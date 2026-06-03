@@ -85,7 +85,7 @@ export default defineEventHandler(async event => {
         },
       });
     case 'markdown':
-      return new Response(new TurndownService().turndown(normalizeHtml(rawHtml, 'html')), {
+      return new Response(new TurndownService().turndown(normalizeHtml(rawHtml, 'markdown')), {
         status: 200,
         headers: {
           'Content-Type': 'text/markdown; charset=UTF-8',

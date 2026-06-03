@@ -9,7 +9,7 @@ import { extractCommentId } from '~/utils/comment';
  * @param format 要处理的格式(默认html)
  * @remarks 服务端工具函数
  */
-export function normalizeHtml(rawHTML: string, format: 'html' | 'text' = 'html'): string {
+export function normalizeHtml(rawHTML: string, format: 'html' | 'text' | 'markdown' = 'html'): string {
   const $ = cheerio.load(rawHTML);
   const $jsArticleContent = $('#js_article');
 
@@ -26,6 +26,11 @@ export function normalizeHtml(rawHTML: string, format: 'html' | 'text' = 'html')
 
   $jsArticleContent.find('#js_pc_qr_code').remove();
   $jsArticleContent.find('#wx_stream_article_slide_tip').remove();
+
+  // 删除小说阅读器入口卡片、内联 <style>、javascript 空链接（在 markdown/text 里是噪声）
+  $jsArticleContent.find('#js_novel_title, #js_novel_title_old, .novel-card, .novel-title, .novel-description').remove();
+  $jsArticleContent.find('style').remove();
+  $jsArticleContent.find('a[href^="javascript:"]').removeAttr('href');
 
   // 处理图片懒加载（全局处理所有 img）
   $('img').each((i, el) => {
@@ -46,6 +51,9 @@ export function normalizeHtml(rawHTML: string, format: 'html' | 'text' = 'html')
 
     // 重新连接行
     return filteredLines.join('\n');
+  } else if (format === 'markdown') {
+    // 只返回正文 body（不含 <head>/<style> 模板），供 turndown 转换，避免 CSS 泄露
+    return $('<div>').append($jsArticleContent.clone()).html() || '';
   } else if (format === 'html') {
     // 获取修改后的 HTML
     let bodyCls = $('body').attr('class');
