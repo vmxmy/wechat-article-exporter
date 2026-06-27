@@ -12,8 +12,8 @@
  * 注意：本文件是 feat/mcp-oauth 分支脚手架，需 preview 部署 + 扫码联调后再上正式。
  */
 import OAuthProvider from '@cloudflare/workers-oauth-provider';
-import { mcpApiHandler } from './mcp';
 import { authHandler } from './auth';
+import { mcpApiHandler } from './mcp';
 
 export default new OAuthProvider({
   // /mcp 之外的请求（/authorize、根路径等）走 authHandler

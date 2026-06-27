@@ -73,12 +73,18 @@ function buildServer(env: Env): McpServer {
   );
 
   // ── 无需鉴权 ──────────────────────────────────────────────────────
-  server.tool('get_account_by_url', '从微信文章链接提取公众号信息（含 fakeid）。', { url: z.string() }, async ({ url }) =>
-    text(await call('/api/public/v1/accountbyurl', { url }))
+  server.tool(
+    'get_account_by_url',
+    '从微信文章链接提取公众号信息（含 fakeid）。',
+    { url: z.string() },
+    async ({ url }) => text(await call('/api/public/v1/accountbyurl', { url }))
   );
 
-  server.tool('get_account_details', '公众号详细资料：简介、微信号、认证、历史名称、IP 归属地等。', { fakeid: z.string() }, async ({ fakeid }) =>
-    text(await call('/api/public/beta/aboutbiz', { fakeid }))
+  server.tool(
+    'get_account_details',
+    '公众号详细资料：简介、微信号、认证、历史名称、IP 归属地等。',
+    { fakeid: z.string() },
+    async ({ fakeid }) => text(await call('/api/public/beta/aboutbiz', { fakeid }))
   );
 
   server.tool('get_author_info', '获取公众号作者/机构元数据。', { fakeid: z.string() }, async ({ fakeid }) =>
@@ -95,11 +101,14 @@ function buildServer(env: Env): McpServer {
       begin_msgid: z.string().optional(),
       begin_itemidx: z.string().optional(),
     },
-    async (a) => text(await call('/api/web/misc/appmsgalbum', a))
+    async a => text(await call('/api/web/misc/appmsgalbum', a))
   );
 
-  server.tool('get_account_name', '从微信文章链接快速获取公众号名称，无需 fakeid。', { url: z.string() }, async ({ url }) =>
-    text(await call('/api/web/misc/accountname', { url }))
+  server.tool(
+    'get_account_name',
+    '从微信文章链接快速获取公众号名称，无需 fakeid。',
+    { url: z.string() },
+    async ({ url }) => text(await call('/api/web/misc/accountname', { url }))
   );
 
   return server;
