@@ -23,7 +23,7 @@ import GridStatusBar from '~/components/grid/StatusBar.vue';
 import AccountSelectorForArticle from '~/components/selector/AccountSelectorForArticle.vue';
 import { isDev, websiteName } from '~/config';
 import { sharedGridOptions } from '~/config/shared-grid-options';
-import { articleDeleted, getArticleCache, updateArticleStatus } from '~/store/v2/article';
+import { articleDeleted, getArticleCache, reconcileArticlesFromD1, updateArticleStatus } from '~/store/v2/article';
 import { getCommentCache } from '~/store/v2/comment';
 import { getDebugCache } from '~/store/v2/debug';
 import { getHtmlCache } from '~/store/v2/html';
@@ -368,6 +368,8 @@ watch(selectedAccount, newVal => {
 async function switchTableData(fakeid: string) {
   loading.value = true;
   const articles: Article[] = [];
+  // 加载某账号文章列表入口：先对账 D1（开关关时静默跳过），再走既有本地范围查询/排序。
+  await reconcileArticlesFromD1(fakeid);
   const data = await getArticleCache(fakeid, Math.floor(Date.now() / 1000));
   for (const article of data) {
     const contentDownload = (await getHtmlCache(article.link)) !== undefined;

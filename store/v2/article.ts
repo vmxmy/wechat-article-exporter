@@ -3,6 +3,7 @@ import type { AppMsgExWithFakeID, PublishInfo, PublishPage } from '~/types/types
 import { writeEntriesToD1 } from './d1';
 import { db } from './db';
 import { type MpAccount, updateInfoCache } from './info';
+import { reconcileListFromD1 } from './read';
 
 export type ArticleAsset = AppMsgExWithFakeID;
 
@@ -78,6 +79,26 @@ export async function updateArticleCache(account: MpAccount, publish_page: Publi
       options
     );
   }
+}
+
+/**
+ * 账号级对账：拉 D1 中该账号的全部文章 → 覆盖式 upsert 进 Dexie。
+ * 仅在「加载某账号文章列表」入口前置调用一次，不在 getArticleCache / _load 循环内调用，
+ * 避免高频重复打 D1。article 主键为 outbound 复合键 `fakeid:aid`，bulkPut 需显式传 keys 数组。
+ * 门控由 reconcileListFromD1 → fetchListFromD1 承担（开关关时静默跳过，行为=现状）。
+ * @param fakeid 公众号id
+ */
+export async function reconcileArticlesFromD1(fakeid: string): Promise<void> {
+  await reconcileListFromD1<ArticleAsset>('article', fakeid, async items => {
+    // 增量对账：仅补本地缺失的文章，绝不覆盖既有本地行（保留本地领先的 _status/is_deleted 等标记）。
+    const existing = new Set(await db.article.where('fakeid').equals(fakeid).primaryKeys());
+    const fresh = items.filter(article => !existing.has(`${article.fakeid}:${article.aid}`));
+    if (fresh.length === 0) return;
+    await db.article.bulkPut(
+      fresh,
+      fresh.map(article => `${article.fakeid}:${article.aid}`)
+    );
+  });
 }
 
 /**

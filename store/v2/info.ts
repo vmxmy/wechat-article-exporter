@@ -1,6 +1,7 @@
 import type { D1CacheWriteOptions } from '~/shared/utils/d1-cache';
 import { writeEntryToD1 } from './d1';
 import { db } from './db';
+import { reconcileListFromD1 } from './read';
 
 export interface MpAccount {
   fakeid: string;
@@ -112,6 +113,23 @@ export async function getInfoCache(fakeid: string): Promise<MpAccount | undefine
 
 export async function getAllInfo(): Promise<MpAccount[]> {
   return db.info.toArray();
+}
+
+/**
+ * 账号列表对账：拉本 owner 在 D1 的全部 info 行 → upsert 进 Dexie。
+ * info 表 scope_key=自身 fakeid，但对账整张账号列表时不传 scopeKey（拉全部 info 行）。
+ * info 主键为 inbound `fakeid`，bulkPut 无需显式传 keys。
+ * 门控由 reconcileListFromD1 → fetchListFromD1 承担（开关关时静默跳过，行为=现状）。
+ * 在 getAllInfo 前由 refresh() 调用。
+ */
+export async function reconcileAllInfoFromD1(): Promise<void> {
+  await reconcileListFromD1<MpAccount>('info', undefined, async items => {
+    // 增量对账：仅补本地缺失的账号，绝不覆盖既有本地行（count/articles 为本地累加值，覆盖会回退进度）。
+    const existing = new Set(await db.info.toCollection().primaryKeys());
+    const fresh = items.filter(account => !existing.has(account.fakeid));
+    if (fresh.length === 0) return;
+    await db.info.bulkPut(fresh);
+  });
 }
 
 // 获取公众号的名称

@@ -57,14 +57,14 @@
           <UCheckbox
             v-model="preferences.d1MirrorEnabled"
             name="d1MirrorEnabled"
-            label="同步缓存到 Cloudflare D1（云端镜像）"
+            label="云端同步元数据到 Cloudflare D1（默认开启，按账号隔离）"
           />
           <UPopover mode="hover" :popper="{ placement: 'top' }">
             <template #panel>
               <p class="max-w-[300px] p-3 text-sm text-gray-500">
-                勾选后，文章/评论/资源等缓存除了写入本地 IndexedDB，还会异步镜像到 Cloudflare D1。<br />
-                需要部署到 Cloudflare Pages 并在后台配置 NUXT_D1_CACHE_ENABLED=true 才会真正生效。<br />
-                关闭时不影响已有镜像数据，但新写入将不再同步。
+                默认开启。文章列表/账号/评论/资源映射等<strong>元数据小表</strong>会按账号隔离同步到 Cloudflare D1，作为跨设备读权威（换设备加载时自动对账拉回）。<br />
+                文章正文 HTML、图片等<strong>大体积内容保持纯本地</strong>，不上云。<br />
+                需部署到 Cloudflare Pages 并配置 NUXT_D1_CACHE_ENABLED=true 才生效；关闭后仅本地缓存，不再跨设备同步。
               </p>
             </template>
             <UIcon color="gray" name="i-heroicons:question-mark-circle-16-solid" class="size-5" />
@@ -146,9 +146,9 @@ const toast = useToast();
 
 function onD1AuthError() {
   toast.add({
-    title: 'D1 镜像需要登录',
-    description: '未检测到有效登录状态，云端镜像已自动关闭',
-    color: 'red',
+    title: 'D1 同步已临时暂停',
+    description: '未检测到有效登录状态，云端同步已临时暂停，重新登录后自动恢复（偏好未改动）',
+    color: 'orange',
     timeout: 6000,
   });
 }

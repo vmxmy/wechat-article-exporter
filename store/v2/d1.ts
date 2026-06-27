@@ -1,14 +1,19 @@
-import type {
-  D1CacheDeleteRequestEntry,
-  D1CacheTable,
-  D1CacheWriteOptions,
-  D1CacheWriteRequestEntry,
+import {
+  type D1CacheDeleteRequestEntry,
+  type D1CacheListResponse,
+  type D1CacheTable,
+  type D1CacheWriteOptions,
+  type D1CacheWriteRequestEntry,
+  type D1CloudTable,
+  isCloudMirroredTable,
 } from '~/shared/utils/d1-cache';
 
 interface D1CacheEntry {
   table: D1CacheTable;
   key: string;
   record: Record<string, unknown>;
+  // 该条目所属账号 fakeid，缺省时由 serializeEntry 从 record.fakeid 派生。
+  scopeKey?: string;
 }
 
 // --- helpers ---
@@ -37,10 +42,25 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
 
 // --- preference toggle ---
 
+// 401 临时熔断：内存级、带冷却，到期自动恢复，不改用户持久偏好。
+let circuitOpenUntil = 0;
+const D1_CIRCUIT_COOLDOWN = 60_000;
+
+function isCircuitOpen(): boolean {
+  return Date.now() < circuitOpenUntil;
+}
+
+// 重新登录后可主动复位熔断（冷却到期也会自动恢复）。
+export function resetD1Circuit(): void {
+  circuitOpenUntil = 0;
+}
+
 // Reads d1MirrorEnabled from localStorage directly (not via usePreferences ref)
 // so this module works outside Vue lifecycle contexts.
 // explicit options.writeToD1 takes precedence; undefined falls back to preference.
 export function resolveD1Toggle(options?: D1CacheWriteOptions): boolean {
+  // 熔断期间暂停 D1（含强制写）：token 失效时强制也无意义，冷却到期自动恢复。
+  if (isCircuitOpen()) return false;
   if (typeof options?.writeToD1 === 'boolean') return options.writeToD1;
   if (!import.meta.client) return false;
   try {
@@ -52,20 +72,14 @@ export function resolveD1Toggle(options?: D1CacheWriteOptions): boolean {
   }
 }
 
-// --- 401 auto-disable ---
+// --- 401 temporary circuit breaker ---
 
 function disableD1OnUnauth(error: unknown): boolean {
   const status = (error as any)?.response?.status ?? (error as any)?.status;
   if (status !== 401) return false;
-  try {
-    const raw = localStorage.getItem('preferences');
-    if (raw) {
-      const prefs = JSON.parse(raw);
-      prefs.d1MirrorEnabled = false;
-      localStorage.setItem('preferences', JSON.stringify(prefs));
-      window.dispatchEvent(new StorageEvent('storage', { key: 'preferences', newValue: JSON.stringify(prefs) }));
-    }
-  } catch {}
+  // 内存级临时熔断：不再永久改写用户偏好（偶发 401 不应把默认开启的同步自我永久降级）；
+  // 冷却到期或重新登录（resetD1Circuit）后自动恢复。
+  circuitOpenUntil = Date.now() + D1_CIRCUIT_COOLDOWN;
   window.dispatchEvent(new CustomEvent('d1-auth-error'));
   return true;
 }
@@ -124,17 +138,21 @@ async function serializeEntry(entry: D1CacheEntry): Promise<D1CacheWriteRequestE
     blobField,
     blobType,
     blobBase64,
+    // 优先用显式 scopeKey，回退到 record.fakeid（info 表 fakeid 即自身，天然满足 scope_key=自身 fakeid）。
+    scopeKey: entry.scopeKey ?? (entry.record.fakeid as string | undefined) ?? null,
   };
 }
 
 export async function writeEntriesToD1(entries: D1CacheEntry[], options?: D1CacheWriteOptions): Promise<void> {
-  if (!resolveD1Toggle(options) || !import.meta.client || entries.length === 0) {
+  // 仅元数据小表上云；Blob 表（html/asset/resource/debug）保持纯本地。
+  const cloudEntries = entries.filter(entry => isCloudMirroredTable(entry.table));
+  if (!resolveD1Toggle(options) || !import.meta.client || cloudEntries.length === 0) {
     return;
   }
 
   try {
     const body = {
-      entries: await Promise.all(entries.map(serializeEntry)),
+      entries: await Promise.all(cloudEntries.map(serializeEntry)),
     };
 
     await $fetch('/api/web/cache/d1', {
@@ -157,9 +175,10 @@ export async function deleteEntriesFromD1(
   entries: D1CacheDeleteRequestEntry[],
   options?: D1CacheWriteOptions
 ): Promise<void> {
-  if (!resolveD1Toggle(options) || !import.meta.client || entries.length === 0) return;
+  const cloudEntries = entries.filter(entry => isCloudMirroredTable(entry.table));
+  if (!resolveD1Toggle(options) || !import.meta.client || cloudEntries.length === 0) return;
   try {
-    await $fetch('/api/web/cache/d1', { method: 'POST', body: { action: 'delete', entries } });
+    await $fetch('/api/web/cache/d1', { method: 'POST', body: { action: 'delete', entries: cloudEntries } });
   } catch (error) {
     if (disableD1OnUnauth(error)) return;
     console.warn('[store/v2] failed to mirror cache deletes to D1', error);
@@ -169,6 +188,7 @@ export async function deleteEntriesFromD1(
 // --- read (D1 fallback) ---
 
 export async function fetchEntryFromD1<T>(table: D1CacheTable, key: string): Promise<T | undefined> {
+  if (!isCloudMirroredTable(table)) return undefined;
   if (!resolveD1Toggle(undefined)) return undefined;
   if (!import.meta.client) return undefined;
 
@@ -199,6 +219,38 @@ export async function fetchEntryFromD1<T>(table: D1CacheTable, key: string): Pro
   } catch (error) {
     if (disableD1OnUnauth(error)) return undefined;
     console.warn('[store/v2] D1 fallback read failed', error);
+    return undefined;
+  }
+}
+
+// --- list（账号级对账，不进 negativeCache） ---
+
+export async function fetchListFromD1<T>(
+  table: D1CloudTable,
+  scopeKey?: string
+): Promise<{ items: T[]; truncated: boolean } | undefined> {
+  if (!isCloudMirroredTable(table)) return undefined;
+  if (!resolveD1Toggle(undefined)) return undefined;
+  if (!import.meta.client) return undefined;
+
+  try {
+    const resp = await $fetch<D1CacheListResponse>('/api/web/cache/d1', {
+      method: 'POST',
+      body: { action: 'list', table, scopeKey },
+    });
+
+    const records = resp.items.map(item => {
+      const record = { ...item.payload };
+      if (item.blobField && item.blobBase64) {
+        record[item.blobField] = new Blob([base64ToArrayBuffer(item.blobBase64)], { type: item.blobType ?? '' });
+      }
+      return record as T;
+    });
+
+    return { items: records, truncated: resp.truncated };
+  } catch (error) {
+    if (disableD1OnUnauth(error)) return undefined;
+    console.warn('[store/v2] D1 list read failed', error);
     return undefined;
   }
 }

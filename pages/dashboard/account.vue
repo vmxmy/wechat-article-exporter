@@ -24,7 +24,7 @@ import { IMAGE_PROXY, websiteName } from '~/config';
 import { sharedGridOptions } from '~/config/shared-grid-options';
 import { deleteAccountData } from '~/store/v2';
 import { getArticleCache, hitCache } from '~/store/v2/article';
-import { getAllInfo, getInfoCache, importMpAccounts, type MpAccount } from '~/store/v2/info';
+import { getAllInfo, getInfoCache, importMpAccounts, type MpAccount, reconcileAllInfoFromD1 } from '~/store/v2/info';
 import type { AccountManifest } from '~/types/account';
 import type { Preferences } from '~/types/preferences';
 import { exportAccountJsonFile } from '~/utils/exporter';
@@ -378,6 +378,8 @@ function restoreColumnState() {
 }
 
 async function refresh() {
+  // 账号加载入口：先对账 D1 的 info（开关关时静默跳过），再读本地。
+  await reconcileAllInfoFromD1();
   globalRowData = await getAllInfo();
   gridApi.value?.setGridOption('rowData', globalRowData);
 }
