@@ -8,7 +8,9 @@ export default defineNuxtConfig({
   ssr: false,
   runtimeConfig: {
     d1Cache: {
-      enabled: process.env.NUXT_D1_CACHE_ENABLED === 'true',
+      // 默认开启（元数据持久化默认存储）；显式设 NUXT_D1_CACHE_ENABLED=false 才关闭。
+      // 无 D1 binding 的环境（本地/非 CF）会在 getD1Database 处返回 null → 503 → 客户端静默纯本地，故默认开安全。
+      enabled: process.env.NUXT_D1_CACHE_ENABLED !== 'false',
       binding: process.env.NITRO_D1_BINDING || 'DB',
       table: process.env.NITRO_D1_TABLE || 'cache_entries',
     },
