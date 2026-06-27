@@ -28,7 +28,9 @@ export function normalizeHtml(rawHTML: string, format: 'html' | 'text' | 'markdo
   $jsArticleContent.find('#wx_stream_article_slide_tip').remove();
 
   // 删除小说阅读器入口卡片、内联 <style>、javascript 空链接（在 markdown/text 里是噪声）
-  $jsArticleContent.find('#js_novel_title, #js_novel_title_old, .novel-card, .novel-title, .novel-description').remove();
+  $jsArticleContent
+    .find('#js_novel_title, #js_novel_title_old, .novel-card, .novel-title, .novel-description')
+    .remove();
   $jsArticleContent.find('style').remove();
   $jsArticleContent.find('a[href^="javascript:"]').removeAttr('href');
 
@@ -42,7 +44,12 @@ export function normalizeHtml(rawHTML: string, format: 'html' | 'text' | 'markdo
   });
 
   if (format === 'text') {
-    // 获取纯文本内容
+    // cheerio 的 .text() 不会为块级元素补换行，沉浸式 stream 排版的文章会把整篇正文黏连成一行。
+    // 取文本前在每个块级元素后插入换行，恢复段落结构。
+    $jsArticleContent
+      .find('p, div, section, br, li, blockquote, h1, h2, h3, h4, h5, h6, tr, figure, figcaption')
+      .after('\n');
+
     const text = $jsArticleContent.text().trim().replace(/\n+/g, '\n').replace(/ +/g, ' ');
     // 分割成行
     const lines = text.split('\n');
