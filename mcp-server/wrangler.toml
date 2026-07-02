@@ -19,5 +19,15 @@ id = "d44eb3b7fd744963a18e46a934b72d93"
 [vars]
 # exporter（CF Pages）基址：MCP 工具与登录都复用它已部署的 /api/*
 EXPORTER_BASE_URL = "https://mp.ziikoo.app"
-# 本服务对外基址（OAuth 元数据用）。绑自定义域后改成正式域
-ISSUER_BASE_URL = "https://mptext.ziikoo.app"
+
+[env.preview]
+name = "wechat-article-mcp-preview"
+workers_dev = true
+routes = []
+
+[[env.preview.kv_namespaces]]
+binding = "OAUTH_KV"
+id = "ce9220f85744491dad21c7bc9c8ec39a"
+
+[env.preview.vars]
+EXPORTER_BASE_URL = "https://mp.ziikoo.app"

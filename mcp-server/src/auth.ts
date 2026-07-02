@@ -8,7 +8,6 @@
  */
 export interface Env {
   EXPORTER_BASE_URL: string;
-  ISSUER_BASE_URL: string;
   OAUTH_PROVIDER: {
     parseAuthRequest(request: Request): Promise<AuthRequest>;
     completeAuthorization(opts: {
