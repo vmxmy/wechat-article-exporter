@@ -5,6 +5,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createMcpHandler, getMcpAuthContext } from 'agents/mcp';
 import { z } from 'zod';
+import { MCP_ROUTE } from './constants';
 
 export interface Env {
   EXPORTER_BASE_URL: string;
@@ -114,10 +115,10 @@ function buildServer(env: Env): McpServer {
   return server;
 }
 
-// OAuthProvider 把已鉴权请求路由到这里；createMcpHandler 处理 Streamable HTTP，
-// props 由库注入、经 getMcpAuthContext() 读取。
+// OAuthProvider 把已鉴权请求路由到这里；createMcpHandler 走 Streamable HTTP（单一 /mcp 端点，
+// POST 下行 + GET 事件流 + DELETE 关会话），props 由库注入、经 getMcpAuthContext() 读取。
 export const mcpApiHandler = {
   fetch(request, env, ctx) {
-    return createMcpHandler(buildServer(env))(request, env, ctx);
+    return createMcpHandler(buildServer(env), { route: MCP_ROUTE })(request, env, ctx);
   },
 } satisfies ExportedHandler<Env>;

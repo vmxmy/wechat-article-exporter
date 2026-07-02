@@ -3,6 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2026-01-28"
 compatibility_flags = ["nodejs_compat"]
 
+# 自定义正式域：workers.dev 在国内不稳，绑 ziikoo.app 子域（自动建 DNS + 证书）
+routes = [{ pattern = "mptext.ziikoo.app", custom_domain = true }]
+
 # OAuth 2.1 token/grant 存储 —— workers-oauth-provider 要求绑定名必须叫 OAUTH_KV
 # 部署前：wrangler kv namespace create OAUTH_KV  → 把返回的 id 填到下面
 [[kv_namespaces]]
@@ -16,5 +19,15 @@ id = "d44eb3b7fd744963a18e46a934b72d93"
 [vars]
 # exporter（CF Pages）基址：MCP 工具与登录都复用它已部署的 /api/*
 EXPORTER_BASE_URL = "https://mp.ziikoo.app"
-# 本服务对外基址（OAuth 元数据用）。绑自定义域后改成正式域
-ISSUER_BASE_URL = "https://wechat-article-mcp.blueyang.workers.dev"
+
+[env.preview]
+name = "wechat-article-mcp-preview"
+workers_dev = true
+routes = []
+
+[[env.preview.kv_namespaces]]
+binding = "OAUTH_KV"
+id = "ce9220f85744491dad21c7bc9c8ec39a"
+
+[env.preview.vars]
+EXPORTER_BASE_URL = "https://mp.ziikoo.app"

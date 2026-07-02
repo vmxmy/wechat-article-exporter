@@ -13,12 +13,13 @@
  */
 import OAuthProvider from '@cloudflare/workers-oauth-provider';
 import { authHandler } from './auth';
+import { MCP_ROUTE } from './constants';
 import { mcpApiHandler } from './mcp';
 
 export default new OAuthProvider({
   // /mcp 之外的请求（/authorize、根路径等）走 authHandler
   apiHandlers: {
-    '/mcp': mcpApiHandler,
+    [MCP_ROUTE]: mcpApiHandler,
   },
   defaultHandler: authHandler,
   authorizeEndpoint: '/authorize',

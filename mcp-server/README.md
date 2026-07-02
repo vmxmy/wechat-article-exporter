@@ -12,24 +12,25 @@ Cloudflare Workers 上的 [MCP](https://modelcontextprotocol.io/) 服务器，�
 
 ### 服务端环境变量
 
-在 Cloudflare Workers 控制台或 `wrangler secret` 中配置：
-
-| 变量 | 必填 | 说明 |
-|---|---|---|
-| `EXPORTER_BASE_URL` | **是** | wechat-article-exporter 实例地址，如 `https://your-site.pages.dev` |
-| `MCP_API_KEY` | 否 | Bearer token，设置后所有请求须携带 `Authorization: Bearer <key>` |
+实际生效变量以 `wrangler.toml [vars]` / `[env.preview.vars]` 为准：`EXPORTER_BASE_URL`（exporter 实例基址）。鉴权走 OAuth 2.1，不再支持静态 `MCP_API_KEY`。
 
 ## 部署
 
+默认先部署到 preview，避免误覆盖正式 Worker：
+
 ```bash
 cd mcp-server
-npm ci
-wrangler secret put EXPORTER_BASE_URL   # 输入你的实例地址
-wrangler secret put MCP_API_KEY         # 可选，设置访问密钥
-wrangler deploy
+COREPACK_ENABLE_PROJECT_SPEC=0 pnpm install
+# [env.preview] 已配置独立 OAUTH_KV；如需重建，执行后替换 wrangler.toml 中的 preview id
+# wrangler kv namespace create OAUTH_KV --env preview
+wrangler deploy --env preview
 ```
 
-部署成功后 Worker URL 格式为 `https://wechat-article-mcp.<your-subdomain>.workers.dev`。
+preview 部署成功后 Worker URL 格式为 `https://wechat-article-mcp-preview.<your-subdomain>.workers.dev`。确认 OAuth 与 MCP 工具验收通过后，再执行正式部署：
+
+```bash
+wrangler deploy
+```
 
 ## 工具列表
 
@@ -41,12 +42,11 @@ wrangler deploy
 | `get_account_details` | 获取公众号详情（需服务端配置 `NUXT_WECHAT_ABOUT_BIZ_*` 环境变量） |
 | `get_author_info` | 获取公众号主体元数据 |
 | `get_account_name` | 从文章链接快速获取公众号名称 |
-| `get_auth_key` | 尝试从服务端会话获取 auth_key。**仅当 exporter 服务端已有登录会话时有效**；无效时请从 exporter「设置 → 关于」页面手动复制 |
-| `list_album` | 获取公众号合集文章列表。**需要 exporter 服务端有有效的微信登录会话**（不需要 auth_key） |
+| `list_album` | 获取公众号合集文章列表。**需要 exporter 服务端有有效的微信登录会话** |
 
-### 需要 auth_key
+### 需要 OAuth 授权
 
-> 推荐做法：在 wechat-article-exporter 后台「设置 → 关于」页面复制 auth_key，粘贴到工具参数中。`get_auth_key` 工具仅在服务端已有 cookie 会话时有效。
+首次连接客户端时会打开 OAuth 同意页。Phase 1 仍需要用户在同意页粘贴从 exporter「设置」页复制的 `auth_key`，授权完成后客户端使用 OAuth access token；MCP 工具参数中不再传 `auth_key`。
 
 | 工具 | 说明 |
 |---|---|
@@ -61,7 +61,6 @@ wrangler deploy
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `auth_key` | string | 是 | 鉴权令牌 |
 | `url` | string | 是 | 微信文章链接 `https://mp.weixin.qq.com/s/...` |
 | `format` | string | 否 | `markdown`（默认）/ `text` / `html` / `json` |
 </details>
@@ -87,7 +86,6 @@ wrangler deploy
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `auth_key` | string | 是 | 鉴权令牌 |
 | `keyword` | string | 是 | 搜索关键词 |
 | `begin` | integer | 否 | 分页偏移（默认 0） |
 | `size` | integer | 否 | 返回数量（默认 5，最大 20） |
@@ -98,7 +96,6 @@ wrangler deploy
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `auth_key` | string | 是 | 鉴权令牌 |
 | `fakeid` | string | 是 | 公众号内部 ID |
 | `keyword` | string | 否 | 标题关键词过滤 |
 | `begin` | integer | 否 | 分页偏移（默认 0） |
@@ -117,37 +114,36 @@ wrangler deploy
 | `begin_itemidx` | string | 否 | 分页起始索引 |
 </details>
 
-## Claude Desktop 配置
+## Transport
 
-### 公开实例（无 MCP_API_KEY）
+本服务走 **Streamable HTTP**（`POST /mcp` 下行 JSON-RPC + `GET /mcp` 事件流 + `DELETE /mcp` 关会话），由 `agents/mcp` 的 `createMcpHandler` 默认实现。不提供 legacy SSE 端点。
+
+## 客户端配置
+
+鉴权采用 OAuth 2.1（`workers-oauth-provider`）：首次连接会在浏览器弹出同意页，授权后令牌缓存在客户端。
+
+### Claude Desktop / Cursor（原生支持 Streamable HTTP + OAuth）
+
+preview 验收时使用 preview 地址；正式发布后再替换为 `https://mptext.ziikoo.app/mcp`。
 
 ```json
 {
   "mcpServers": {
     "wechat-article": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "https://wechat-article-mcp.<your-subdomain>.workers.dev/mcp"
-      ]
+      "url": "https://wechat-article-mcp-preview.<your-subdomain>.workers.dev/mcp"
     }
   }
 }
 ```
 
-### 带鉴权（设置了 MCP_API_KEY）
+### 客户端不支持 HTTP-only MCP 时的回退（mcp-remote 桥接）
 
 ```json
 {
   "mcpServers": {
     "wechat-article": {
       "command": "npx",
-      "args": [
-        "mcp-remote",
-        "https://wechat-article-mcp.<your-subdomain>.workers.dev/mcp",
-        "--header",
-        "Authorization: Bearer <your-mcp-api-key>"
-      ]
+      "args": ["mcp-remote", "https://wechat-article-mcp-preview.<your-subdomain>.workers.dev/mcp"]
     }
   }
 }
@@ -157,6 +153,6 @@ wrangler deploy
 
 ```bash
 cd mcp-server
-npm ci
+COREPACK_ENABLE_PROJECT_SPEC=0 pnpm install
 wrangler dev   # 本地调试，监听 localhost:8787/mcp
 ```
