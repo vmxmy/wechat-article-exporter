@@ -14,6 +14,16 @@ Cloudflare Workers 上的 [MCP](https://modelcontextprotocol.io/) 服务器，�
 
 实际生效变量以 `wrangler.toml [vars]` / `[env.preview.vars]` 为准：`EXPORTER_BASE_URL`（exporter 实例基址）。鉴权走 OAuth 2.1，不再支持静态 `MCP_API_KEY`。
 
+### OAuth 生命周期
+
+| 项目 | 有效期 | 行为 |
+|---|---:|---|
+| Access token | 7 天 | 支持 refresh token 的 MCP 客户端自动刷新，无需浏览器参与 |
+| Refresh token | 180 天 | 在此期间可持续换取 access token；到期后才需重新授权 |
+| 动态客户端注册 | 365 天 | 保证不会早于 refresh token 失效 |
+
+如果 exporter 中的微信会话本身失效，仍需在 exporter 重新扫码并重新完成 OAuth 授权；延长 MCP token 不会绕过微信会话有效期。
+
 ## 部署
 
 默认先部署到 preview，避免误覆盖正式 Worker：
@@ -135,6 +145,17 @@ preview 验收时使用 preview 地址；正式发布后再替换为 `https://mp
   }
 }
 ```
+
+### 无浏览器服务器（Codex CLI 等）
+
+设备码授权尚未被当前 `workers-oauth-provider` 正式支持。服务器上首次授权可用手动 loopback 回调完成；之后 MCP OAuth 层可在 180 天内由客户端自动刷新，无需为 MCP token 再次打开浏览器：
+
+1. 在服务器执行登录命令。以 Codex 为例，可用 `BROWSER=echo codex mcp login wechat-article` 让终端打印授权 URL。
+2. 把授权 URL 复制到任意有浏览器的设备打开，粘贴 exporter「设置」页中的 `auth_key`。
+3. 勾选“我的 MCP 客户端运行在无浏览器服务器上”后授权。
+4. 页面会显示一条只含一次性授权码的 `curl` 命令；复制回原服务器执行，等待中的 MCP 客户端即可完成登录。
+
+一次性回调命令属于短期凭证，不要分享到聊天、工单或日志中。
 
 ### 客户端不支持 HTTP-only MCP 时的回退（mcp-remote 桥接）
 

@@ -32,20 +32,33 @@ export const authHandler = {
     if (url.pathname === '/authorize') {
       if (request.method === 'GET') {
         const oauthReq = await env.OAUTH_PROVIDER.parseAuthRequest(request);
-        const state = btoa(unescape(encodeURIComponent(JSON.stringify(oauthReq))));
-        return html(renderConsent(state, env.EXPORTER_BASE_URL));
+        const state = encodeAuthorizationState(oauthReq);
+        return html(renderConsent(state, env.EXPORTER_BASE_URL, '', url.searchParams.get('headless') === '1'));
       }
       if (request.method === 'POST') {
         const form = await request.formData();
-        const oauthReq = JSON.parse(decodeURIComponent(escape(atob(String(form.get('state')))))) as AuthRequest;
+        const state = String(form.get('state') || '');
+        const headless = form.get('headless') === '1';
+        let oauthReq: AuthRequest;
+        try {
+          oauthReq = decodeAuthorizationState(state);
+        } catch {
+          return html(
+            renderConsent('', env.EXPORTER_BASE_URL, '授权请求已失效，请从 MCP 客户端重新发起登录', headless),
+            400
+          );
+        }
+
         const apiToken = String(form.get('auth_key') || '').trim();
-        if (!apiToken) return html(renderConsent('', env.EXPORTER_BASE_URL, '请填写 auth_key'), 400);
+        if (!apiToken) return html(renderConsent(state, env.EXPORTER_BASE_URL, '请填写 auth_key', headless), 400);
 
         // 校验 token 有效：调一个需鉴权的轻量接口（401 即无效）
         const ok = await verifyToken(apiToken, env.EXPORTER_BASE_URL);
         if (!ok) {
-          const state = btoa(unescape(encodeURIComponent(JSON.stringify(oauthReq))));
-          return html(renderConsent(state, env.EXPORTER_BASE_URL, 'auth_key 无效或已过期，请重新登录复制'), 401);
+          return html(
+            renderConsent(state, env.EXPORTER_BASE_URL, 'auth_key 无效或已过期，请重新登录复制', headless),
+            401
+          );
         }
 
         const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
@@ -54,7 +67,8 @@ export const authHandler = {
           scope: oauthReq.scope?.length ? oauthReq.scope : ['wechat.read'],
           props: { apiToken },
         });
-        return Response.redirect(redirectTo, 302);
+        if (headless && isLoopbackRedirect(redirectTo)) return html(renderHeadlessCompletion(redirectTo));
+        return redirect(redirectTo);
       }
     }
 
@@ -83,10 +97,32 @@ async function verifyToken(apiToken: string, base: string): Promise<boolean> {
 }
 
 function html(body: string, status = 200): Response {
-  return new Response(body, { status, headers: { 'content-type': 'text/html; charset=utf-8' } });
+  return new Response(body, {
+    status,
+    headers: {
+      'cache-control': 'no-store',
+      'content-security-policy':
+        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      'content-type': 'text/html; charset=utf-8',
+      'referrer-policy': 'no-referrer',
+      'x-content-type-options': 'nosniff',
+    },
+  });
 }
 
-function renderConsent(state: string, exporterUrl: string, error = ''): string {
+function redirect(location: string): Response {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      'cache-control': 'no-store',
+      location,
+      'referrer-policy': 'no-referrer',
+    },
+  });
+}
+
+function renderConsent(state: string, exporterUrl: string, error = '', headless = false): string {
+  const safeExporterUrl = escapeHtml(exporterUrl);
   return `<!doctype html><html lang=zh><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>授权 · 微信文章导出 MCP</title>
@@ -95,20 +131,85 @@ function renderConsent(state: string, exporterUrl: string, error = ''): string {
  h1{font-size:20px} ol{padding-left:20px} a{color:#2563eb}
  input[name=auth_key]{width:100%;box-sizing:border-box;padding:10px;font:13px monospace;border:1px solid #d1d5db;border-radius:8px;margin:8px 0}
  button{background:#2563eb;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:15px;cursor:pointer}
- .err{color:#dc2626;margin:8px 0} .muted{color:#6b7280;font-size:13px}
+ .headless{display:flex;gap:8px;align-items:flex-start;margin:8px 0 16px}.headless input{margin-top:5px}
+ .err{color:#dc2626;margin:8px 0}.muted{color:#6b7280;font-size:13px}
 </style></head><body>
 <h1>授权 AI 访问你的「微信文章导出」</h1>
-${error ? `<p class=err>⚠ ${error}</p>` : ''}
+${error ? `<p class=err>⚠ ${escapeHtml(error)}</p>` : ''}
 <ol>
- <li>打开 <a href="${exporterUrl}" target=_blank rel=noopener>${exporterUrl}</a> 扫码登录公众号</li>
+ <li>打开 <a href="${safeExporterUrl}" target=_blank rel="noopener noreferrer">${safeExporterUrl}</a> 扫码登录公众号</li>
  <li>在「设置」页复制你的 <code>auth_key</code></li>
- <li>粘贴到下方并授权（仅本次会话使用，服务端不长期保存）：</li>
+ <li>粘贴到下方并授权（凭证会加密绑定到本次 OAuth 授权，KV 不保存可直接读取的明文）：</li>
 </ol>
 <form method=post action=/authorize>
- <input type=hidden name=state value="${state}">
- <input name=auth_key placeholder="粘贴 auth_key" autocomplete=off required>
+ <input type=hidden name=state value="${escapeHtml(state)}">
+ <input name=auth_key placeholder="粘贴 auth_key" autocomplete=off spellcheck=false required>
+ <label class=headless>
+  <input type=checkbox name=headless value=1${headless ? ' checked' : ''}>
+  <span>我的 MCP 客户端运行在无浏览器服务器上；授权后显示一条可复制回服务器执行的回调命令。</span>
+ </label>
  <button type=submit>授权</button>
 </form>
-<p class=muted>授权后 AI 客户端将获得一个受限访问令牌（含本次微信会话），过期需重新授权。</p>
+<p class=muted>访问令牌有效期 7 天，客户端可在 180 天内自动刷新；通常无需重新打开浏览器。</p>
 </body></html>`;
+}
+
+function renderHeadlessCompletion(redirectTo: string): string {
+  const callbackUrl = escapeHtml(redirectTo);
+  const command = escapeHtml(`curl -fsS --max-time 30 ${shellQuote(redirectTo)}`);
+  return `<!doctype html><html lang=zh><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>在服务器上完成授权 · 微信文章导出 MCP</title>
+<style>
+ body{font:15px/1.6 system-ui,sans-serif;max-width:720px;margin:8vh auto;padding:0 20px;color:#1f2937}
+ h1{font-size:20px}pre{padding:14px;overflow:auto;background:#111827;color:#f9fafb;border-radius:8px;white-space:pre-wrap;word-break:break-all}
+ a{color:#2563eb}.warn{color:#92400e;background:#fffbeb;padding:10px 12px;border-radius:8px}
+</style></head><body>
+<h1>在服务器上完成最后一步</h1>
+<p>复制下面的命令，回到正在等待 OAuth 登录的服务器终端执行：</p>
+<pre>${command}</pre>
+<p class=warn>该命令包含短期有效、仅可使用一次的授权码。请勿分享到聊天或日志中。</p>
+<p>如果浏览器与 MCP 客户端在同一台机器，也可以<a href="${callbackUrl}" rel="noreferrer">直接完成授权</a>。</p>
+</body></html>`;
+}
+
+export function encodeAuthorizationState(value: AuthRequest): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+export function decodeAuthorizationState(value: string): AuthRequest {
+  const binary = atob(value);
+  const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+  const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid authorization state');
+  return parsed as AuthRequest;
+}
+
+export function isLoopbackRedirect(value: string): boolean {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, char => {
+    const replacements: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    };
+    return replacements[char];
+  });
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
