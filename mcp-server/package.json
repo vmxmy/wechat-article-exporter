@@ -3,7 +3,12 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "wechat-article": "dist/cli/wechat-article.js"
+  },
   "scripts": {
+    "build": "tsc && node -e \"require('node:fs').chmodSync('dist/cli/wechat-article.js', 0o755)\"",
+    "cli": "node dist/cli/wechat-article.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "node --experimental-strip-types --test test/*.test.ts",
@@ -17,6 +22,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260603.1",
+    "@types/node": "^24.13.3",
     "typescript": "^5.0.0",
     "wrangler": "^4.0.0"
   },

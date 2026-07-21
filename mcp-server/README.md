@@ -157,6 +157,43 @@ preview 验收时使用 preview 地址；正式发布后再替换为 `https://mp
 
 一次性回调命令属于短期凭证，不要分享到聊天、工单或日志中。
 
+## CLI
+
+仓库内提供 remote-only CLI。CLI 与 MCP 客户端使用同一个 OAuth 2.1、Streamable HTTP `/mcp` 和服务端工具 schema，不复制第二套文章导出 API。
+
+```bash
+cd mcp-server
+COREPACK_ENABLE_PROJECT_SPEC=0 pnpm install
+pnpm build
+
+# 首次授权；无浏览器服务器增加 --headless
+pnpm cli -- login --server https://mptext.ziikoo.app
+
+# 发现服务端当前公开的工具
+pnpm cli -- api list
+pnpm cli -- api describe download_article
+
+# 通用调用：三种 JSON 输入来源互斥
+pnpm cli -- api call download_article \
+  --input '{"url":"https://mp.weixin.qq.com/s/example","format":"markdown"}'
+pnpm cli -- api call download_article --file ./request.json
+printf '%s' '{"url":"https://mp.weixin.qq.com/s/example"}' | pnpm cli -- api call download_article --stdin
+
+# 高频领域别名走同一个 MCP 调用层
+pnpm cli -- article download 'https://mp.weixin.qq.com/s/example' --format markdown
+pnpm cli -- account search '公众号名称' --size 5
+pnpm cli -- article list FAKEID --begin 0 --size 10
+```
+
+CLI 行为约定：
+
+- `api list/describe/call` 和 `mcp tools/describe/call` 是等价的稳定入口。
+- 正常结果输出 JSON；成功退出码为 `0`，运行或远端错误为 `1`，命令用法错误为 `2`。
+- 长正文或敏感参数优先使用 `--file` 或 `--stdin`，避免写入 shell history。
+- `--dry-run` 仅输出脱敏预览，不建立 MCP 连接；未来新增的非只读工具需要精确的 `--confirm <tool>`。
+- OAuth access/refresh token 保存在权限为 `0600` 的本地配置文件中。`status`、错误和 dry-run 都不会输出令牌。
+- 默认配置路径为 `~/.config/wechat-article-exporter/cli.json`；可用 `WECHAT_ARTICLE_CLI_CONFIG` 覆盖，便于隔离自动化环境。
+
 ### 客户端不支持 HTTP-only MCP 时的回退（mcp-remote 桥接）
 
 ```json
