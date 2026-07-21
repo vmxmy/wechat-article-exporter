@@ -194,6 +194,25 @@ CLI 行为约定：
 - OAuth access/refresh token 保存在权限为 `0600` 的本地配置文件中。`status`、错误和 dry-run 都不会输出令牌。
 - 默认配置路径为 `~/.config/wechat-article-exporter/cli.json`；可用 `WECHAT_ARTICLE_CLI_CONFIG` 覆盖，便于隔离自动化环境。
 
+### npm 发布
+
+npm 包名为 `@ziikoo/wechat-article`，可执行命令为 `wechat-article`。发布由 GitHub Actions 的 **Publish npm CLI** 工作流完成：
+
+1. 在 npm 创建具备 `@ziikoo/wechat-article` 发布权限的 automation token。
+2. 在 GitHub 仓库创建 `npm-release` Environment，并添加 `NPM_TOKEN` secret；可选配置 required reviewers。
+3. 从 `main` 手动运行工作流，选择 `next`。工作流会测试、构建、检查 tarball、执行打包后的 CLI smoke test，再发布带 provenance 的预发布版本。
+4. 验证实际安装结果：
+
+   ```bash
+   npm view @ziikoo/wechat-article dist-tags versions --json
+   npx -y --package @ziikoo/wechat-article@next wechat-article --version
+   npx -y --package @ziikoo/wechat-article@next wechat-article help
+   ```
+
+5. 从同一个 `main` commit 再次运行工作流并选择 `latest`。工作流只会提升已在 `next` 验证过的同一版本，不允许新版本直接发布为 `latest`。
+
+也可以在完成 `next` 验证后推送与包版本一致的标签触发正式提升，例如 `wechat-article-v2.0.0`。标签必须指向 `main` 可达的 commit。
+
 ### 客户端不支持 HTTP-only MCP 时的回退（mcp-remote 桥接）
 
 ```json

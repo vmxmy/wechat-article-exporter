@@ -1,0 +1,272 @@
+name: Publish npm CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: npm dist-tag to publish or promote
+        required: true
+        default: next
+        type: choice
+        options:
+          - next
+          - latest
+  push:
+    tags:
+      - 'wechat-article-v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-wechat-article
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, verify, and publish @ziikoo/wechat-article
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: npm-release
+      url: https://www.npmjs.com/package/@ziikoo/wechat-article
+    defaults:
+      run:
+        working-directory: mcp-server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: mcp-server/pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org/
+
+      - name: Install release npm CLI
+        run: npm install --global npm@12.0.1
+
+      - name: Verify npm automation token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo '::error::NPM_TOKEN is required to publish @ziikoo/wechat-article.'
+            exit 1
+          fi
+          npm whoami --registry=https://registry.npmjs.org/
+
+      - name: Validate release ref and package version
+        id: release
+        env:
+          REQUESTED_DIST_TAG: ${{ github.event.inputs.tag || 'latest' }}
+        run: |
+          package_name="$(node -p "require('./package.json').name")"
+          package_version="$(node -p "require('./package.json').version")"
+          if [ "$package_name" != '@ziikoo/wechat-article' ]; then
+            echo "::error::Unexpected package name: $package_name"
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = 'push' ]; then
+            expected_tag="wechat-article-v${package_version}"
+            if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
+              echo "::error::Release tag $GITHUB_REF_NAME does not match package version $package_version; expected $expected_tag"
+              exit 1
+            fi
+            git fetch origin main
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo '::error::Release tag must point to a commit reachable from origin/main'
+              exit 1
+            fi
+          elif [ "$GITHUB_REF" != 'refs/heads/main' ]; then
+            echo '::error::Manual npm releases must run from the main branch'
+            exit 1
+          fi
+          echo "package_name=$package_name" >> "$GITHUB_OUTPUT"
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=$REQUESTED_DIST_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm test
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Verify package identity and contents
+        id: package
+        run: |
+          node -e "const p=require('./package.json'); if (p.name !== '@ziikoo/wechat-article') throw new Error('Unexpected package name: '+p.name); if (p.bin?.['wechat-article'] !== 'dist/cli/wechat-article.js') throw new Error('wechat-article bin missing');"
+          npm pack --json > /tmp/wechat-article-pack.json
+          node - <<'NODE' >> "$GITHUB_OUTPUT"
+          const fs = require('node:fs');
+          const packResult = JSON.parse(fs.readFileSync('/tmp/wechat-article-pack.json', 'utf8'));
+          const item = Array.isArray(packResult) ? packResult[0] : Object.values(packResult)[0];
+          if (!item) throw new Error('npm pack --json returned no package metadata');
+          const paths = item.files.map(file => file.path);
+          if (!paths.includes('dist/cli/wechat-article.js')) {
+            throw new Error('Published tarball would not contain dist/cli/wechat-article.js');
+          }
+          const unexpected = paths.filter(file =>
+            file.startsWith('src/') ||
+            file.startsWith('test/') ||
+            file.startsWith('dist/index') ||
+            file === 'wrangler.toml'
+          );
+          if (unexpected.length > 0) {
+            throw new Error(`Published tarball contains server-only files: ${unexpected.join(', ')}`);
+          }
+          console.log(`local_shasum=${item.shasum}`);
+          console.log(`local_tarball=${item.filename}`);
+          NODE
+          local_tarball="$(node -e "const value=JSON.parse(require('node:fs').readFileSync('/tmp/wechat-article-pack.json','utf8')); const item=Array.isArray(value)?value[0]:Object.values(value)[0]; process.stdout.write(item.filename);")"
+          smoke_dir="$(mktemp -d)"
+          npm install --prefix "$smoke_dir" "$GITHUB_WORKSPACE/mcp-server/$local_tarball" --ignore-scripts
+          actual_version="$("$smoke_dir/node_modules/.bin/wechat-article" --version)"
+          if [ "$actual_version" != '${{ steps.release.outputs.package_version }}' ]; then
+            echo "::error::Packed CLI reported $actual_version, expected ${{ steps.release.outputs.package_version }}"
+            exit 1
+          fi
+
+      - name: Check registry version and dist-tag
+        id: registry
+        env:
+          PACKAGE_NAME: ${{ steps.release.outputs.package_name }}
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+          DIST_TAG: ${{ steps.release.outputs.dist_tag }}
+          LOCAL_SHASUM: ${{ steps.package.outputs.local_shasum }}
+          LOCAL_TARBALL: ${{ steps.package.outputs.local_tarball }}
+        run: |
+          registry_metadata="$(mktemp)"
+          node --input-type=module - <<'NODE' > "$registry_metadata"
+          const packageUrl = `https://registry.npmjs.org/${encodeURIComponent(process.env.PACKAGE_NAME)}`;
+          let lastError;
+          for (let attempt = 1; attempt <= 5; attempt += 1) {
+            try {
+              const response = await fetch(packageUrl, { signal: AbortSignal.timeout(15000) });
+              if (response.status === 404) {
+                process.stdout.write(JSON.stringify({ exists: false }));
+                process.exit(0);
+              }
+              if (!response.ok) throw new Error(`npm registry returned ${response.status}`);
+              const metadata = await response.json();
+              const versionMetadata = metadata.versions?.[process.env.PACKAGE_VERSION];
+              process.stdout.write(JSON.stringify({
+                exists: Boolean(versionMetadata),
+                shasum: versionMetadata?.dist?.shasum ?? '',
+                tarball: versionMetadata?.dist?.tarball ?? '',
+                taggedVersion: metadata['dist-tags']?.[process.env.DIST_TAG] ?? '',
+                nextVersion: metadata['dist-tags']?.next ?? '',
+              }));
+              process.exit(0);
+            } catch (error) {
+              lastError = error;
+              if (attempt < 5) await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+            }
+          }
+          throw lastError;
+          NODE
+          registry_field() {
+            REGISTRY_METADATA="$registry_metadata" REGISTRY_FIELD="$1" node -e "const value=JSON.parse(require('node:fs').readFileSync(process.env.REGISTRY_METADATA, 'utf8'))[process.env.REGISTRY_FIELD]; process.stdout.write(String(value ?? ''));"
+          }
+          if [ "$(registry_field exists)" != 'true' ]; then
+            if [ "$DIST_TAG" = 'latest' ]; then
+              echo "::error::$PACKAGE_NAME@$PACKAGE_VERSION must be published and verified on dist-tag next before promotion to latest"
+              exit 1
+            fi
+            echo 'should_publish=true' >> "$GITHUB_OUTPUT"
+            echo 'should_promote=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          remote_shasum="$(registry_field shasum)"
+          remote_tarball="$(registry_field tarball)"
+          tagged_version="$(registry_field taggedVersion)"
+          if [ "$remote_shasum" != "$LOCAL_SHASUM" ]; then
+            if [ -z "$remote_tarball" ]; then
+              echo '::error::Registry metadata did not include a tarball URL for the existing version'
+              exit 1
+            fi
+            compare_dir="$(mktemp -d)"
+            mkdir -p "$compare_dir/local" "$compare_dir/remote"
+            curl --fail --silent --show-error --location --retry 5 --retry-all-errors --connect-timeout 10 --max-time 60 "$remote_tarball" --output "$compare_dir/remote.tgz"
+            tar -xzf "$LOCAL_TARBALL" -C "$compare_dir/local" --strip-components=1
+            tar -xzf "$compare_dir/remote.tgz" -C "$compare_dir/remote" --strip-components=1
+            if ! diff --recursive --brief --no-dereference "$compare_dir/local" "$compare_dir/remote"; then
+              echo "::error::$PACKAGE_NAME@$PACKAGE_VERSION already exists with different package contents"
+              exit 1
+            fi
+            echo '::notice::Tarball shasums differ, but extracted package contents match'
+          fi
+          if [ "$tagged_version" != "$PACKAGE_VERSION" ]; then
+            if [ "$DIST_TAG" = 'latest' ]; then
+              next_version="$(registry_field nextVersion)"
+              if [ "$next_version" != "$PACKAGE_VERSION" ]; then
+                echo "::error::$PACKAGE_NAME@$PACKAGE_VERSION is not the exact version verified on dist-tag next"
+                exit 1
+              fi
+            fi
+            echo 'should_publish=false' >> "$GITHUB_OUTPUT"
+            echo 'should_promote=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo '::notice::Expected version and dist-tag already exist; skipping publish'
+          echo 'should_publish=false' >> "$GITHUB_OUTPUT"
+          echo 'should_promote=false' >> "$GITHUB_OUTPUT"
+
+      - name: Publish verified tarball
+        if: steps.registry.outputs.should_publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npm publish "${{ steps.package.outputs.local_tarball }}" --access public --provenance --tag "${{ steps.release.outputs.dist_tag }}"
+
+      - name: Promote verified exact version
+        if: steps.registry.outputs.should_promote == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGE_NAME: ${{ steps.release.outputs.package_name }}
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+          DIST_TAG: ${{ steps.release.outputs.dist_tag }}
+        run: npm dist-tag add "$PACKAGE_NAME@$PACKAGE_VERSION" "$DIST_TAG"
+
+      - name: Verify registry publication
+        env:
+          PACKAGE_NAME: ${{ steps.release.outputs.package_name }}
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+          DIST_TAG: ${{ steps.release.outputs.dist_tag }}
+        run: |
+          node --input-type=module - <<'NODE'
+          const packageUrl = `https://registry.npmjs.org/${encodeURIComponent(process.env.PACKAGE_NAME)}`;
+          let lastVersion = '';
+          for (let attempt = 1; attempt <= 5; attempt += 1) {
+            try {
+              const response = await fetch(`${packageUrl}?cacheBust=${Date.now()}`, {
+                signal: AbortSignal.timeout(15000),
+                cache: 'no-store',
+              });
+              if (!response.ok) throw new Error(`npm registry returned ${response.status}`);
+              const metadata = await response.json();
+              lastVersion = metadata['dist-tags']?.[process.env.DIST_TAG] ?? '';
+              if (lastVersion === process.env.PACKAGE_VERSION) process.exit(0);
+            } catch (error) {
+              if (attempt === 5) throw error;
+            }
+            await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+          }
+          throw new Error(`Registry dist-tag ${process.env.DIST_TAG} resolved to ${lastVersion || 'nothing'}, expected ${process.env.PACKAGE_VERSION}`);
+          NODE
