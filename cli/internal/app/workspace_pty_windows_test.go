@@ -77,7 +77,6 @@ func (harness *workspacePTYHarness) start(_ context.Context, helper string, envi
 	}
 	startup := new(windows.StartupInfoEx)
 	startup.Cb = uint32(unsafe.Sizeof(*startup))
-	startup.Flags = windows.STARTF_USESTDHANDLES
 	startup.ProcThreadAttributeList = attrs.List()
 	process := new(windows.ProcessInformation)
 	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT)
