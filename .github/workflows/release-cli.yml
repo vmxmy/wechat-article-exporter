@@ -433,10 +433,7 @@ jobs:
           build_metadata="$(go version -m "$binary")"
           grep -Fq "GOOS=$EXPECTED_GOOS" <<<"$build_metadata"
           grep -Fq "GOARCH=$EXPECTED_GOARCH" <<<"$build_metadata"
-          if grep -Fq 'CGO_ENABLED=1' <<<"$build_metadata"; then
-            echo 'release binary unexpectedly enables CGO' >&2
-            exit 1
-          fi
+          grep -Fq 'CGO_ENABLED=0' <<<"$build_metadata"
 
   release:
     if: startsWith(github.ref, 'refs/tags/wechat-article-v')
