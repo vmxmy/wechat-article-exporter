@@ -1,0 +1,316 @@
+name: Release Go CLI
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'cli/**'
+      - 'docs/architecture/database-compatibility.md'
+      - 'docs/architecture/sqlite-policy.md'
+      - 'samples/**'
+      - '.github/workflows/release-cli.yml'
+  workflow_dispatch:
+  push:
+    tags:
+      - 'wechat-article-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cli-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CGO_ENABLED: '0'
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Verify formatting
+        run: |
+          unformatted="$(gofmt -l $(find . -name '*.go' -type f))"
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 -checks='SA*,S1*,QF*' ./...
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Unit and integration tests
+        run: go test ./...
+
+      - name: Race tests
+        if: runner.os != 'Windows'
+        run: go test -race ./...
+
+      - name: Native pseudo-terminal workspace smoke
+        if: runner.os != 'macOS' || runner.arch == 'X64'
+        run: go test -count=1 -run TestCLIWorkspaceRealPTYNavigationResizeAndCleanExit ./internal/app
+
+      - name: LibreOffice DOCX open smoke
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-writer
+          go test -count=1 -run TestGeneratedDOCXOpensInLibreOfficeHeadless ./internal/exporter
+
+  fixture-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Parser and renderer corpus
+        run: >-
+          go test -count=1
+          -run 'TestRepresentativeSamples|TestSampleEngagementAndAudio|TestRepresentativeUnavailableSamples|TestSampleSemanticAndStructuralGoldenSuite'
+          ./internal/processor
+
+      - name: Export fixture corpus
+        run: >-
+          go test -count=1
+          -run 'TestFormatSpecificGoldenAndStructuralRegression|TestCuratedHTMLPDFVisualAndStructuralRegression'
+          ./internal/exporter
+
+  database-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Upgrade every supported schema baseline
+        run: >-
+          go test -count=1
+          -run 'TestMigrationUpgradeFromEverySupportedBaseline|TestMigrationReplyCheckpointsIsOrderedAndIdempotent|TestMigrationFailureRollsBackVersionAndSchema|TestOpenRefusesNewerSchema'
+          ./internal/library
+
+      - name: Backup, restore, and integrity matrix
+        run: >-
+          go test -count=1
+          -run 'TestBackup|TestVerifyBackup|TestRestore|TestIntegrity'
+          ./internal/library
+
+  build:
+    needs: [static, test, fixture-corpus, database-compatibility]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Build archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#wechat-article-v}"
+          if [ "$version" = "$GITHUB_REF_NAME" ]; then
+            version="dev-${GITHUB_SHA::7}"
+          elif ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $version" >&2
+            exit 1
+          fi
+          archive="wechat-article_${version}_${GOOS}_${GOARCH}"
+          mkdir -p "dist/$archive"
+          binary="wechat-article"
+          if [ "$GOOS" = 'windows' ]; then binary='wechat-article.exe'; fi
+          go build -trimpath -ldflags="-s -w -X github.com/wechat-article/wechat-article-exporter/cli/internal/app.Version=$version" -o "dist/$archive/$binary" ./cmd/wechat-article
+          go version -m "dist/$archive/$binary" | tee "dist/$archive/build-info.txt"
+          cp README.md "dist/$archive/README.md"
+          cp ../LICENSE "dist/$archive/LICENSE"
+          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0 \
+            app -json -output "dist/${archive}.sbom.cdx.json" -main cmd/wechat-article .
+          if [ "$GOOS" = 'windows' ]; then
+            (cd dist && zip -X -r "$archive.zip" "$archive")
+          else
+            tar -C dist -czf "dist/$archive.tar.gz" "$archive"
+          fi
+          rm -rf "dist/$archive"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wechat-article-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: cli/dist/*
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            archive_ext: tar.gz
+            binary: wechat-article
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            archive_ext: tar.gz
+            binary: wechat-article
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            archive_ext: zip
+            binary: wechat-article.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: wechat-article-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: artifact
+
+      - name: Extract native archive
+        shell: bash
+        env:
+          ARCHIVE_EXT: ${{ matrix.archive_ext }}
+        run: |
+          set -euo pipefail
+          archive="$(find artifact -maxdepth 1 -type f -name "*.${ARCHIVE_EXT}" -print -quit)"
+          test -n "$archive"
+          mkdir smoke
+          if [ "$ARCHIVE_EXT" = 'zip' ]; then
+            unzip -q "$archive" -d smoke
+          else
+            tar -xzf "$archive" -C smoke
+          fi
+
+      - name: Smoke native binary
+        shell: bash
+        env:
+          BINARY_NAME: ${{ matrix.binary }}
+          EXPECTED_GOOS: ${{ matrix.goos }}
+          EXPECTED_GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          binary="$(find smoke -type f -name "$BINARY_NAME" -print -quit)"
+          test -n "$binary"
+          chmod +x "$binary"
+          "$binary" --version
+          smoke_root="$RUNNER_TEMP/wechat-article-smoke"
+          mkdir -p "$smoke_root/config" "$smoke_root/data" "$smoke_root/cache" "$smoke_root/state"
+          XDG_CONFIG_HOME="$smoke_root/config" \
+          XDG_DATA_HOME="$smoke_root/data" \
+          XDG_CACHE_HOME="$smoke_root/cache" \
+          XDG_STATE_HOME="$smoke_root/state" \
+            "$binary" status --json > "$smoke_root/status.json"
+          grep -q '"success": true' "$smoke_root/status.json"
+          grep -q '"databaseAvailable": true' "$smoke_root/status.json"
+          grep -q '"objectStoreReady": true' "$smoke_root/status.json"
+          go version -m "$binary" | grep -q "GOOS=$EXPECTED_GOOS"
+          go version -m "$binary" | grep -q "GOARCH=$EXPECTED_GOARCH"
+          if go version -m "$binary" | grep -q 'CGO_ENABLED=1'; then
+            echo 'release binary unexpectedly enables CGO' >&2
+            exit 1
+          fi
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/wechat-article-v')
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create checksums
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          find . -maxdepth 1 -type f ! -name 'checksums.txt' -printf '%f\n' | sort | xargs sha256sum > checksums.txt
+          sha256sum --check checksums.txt
+
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" artifacts/* --generate-notes --verify-tag
