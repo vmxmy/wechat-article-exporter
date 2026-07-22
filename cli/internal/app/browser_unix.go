@@ -18,3 +18,10 @@ func openBrowser(target string) error {
 	command.Stderr = io.Discard
 	return command.Start()
 }
+
+func launchBrowserExecutable(path, target string) error {
+	command := exec.Command(path, target)
+	command.Stdout = io.Discard
+	command.Stderr = io.Discard
+	return command.Start()
+}

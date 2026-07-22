@@ -1,0 +1,31 @@
+{
+  "extension": ".xlsx",
+  "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "sheets": [
+    {
+      "name": "Sheet1",
+      "rowCount": 2,
+      "columns": [
+        "公众号",
+        "ID",
+        "链接",
+        "标题",
+        "封面",
+        "摘要",
+        "创建时间",
+        "发布时间",
+        "阅读",
+        "点赞",
+        "分享",
+        "喜欢",
+        "留言",
+        "作者",
+        "是否原创",
+        "文章类型",
+        "所属合集",
+        "文章内容"
+      ]
+    }
+  ],
+  "streamingRequired": true
+}

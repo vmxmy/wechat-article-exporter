@@ -1,0 +1,9 @@
+{
+  "format": "json",
+  "includeContent": true,
+  "includeMetrics": true,
+  "includeComments": true,
+  "articleIds": [
+    "fixture-article-001"
+  ]
+}

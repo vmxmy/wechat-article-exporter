@@ -11,6 +11,11 @@ interface HtmlSampleGroup {
 
 export const samples: HtmlSampleGroup[] = [
   {
+    name: 'author',
+    hasContent: true,
+    samples: [path.join(samplesDirectory, 'author/01.html')],
+  },
+  {
     name: '作者已删除',
     hasContent: false,
     samples: [
@@ -72,6 +77,7 @@ export const samples: HtmlSampleGroup[] = [
       path.join(samplesDirectory, '普通图文/03.html'),
       path.join(samplesDirectory, '普通图文/04.html'),
       path.join(samplesDirectory, '普通图文/c01.html'),
+      path.join(samplesDirectory, '普通图文/c02.html'),
     ],
   },
   {

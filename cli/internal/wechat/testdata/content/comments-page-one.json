@@ -1,0 +1,26 @@
+{
+  "base_resp": { "ret": 0 },
+  "continue_flag": true,
+  "buffer": "fixture-buffer-2",
+  "elected_comment": [
+    {
+      "content_id": "fixture-comment-001",
+      "nick_name": "读者甲",
+      "content": "第一条",
+      "create_time": 1767225600,
+      "like_num": 2,
+      "reply_new": {
+        "reply_total_cnt": 2,
+        "max_reply_id": 1,
+        "reply_list": [
+          {
+            "reply_id": 1,
+            "nick_name": "示例作者",
+            "content": "谢谢阅读",
+            "create_time": 1767225700
+          }
+        ]
+      }
+    }
+  ]
+}

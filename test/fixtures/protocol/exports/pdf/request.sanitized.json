@@ -1,0 +1,8 @@
+{
+  "format": "pdf",
+  "browser": "chromium",
+  "includeComments": true,
+  "articleIds": [
+    "fixture-article-001"
+  ]
+}

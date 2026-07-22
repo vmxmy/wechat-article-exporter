@@ -1,0 +1,9 @@
+{
+  "base_resp": { "ret": 0, "err_msg": "ok" },
+  "getalbum_resp": {
+    "base_info": { "title": "Empty Fixture Album", "nickname": "Fixture Account", "article_count": "0" },
+    "article_list": [],
+    "continue_flag": "0",
+    "reverse_continue_flag": "0"
+  }
+}

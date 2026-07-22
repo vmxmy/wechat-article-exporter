@@ -19,6 +19,10 @@ id = "d44eb3b7fd744963a18e46a934b72d93"
 [vars]
 # exporter（CF Pages）基址：MCP 工具与登录都复用它已部署的 /api/*
 EXPORTER_BASE_URL = "https://mp.ziikoo.app"
+# Set only after the compatibility release announces a concrete retirement
+# deadline. Before that date new OAuth authorization remains available.
+# REMOTE_OAUTH_DISABLE_AFTER = "2027-01-31T00:00:00Z"
+LOCAL_CLI_MIGRATION_URL = "https://github.com/wechat-article/wechat-article-exporter#local-cli"
 
 [env.preview]
 name = "wechat-article-mcp-preview"
@@ -31,3 +35,4 @@ id = "ce9220f85744491dad21c7bc9c8ec39a"
 
 [env.preview.vars]
 EXPORTER_BASE_URL = "https://mp.ziikoo.app"
+LOCAL_CLI_MIGRATION_URL = "https://github.com/wechat-article/wechat-article-exporter#local-cli"

@@ -1,0 +1,10 @@
+{
+  "skippedThreads": [
+    "fixture-comment-001"
+  ],
+  "completedThreads": [
+    "fixture-comment-002"
+  ],
+  "duplicateWrites": 0,
+  "jobState": "completed"
+}

@@ -1,0 +1,7 @@
+{
+  "base_resp": {
+    "ret": 0
+  },
+  "total_count": 8,
+  "publish_page": "{\"publish_list\":[{\"publish_info\":\"{\\\"appmsgex\\\":[{\\\"aid\\\":\\\"fixture-aid-old\\\",\\\"appmsgid\\\":10001,\\\"itemidx\\\":1,\\\"fakeid\\\":\\\"fixture-account-001\\\",\\\"title\\\":\\\"边界之前\\\",\\\"author_name\\\":\\\"示例作者\\\",\\\"digest\\\":\\\"用于本地回归的脱敏摘要\\\",\\\"link\\\":\\\"https://mp.weixin.qq.com/s/fixture-old\\\",\\\"cover\\\":\\\"https://mmbiz.qpic.cn/mmbiz_jpg/fixture/640\\\",\\\"create_time\\\":1767139199,\\\"update_time\\\":1767139199,\\\"item_show_type\\\":0,\\\"copyright_stat\\\":1,\\\"copyright_type\\\":1,\\\"is_pay_subscribe\\\":0,\\\"appmsg_album_infos\\\":[{\\\"album_id\\\":\\\"fixture-album-001\\\",\\\"title\\\":\\\"示例合集\\\"}]}]}\"}]}"
+}

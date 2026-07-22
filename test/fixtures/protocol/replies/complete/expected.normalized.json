@@ -1,0 +1,15 @@
+{
+  "items": [
+    {
+      "id": "1",
+      "author": "示例作者",
+      "content": "谢谢阅读"
+    },
+    {
+      "id": "2",
+      "author": "读者甲",
+      "content": "继续关注"
+    }
+  ],
+  "complete": true
+}

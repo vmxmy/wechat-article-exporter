@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "domain": "appmsgpublish",
+  "name": "empty",
+  "operation": "GET /cgi-bin/appmsgpublish",
+  "classification": "success",
+  "provenance": "sanitized-synthetic-shape-derived-from-current-web-implementation",
+  "capturedAt": "2026-07-22T00:00:00.000Z",
+  "sanitization": [
+    "tokens replaced",
+    "cookies omitted",
+    "private identifiers pseudonymized",
+    "article body synthetic"
+  ],
+  "notes": []
+}

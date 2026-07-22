@@ -1,0 +1,22 @@
+{
+  "base_resp": {
+    "ret": 0
+  },
+  "getalbum_resp": {
+    "article_list": [
+      {
+        "msgid": "10001",
+        "itemidx": "1",
+        "title": "第一篇",
+        "url": "https://mp.weixin.qq.com/s/fixture-album-1"
+      },
+      {
+        "msgid": "10001",
+        "itemidx": "1",
+        "title": "第一篇",
+        "url": "https://mp.weixin.qq.com/s/fixture-album-1"
+      }
+    ],
+    "continue_flag": "0"
+  }
+}

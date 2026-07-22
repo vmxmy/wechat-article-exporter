@@ -1,0 +1,6 @@
+{
+  "base_resp": {
+    "ret": -1,
+    "err_msg": "temporary upstream failure"
+  }
+}

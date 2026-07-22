@@ -1,4 +1,4 @@
-import { parseCgiDataNew } from '#shared/utils/html';
+import { parseCgiDataNew } from '../shared/utils/html';
 import { read, samples, write } from './common';
 
 function normalizeOutPath(input: string): string {

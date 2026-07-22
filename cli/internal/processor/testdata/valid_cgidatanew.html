@@ -1,0 +1,123 @@
+<!doctype html>
+<html>
+<head><title>Sanitized fixture</title></head>
+<body>
+<div id="js_article"><div id="js_content">Rendered article shell</div></div>
+<script>
+  window.fixtureSideEffect = function () { throw new Error('must not execute'); };
+  window.cgiDataNew = {
+    title: JsDecode('Safe \x26 Sound'),
+    desc: JsDecode('A sanitized fixture'),
+    author: JsDecode('Fixture Author'),
+    user_name: JsDecode('gh_fixture'),
+    bizuin: JsDecode('RklYVFVSRQ=='),
+    nick_name: JsDecode('Fixture Account'),
+    alias: JsDecode('fixture_account'),
+    round_head_img: JsDecode('//images.example.test/avatar.png'),
+    hd_head_img: JsDecode('https://images.example.test/avatar-hd.png'),
+    signature: JsDecode('Account signature'),
+    mid: '2247000001' * 1,
+    idx: '2' * 1,
+    sn: JsDecode('fixture-signature'),
+    appmsgid: JsDecode('article-001'),
+    link: JsDecode('https://mp.weixin.qq.com/s/example?x=1\x26amp;y=2'),
+    source_url: JsDecode('https://source.example.test/post'),
+    content_noencode: JsDecode('\x3csection\x3eBody \x26 details\x3c/section\x3e'),
+    ori_create_time: '1700000000' * 1,
+    create_time: JsDecode('2023-11-15 06:13'),
+    svr_time: '1700000001' * 1,
+    filter_time: '1699999999' * 1,
+    real_item_show_type: '8' * 1,
+    is_pay_subscribe: '1' * 1,
+    pay_subscribe_info: {
+      desc: JsDecode('Members only'),
+      fee: '299' * 1,
+      wecoin_amount: '30' * 1,
+      preview_percent: '25' * 1,
+      gifts_count: '2' * 1,
+    },
+    cdn_url: JsDecode('//images.example.test/cover.jpg'),
+    img_format: JsDecode('jpeg'),
+    picture_page_info_list: [
+      {
+        cdn_url: JsDecode('https://images.example.test/one.png?x=1\x26amp;y=2'),
+        width: '1200' * 1,
+        height: '800' * 1,
+        show_watermark: true,
+      },
+    ],
+    voice_in_appmsg: [
+      {
+        voice_id: JsDecode('voice-1'),
+        listen_id: JsDecode('listen-1'),
+        title: JsDecode('Fixture audio'),
+        voice_url: JsDecode('//media.example.test/audio.mp3'),
+        duration: '42' * 1,
+        file_size: '1024' * 1,
+      },
+    ],
+    video_page_info: {
+      video_id: JsDecode('video-1'),
+      title: JsDecode('Fixture video'),
+      cover_url: JsDecode('//images.example.test/video.jpg'),
+      is_mp_video: true,
+      mp_video_trans_info: [
+        {
+          url: JsDecode('https://media.example.test/video.mp4'),
+          duration: '12' * 1,
+          filesize: '4096' * 1,
+          width: '1920' * 1,
+          height: '1080' * 1,
+          format_id: '10001' * 1,
+          video_quality_level: '4' * 1,
+          video_quality_wording: JsDecode('1080p'),
+        },
+      ],
+    },
+    appmsgalbuminfo: {
+      album_id: JsDecode('album-1'),
+      album_id_str: JsDecode('album-1'),
+      title: JsDecode('Fixture Album'),
+      link: JsDecode('//mp.weixin.qq.com/mp/appmsgalbum?album_id=album-1'),
+      content_size: '9' * 1,
+      album_needpay: '1' * 1,
+      isupdating: '1' * 1,
+    },
+    appmsg_album_infos: [
+      {
+        album_id: JsDecode('album-2'),
+        title: JsDecode('Second Album'),
+        link: JsDecode('https://mp.weixin.qq.com/mp/appmsgalbum?album_id=album-2'),
+        content_count: '4' * 1,
+      },
+    ],
+    public_tag_info: {
+      tags: [{ album_info: { album_id: JsDecode('album-1'), title: JsDecode('Duplicate Album') } }],
+    },
+    comment_id: JsDecode('comment-1'),
+    segment_comment_id: JsDecode('segment-1'),
+    extra_comment_id: JsDecode('extra-1'),
+    show_comment: '1' * 1,
+    rt_biz_info: { elected_comment_total_cnt: '13' * 1 },
+    user_info: {
+      appmsg_bar_data: {
+        read_num: '101' * 1,
+        like_count: '11' * 1,
+        old_like_count: '7' * 1,
+        share_count: '5' * 1,
+        collect_count: '3' * 1,
+        comment_count: '2' * 1,
+      },
+    },
+    copyright_info: { copyright_stat: '11' * 1, is_cartoon_copyright: true },
+    lang: JsDecode('zh_CN'),
+    ip_wording: {
+      country_name: JsDecode('中国'),
+      province_name: JsDecode('上海'),
+      city_name: JsDecode('上海'),
+    },
+  };
+  fetch('https://must-not-run.invalid/');
+</script>
+</body>
+</html>

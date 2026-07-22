@@ -1,0 +1,16 @@
+{
+  "base_resp": { "ret": 0 },
+  "content_id": "fixture-comment-001",
+  "reply_list": {
+    "max_reply_id": 2,
+    "reply_list": [
+      {
+        "reply_id": 2,
+        "nick_name": "读者甲",
+        "content": "继续关注",
+        "create_time": 1767225800,
+        "reply_like_num": 3
+      }
+    ]
+  }
+}

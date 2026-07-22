@@ -1,0 +1,21 @@
+{
+  "base_resp": {
+    "ret": 0,
+    "err_msg": "ok"
+  },
+  "total": 3,
+  "list": [
+    {
+      "fakeid": "fixture-account-001",
+      "nickname": "示例公众号",
+      "alias": "fixture_one",
+      "round_head_img": "https://mmbiz.qpic.cn/mmbiz_png/fixture/0"
+    },
+    {
+      "fakeid": "fixture-account-002",
+      "nickname": "示例周刊",
+      "alias": "fixture_two",
+      "round_head_img": "https://mmbiz.qpic.cn/mmbiz_png/fixture/1"
+    }
+  ]
+}

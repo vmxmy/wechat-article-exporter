@@ -1,0 +1,24 @@
+{
+  "base_resp": {
+    "ret": 0
+  },
+  "getalbum_resp": {
+    "base_info": {
+      "title": "示例合集",
+      "nickname": "示例公众号",
+      "article_count": "3",
+      "is_reverse": "1"
+    },
+    "article_list": [
+      {
+        "msgid": "10003",
+        "itemidx": "1",
+        "title": "第三篇",
+        "url": "https://mp.weixin.qq.com/s/fixture-album-3",
+        "create_time": "1767043200"
+      }
+    ],
+    "continue_flag": "0",
+    "reverse_continue_flag": "1"
+  }
+}

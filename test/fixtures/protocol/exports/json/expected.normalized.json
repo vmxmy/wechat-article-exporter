@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "articleCount": 1,
+  "requiredFields": [
+    "schemaVersion",
+    "articles",
+    "provenance"
+  ],
+  "includes": [
+    "content",
+    "metrics",
+    "comments",
+    "replies",
+    "albums"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "url": "https://mp.weixin.qq.com/s/fixture-article-001",
+  "credentialRef": "credential:fixture-account-001",
+  "cookie": "<redacted>",
+  "key": "<redacted>",
+  "pass_ticket": "<redacted>",
+  "appmsg_token": "<redacted>"
+}

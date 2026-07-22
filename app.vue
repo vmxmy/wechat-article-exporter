@@ -1,5 +1,6 @@
 <template>
   <div :class="isDev ? 'debug-screens' : ''" class="flex flex-col h-screen">
+    <CompatibilityDeprecationNotice />
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>

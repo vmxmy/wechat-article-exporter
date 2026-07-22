@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -40,4 +41,8 @@ func JSONRequested(args []string) bool {
 		}
 	}
 	return requested
+}
+
+func IsInterrupted(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

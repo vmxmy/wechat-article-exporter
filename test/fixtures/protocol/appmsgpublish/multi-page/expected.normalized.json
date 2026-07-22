@@ -1,0 +1,53 @@
+{
+  "items": [
+    {
+      "aid": "fixture-aid-001",
+      "appmsgid": 10001,
+      "itemidx": 1,
+      "fakeid": "fixture-account-001",
+      "title": "离线基线文章",
+      "author_name": "示例作者",
+      "digest": "用于本地回归的脱敏摘要",
+      "link": "https://mp.weixin.qq.com/s/fixture-article-001",
+      "cover": "https://mmbiz.qpic.cn/mmbiz_jpg/fixture/640",
+      "create_time": 1767225600,
+      "update_time": 1767225600,
+      "item_show_type": 0,
+      "copyright_stat": 1,
+      "copyright_type": 1,
+      "is_pay_subscribe": 0,
+      "appmsg_album_infos": [
+        {
+          "album_id": "fixture-album-001",
+          "title": "示例合集"
+        }
+      ]
+    },
+    {
+      "aid": "fixture-aid-002",
+      "appmsgid": 10001,
+      "itemidx": 1,
+      "fakeid": "fixture-account-001",
+      "title": "第二篇基线文章",
+      "author_name": "示例作者",
+      "digest": "用于本地回归的脱敏摘要",
+      "link": "https://mp.weixin.qq.com/s/fixture-article-002",
+      "cover": "https://mmbiz.qpic.cn/mmbiz_jpg/fixture/640",
+      "create_time": 1767225600,
+      "update_time": 1767225600,
+      "item_show_type": 0,
+      "copyright_stat": 1,
+      "copyright_type": 1,
+      "is_pay_subscribe": 0,
+      "appmsg_album_infos": [
+        {
+          "album_id": "fixture-album-001",
+          "title": "示例合集"
+        }
+      ]
+    }
+  ],
+  "total": 3,
+  "nextBegin": 2,
+  "complete": false
+}

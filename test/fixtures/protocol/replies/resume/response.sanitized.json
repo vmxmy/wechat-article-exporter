@@ -1,0 +1,16 @@
+{
+  "base_resp": {
+    "ret": 0
+  },
+  "content_id": "fixture-comment-002",
+  "reply_list": {
+    "max_reply_id": 9,
+    "reply_list": [
+      {
+        "reply_id": 9,
+        "nick_name": "读者乙",
+        "content": "恢复成功"
+      }
+    ]
+  }
+}

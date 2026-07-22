@@ -1,0 +1,8 @@
+{
+  "persistedPages": 1,
+  "checkpoint": {
+    "buffer": "fixture-buffer-2"
+  },
+  "retryable": true,
+  "complete": false
+}

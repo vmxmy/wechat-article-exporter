@@ -1,5 +1,5 @@
-import { parseCgiDataNew } from '#shared/utils/html';
-import { renderHTMLFromCgiDataNew } from '#shared/utils/renderer';
+import { parseCgiDataNew } from '../shared/utils/html';
+import { renderHTMLFromCgiDataNew } from '../shared/utils/renderer';
 import { read, samples, write } from './common';
 
 function normalizeOutPath(input: string): string {

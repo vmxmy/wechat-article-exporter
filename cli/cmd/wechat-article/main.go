@@ -2,21 +2,21 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/app"
 )
 
 func main() {
 	application := app.New(os.Stdin, os.Stdout, os.Stderr)
-	if err := application.Execute(context.Background(), os.Args[1:]); err != nil {
+	defer application.Close()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := application.Execute(ctx, os.Args[1:]); err != nil {
 		if application.JSONOutputEnabled() || app.JSONRequested(os.Args[1:]) {
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
-				"success": false,
-				"error":   map[string]any{"message": err.Error(), "exitCode": app.ExitCode(err)},
-			})
+			_ = app.WriteErrorJSON(os.Stdout, err)
 		} else {
 			fmt.Fprintln(os.Stderr, err)
 		}

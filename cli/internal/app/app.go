@@ -2,50 +2,149 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/config"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/input"
-	"github.com/wechat-article/wechat-article-exporter/cli/internal/mcpclient"
-	"github.com/wechat-article/wechat-article-exporter/cli/internal/oauth"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/legacyremote"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/safety"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/tui"
-	"golang.org/x/oauth2"
-)
-
-const (
-	DefaultServer = "https://mptext.ziikoo.app"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
 
 var Version = "2.0.0"
 
 type App struct {
-	stdin  io.Reader
-	stdout io.Writer
-	stderr io.Writer
-	store  *config.Store
+	stdin    io.Reader
+	stdout   io.Writer
+	stderr   io.Writer
+	store    *config.Store
+	core     application.Application
+	legacy   *legacyremote.Adapter
+	profiles *profiles.Registry
+	secret   secrets.Store
+	proxy    proxyManager
+	runtimes *runtimeManager
+	active   *ProfileRuntime
 
 	server  string
 	jsonOut bool
 	debug   bool
+
+	workspaceRunner func(context.Context, tui.WorkspaceOptions) error
+	forceWorkspace  bool
 }
 
 func New(stdin io.Reader, stdout, stderr io.Writer) *App {
-	return &App{stdin: stdin, stdout: stdout, stderr: stderr, store: config.NewStore("")}
+	appInstance, err := NewWithDependencies(context.Background(), stdin, stdout, stderr, Dependencies{})
+	if err != nil {
+		// Preserve the historical constructor signature for embedders. Runtime
+		// initialization errors are surfaced by status and local operations.
+		store := config.NewStore("")
+		fallback := application.New(application.Options{Version: Version})
+		return &App{stdin: stdin, stdout: stdout, stderr: stderr, store: store, core: fallback,
+			legacy: legacyremote.New(store, Version, http.DefaultClient), secret: secrets.NewMemoryStore()}
+	}
+	return appInstance
+}
+
+func NewWithDependencies(
+	ctx context.Context,
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+	dependencies Dependencies,
+) (*App, error) {
+	if dependencies.PathOptions == (profiles.PathOptions{}) {
+		dependencies.PathOptions = pathOptionsFromEnvironment()
+	}
+	paths, err := defaultPaths(dependencies.PathOptions)
+	if err != nil {
+		return nil, fmt.Errorf("resolve runtime paths: %w", err)
+	}
+	secretStore := dependencies.Secrets
+	if secretStore == nil {
+		secretStore = secrets.NewKeyringStore("")
+		dependencies.Secrets = secretStore
+	}
+	registry := profiles.NewRegistry(paths, secretStore)
+	activeProfile, err := selectedProfile(registry, os.Getenv("WECHAT_ARTICLE_PROFILE"))
+	if err != nil {
+		return nil, err
+	}
+	manager := newRuntimeManager(Version, paths, dependencies)
+	active, err := manager.Build(ctx, activeProfile)
+	if err != nil {
+		return nil, err
+	}
+	store := dependencies.LegacyConfig
+	if store == nil {
+		store = config.NewStore("")
+	}
+	httpDoer := dependencies.HTTP
+	if httpDoer == nil {
+		httpDoer = http.DefaultClient
+	}
+	return &App{
+		stdin: stdin, stdout: stdout, stderr: stderr,
+		store: store, core: active.Core, legacy: newLegacyAdapter(store, httpDoer),
+		profiles: registry, secret: secretStore, proxy: active.Network, runtimes: manager, active: active,
+	}, nil
+}
+
+func pathOptionsFromEnvironment() profiles.PathOptions {
+	if root := strings.TrimSpace(os.Getenv("WECHAT_ARTICLE_PORTABLE_ROOT")); root != "" {
+		return profiles.PathOptions{Portable: true, PortableRoot: root}
+	}
+	return profiles.PathOptions{
+		ConfigRoot: strings.TrimSpace(os.Getenv("WECHAT_ARTICLE_CONFIG_ROOT")),
+		DataRoot:   strings.TrimSpace(os.Getenv("WECHAT_ARTICLE_DATA_ROOT")),
+		CacheRoot:  strings.TrimSpace(os.Getenv("WECHAT_ARTICLE_CACHE_ROOT")),
+		StateRoot:  strings.TrimSpace(os.Getenv("WECHAT_ARTICLE_STATE_ROOT")),
+	}
+}
+
+func selectedProfile(registry *profiles.Registry, selected string) (profiles.Profile, error) {
+	selected = strings.TrimSpace(selected)
+	if selected == "" {
+		return defaultProfile(registry)
+	}
+	items, err := registry.List()
+	if err != nil {
+		return profiles.Profile{}, err
+	}
+	for _, profile := range items {
+		if profile.ID == domain.ProfileID(selected) {
+			return profile, nil
+		}
+	}
+	return profiles.Profile{}, fmt.Errorf("profile %q does not exist", selected)
+}
+
+func (a *App) Close() error {
+	if a.runtimes == nil {
+		return nil
+	}
+	return a.runtimes.Close()
 }
 
 func (a *App) Execute(ctx context.Context, args []string) error {
+	a.jsonOut = false
+	a.debug = false
+	a.server = ""
 	root := a.rootCommand()
 	root.SetArgs(args)
 	root.SetContext(ctx)
@@ -55,20 +154,26 @@ func (a *App) Execute(ctx context.Context, args []string) error {
 	}
 	var usageError *UsageError
 	if errors.As(err, &usageError) {
-		return err
+		return usage(safety.RedactText(usageError.Error()))
 	}
 	if isCobraUsageError(err) {
-		return usage(err.Error())
+		return usage(safety.RedactText(err.Error()))
 	}
-	return err
+	return safety.RedactError(err)
 }
 
 func (a *App) JSONOutputEnabled() bool { return a.jsonOut }
 
 func (a *App) rootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "wechat-article",
-		Short:         "Remote CLI for WeChat article export",
+		Use:   "wechat-article",
+		Short: "Local-first WeChat article library and exporter",
+		Long:  "Manage a profile-isolated WeChat article library locally. Remote OAuth and MCP compatibility is available only below the legacy command.",
+		Example: `  wechat-article profile create work
+  wechat-article login --qr-output ./wechat-login.png
+  wechat-article account search "OpenAI" --json
+  wechat-article sync account account-id --follow
+  wechat-article export start --format markdown --account account-id --output ./exports --wait`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       Version,
@@ -82,7 +187,7 @@ func (a *App) rootCommand() *cobra.Command {
 			if a.jsonOut {
 				return usage("a command is required with --json")
 			}
-			if !tui.IsInteractive(a.stdin, a.stdout) {
+			if !a.forceWorkspace && !tui.IsInteractive(a.stdin, a.stdout) {
 				return command.Help()
 			}
 			return a.runDashboard(command.Context())
@@ -93,20 +198,284 @@ func (a *App) rootCommand() *cobra.Command {
 	root.SetErr(a.stderr)
 	root.SetVersionTemplate("{{.Version}}\n")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usage(err.Error()) })
-	root.PersistentFlags().StringVar(&a.server, "server", "", "MCP server base URL")
 	root.PersistentFlags().BoolVar(&a.jsonOut, "json", false, "force machine-readable JSON output")
 	root.PersistentFlags().BoolVar(&a.debug, "debug", false, "enable verbose development logging")
 	root.AddCommand(
-		a.loginCommand(),
-		a.logoutCommand(),
-		a.statusCommand(),
-		a.apiCommand("api"),
-		a.apiCommand("mcp"),
+		a.localStatusCommand(),
+		a.localLoginCommand(),
+		a.localLogoutCommand(),
+		a.profileCommand(),
+		a.legacyCommand(),
 		a.articleCommand(),
 		a.accountCommand(),
 		a.albumCommand(),
+		a.syncCommand(),
+		a.downloadCommand(),
+		a.metadataCommand(),
+		a.commentsCommand(),
+		a.credentialCommand(),
+		a.proxyCommand(),
+		a.jobCommand(),
+		a.exportCommand(),
+		a.databaseCommand(),
+		a.migrationCommand(),
+		a.diagnosticsCommand(),
+		a.mcpCommand(),
+		a.completionCommand(root),
 	)
 	return root
+}
+
+func (a *App) profileCommand() *cobra.Command {
+	profile := &cobra.Command{Use: "profile", Short: "Manage isolated local profiles"}
+	profile.AddCommand(&cobra.Command{
+		Use: "create <name>", Short: "Create a local profile", Args: exactArgs(1, "profile create requires <name>"),
+		RunE: func(_ *cobra.Command, args []string) error {
+			created, err := a.profiles.Create(args[0])
+			if err != nil {
+				return err
+			}
+			return a.output(map[string]any{"success": true, "data": created})
+		},
+	})
+	profile.AddCommand(&cobra.Command{
+		Use: "list", Short: "List local profiles", Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			items, err := a.profiles.List()
+			if err != nil {
+				return err
+			}
+			return a.output(map[string]any{"success": true, "data": map[string]any{"profiles": items, "count": len(items)}})
+		},
+	})
+	profile.AddCommand(&cobra.Command{
+		Use: "use <name>", Short: "Activate a local profile", Args: exactArgs(1, "profile use requires <name>"),
+		RunE: func(_ *cobra.Command, args []string) error {
+			selected, err := a.findProfile(domain.ProfileID(args[0]))
+			if err != nil {
+				return err
+			}
+			prepared, err := a.prepareProfile(context.Background(), selected)
+			if err != nil {
+				return err
+			}
+			selected, err = a.profiles.Use(selected.ID)
+			if err != nil {
+				_ = prepared.Close()
+				return err
+			}
+			if err := a.commitProfile(prepared); err != nil {
+				return err
+			}
+			return a.output(map[string]any{"success": true, "data": selected})
+		},
+	})
+	var confirmation string
+	deleteCommand := &cobra.Command{
+		Use: "delete <name>", Short: "Delete a non-active local profile", Args: exactArgs(1, "profile delete requires <name>"),
+		RunE: func(_ *cobra.Command, args []string) error {
+			required := "delete-profile:" + args[0]
+			if confirmation != required {
+				return usage("profile deletion requires --confirm " + required)
+			}
+			if err := a.profiles.Delete(domain.ProfileID(args[0])); err != nil {
+				return err
+			}
+			return a.output(map[string]any{"success": true, "data": map[string]any{"deleted": args[0]}})
+		},
+	}
+	deleteCommand.Flags().StringVar(&confirmation, "confirm", "", "exact confirmation value")
+	profile.AddCommand(deleteCommand)
+	return profile
+}
+
+func (a *App) findProfile(id domain.ProfileID) (profiles.Profile, error) {
+	items, err := a.profiles.List()
+	if err != nil {
+		return profiles.Profile{}, err
+	}
+	for _, profile := range items {
+		if profile.ID == id {
+			return profile, nil
+		}
+	}
+	return profiles.Profile{}, fmt.Errorf("profile %q does not exist", id)
+}
+
+func (a *App) prepareProfile(ctx context.Context, profile profiles.Profile) (*ProfileRuntime, error) {
+	if a.runtimes == nil {
+		return nil, errors.New("profile runtime manager is unavailable")
+	}
+	runtime, err := a.runtimes.Prepare(ctx, profile)
+	if err != nil {
+		return nil, fmt.Errorf("prepare profile %q: %w", profile.ID, err)
+	}
+	return runtime, nil
+}
+
+func (a *App) commitProfile(runtime *ProfileRuntime) error {
+	if err := a.runtimes.Activate(runtime); err != nil {
+		_ = runtime.Close()
+		return err
+	}
+	a.active = runtime
+	a.core = runtime.Core
+	if runtime.Network != nil {
+		a.proxy = runtime.Network
+	}
+	return nil
+}
+
+func (a *App) localStatusCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "status",
+		Aliases: []string{"whoami"},
+		Short:   "Show local runtime, storage, and WeChat session status",
+		Args:    cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			status, err := a.core.RuntimeStatus(command.Context())
+			if err != nil {
+				return err
+			}
+			session, err := a.core.SessionStatus(command.Context())
+			if err != nil {
+				return err
+			}
+			migration, migrationErr := a.legacyMigration()
+			if migrationErr != nil {
+				return migrationErr
+			}
+			if a.active == nil {
+				return errors.New("active profile runtime is unavailable")
+			}
+			configStore := profiles.NewConfigStore(a.active.Profile.Paths.Config)
+			configuration, configurationBackup, err := configStore.Read()
+			if err != nil {
+				return err
+			}
+			effectiveConfiguration := profiles.EffectiveConfig{
+				Path:            configStore.Path(),
+				SchemaVersion:   configuration.SchemaVersion,
+				ProfileID:       configuration.ProfileID,
+				Preferences:     configuration.Preferences,
+				MCP:             configuration.MCP,
+				MigrationBackup: configurationBackup,
+			}
+			return a.output(map[string]any{"success": true, "data": map[string]any{
+				"runtime": status, "session": session, "configuration": effectiveConfiguration,
+				"legacyMigration": migration,
+			}})
+		},
+	}
+}
+
+func (a *App) localLoginCommand() *cobra.Command {
+	var qrOutput string
+	var pollInterval time.Duration
+	var refreshes int
+	command := &cobra.Command{
+		Use:   "login",
+		Short: "Log in to WeChat locally with a QR code",
+		Args:  cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			interactive := tui.IsInteractive(a.stdin, a.stdout)
+			if !interactive && strings.TrimSpace(qrOutput) == "" {
+				return usage("non-interactive login requires --qr-output <path>")
+			}
+			if pollInterval < 500*time.Millisecond || pollInterval > 30*time.Second {
+				return usage("--poll-interval must be between 500ms and 30s")
+			}
+			if refreshes < 0 || refreshes > 10 {
+				return usage("--refreshes must be between 0 and 10")
+			}
+			for attempt := 0; attempt <= refreshes; attempt++ {
+				flow, err := a.core.BeginLogin(command.Context(), "")
+				if err != nil {
+					return err
+				}
+				if qrOutput != "" {
+					if err := wechat.WriteQRImage(qrOutput, flow.QRBytes); err != nil {
+						return err
+					}
+					fmt.Fprintf(a.stderr, "WeChat login QR written to %s; scan and confirm in WeChat.\n", qrOutput)
+				} else {
+					text, err := wechat.RenderQRImageText(flow.QRBytes)
+					if err != nil {
+						return err
+					}
+					fmt.Fprintln(a.stderr, text)
+					fmt.Fprintf(a.stderr, "Scan and confirm before %s. Press Ctrl-C to cancel.\n", flow.ExpiresAt.Local().Format(time.RFC3339))
+				}
+				for {
+					result, err := a.core.PollLogin(command.Context())
+					if err != nil {
+						return err
+					}
+					fmt.Fprintf(a.stderr, "WeChat login status: %s\n", result.State)
+					switch result.State {
+					case wechat.QRConfirmed:
+						session, err := a.core.CompleteLogin(command.Context())
+						if err != nil {
+							return err
+						}
+						return a.output(map[string]any{"success": true, "data": session})
+					case wechat.QRExpired:
+						if attempt == refreshes {
+							return wechat.ErrLoginExpired
+						}
+						goto refresh
+					}
+					select {
+					case <-command.Context().Done():
+						return command.Context().Err()
+					case <-time.After(pollInterval):
+					}
+				}
+			refresh:
+			}
+			return wechat.ErrLoginExpired
+		},
+	}
+	command.Flags().StringVar(&qrOutput, "qr-output", "", "write the upstream login QR image to this path")
+	command.Flags().DurationVar(&pollInterval, "poll-interval", 2*time.Second, "bounded login polling interval")
+	command.Flags().IntVar(&refreshes, "refreshes", 1, "number of automatic QR refreshes after expiry")
+	return command
+}
+
+func (a *App) localLogoutCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "logout",
+		Short: "Log out of WeChat and remove the local session secret",
+		Args:  cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			if err := a.core.Logout(command.Context()); err != nil {
+				return err
+			}
+			return a.output(map[string]any{"success": true, "data": map[string]any{"authenticated": false, "localSessionRemoved": true}})
+		},
+	}
+}
+
+func (a *App) legacyCommand() *cobra.Command {
+	legacy := &cobra.Command{
+		Use:   "legacy",
+		Short: "Deprecated remote OAuth/MCP compatibility during migration",
+		Long: "The remote OAuth/MCP client is deprecated and is not used by normal commands. " +
+			"Create a local profile and run `wechat-article login`; legacy tokens are never copied into the local WeChat session store.",
+		Example: `  wechat-article legacy status
+  wechat-article legacy api list
+  wechat-article profile create local
+  wechat-article login --qr-output ./wechat-login.png`,
+		PersistentPreRun: func(_ *cobra.Command, _ []string) {
+			a.debugf("using deprecated legacy remote compatibility adapter")
+		},
+	}
+	legacy.PersistentFlags().StringVar(&a.server, "server", "", "deprecated remote MCP server base URL")
+	legacy.AddCommand(
+		a.loginCommand(), a.logoutCommand(), a.statusCommand(), a.apiCommand("api"), a.apiCommand("mcp"),
+		a.legacyArticleCommand(), a.legacyAccountCommand(), a.legacyAlbumCommand(),
+	)
+	return legacy
 }
 
 func (a *App) loginCommand() *cobra.Command {
@@ -134,7 +503,7 @@ func (a *App) logoutCommand() *cobra.Command {
 		Short: "Remove saved OAuth credentials",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cleared, err := a.store.ClearSession()
+			cleared, err := a.legacy.Logout()
 			if err != nil {
 				return err
 			}
@@ -147,10 +516,10 @@ func (a *App) statusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "status",
 		Aliases: []string{"whoami"},
-		Short:   "Show local authentication state",
+		Short:   "Show deprecated remote authentication state",
 		Args:    cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return a.printStatus()
+			return a.printLegacyStatus()
 		},
 	}
 }
@@ -166,12 +535,7 @@ func (a *App) apiCommand(name string) *cobra.Command {
 		Short: "List remote MCP tools",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			client, err := a.authenticatedClient(command.Context())
-			if err != nil {
-				return err
-			}
-			defer client.Close()
-			tools, err := client.ListTools(command.Context())
+			tools, err := a.legacy.ListTools(command.Context(), a.server)
 			if err != nil {
 				return err
 			}
@@ -184,12 +548,7 @@ func (a *App) apiCommand(name string) *cobra.Command {
 		Short: "Describe one MCP tool",
 		Args:  exactArgs(1, "api describe requires a tool name"),
 		RunE: func(command *cobra.Command, args []string) error {
-			client, err := a.authenticatedClient(command.Context())
-			if err != nil {
-				return err
-			}
-			defer client.Close()
-			tool, err := findTool(command.Context(), client, args[0])
+			tool, err := a.legacy.FindTool(command.Context(), a.server, args[0])
 			if err != nil {
 				return err
 			}
@@ -226,7 +585,7 @@ func (a *App) callCommand() *cobra.Command {
 	return command
 }
 
-func (a *App) articleCommand() *cobra.Command {
+func (a *App) legacyArticleCommand() *cobra.Command {
 	article := &cobra.Command{Use: "article", Short: "Download and list WeChat articles"}
 	var format string
 	var dryRun bool
@@ -266,7 +625,7 @@ func (a *App) articleCommand() *cobra.Command {
 	return article
 }
 
-func (a *App) accountCommand() *cobra.Command {
+func (a *App) legacyAccountCommand() *cobra.Command {
 	account := &cobra.Command{Use: "account", Short: "Search and inspect WeChat accounts"}
 	var begin, size int
 	search := &cobra.Command{
@@ -290,7 +649,7 @@ func (a *App) accountCommand() *cobra.Command {
 	return account
 }
 
-func (a *App) albumCommand() *cobra.Command {
+func (a *App) legacyAlbumCommand() *cobra.Command {
 	album := &cobra.Command{Use: "album", Short: "List articles in a WeChat album"}
 	var count int
 	var beginMsgID, beginItemIndex string
@@ -334,25 +693,12 @@ func (a *App) executeTool(ctx context.Context, toolName string, arguments map[st
 		preview["requiredConfirmation"] = safety.RequiredConfirmation(&mcp.Tool{Name: toolName, InputSchema: map[string]any{"type": "object"}})
 		return a.output(preview)
 	}
-	spinner := a.spinner("Connecting to remote MCP server…")
-	client, err := a.authenticatedClient(ctx)
+	spinner := a.spinner("Connecting to legacy remote MCP server…")
+	result, err := a.legacy.InvokeTool(ctx, a.server, toolName, arguments, func(tool *mcp.Tool) error {
+		return safety.AssertConfirmation(tool, confirmation)
+	})
 	if err != nil {
-		spinner.Stop("MCP connection failed", false)
-		return err
-	}
-	defer client.Close()
-	tool, err := findTool(ctx, client, toolName)
-	if err != nil {
-		spinner.Stop("Tool discovery failed", false)
-		return err
-	}
-	if err := safety.AssertConfirmation(tool, confirmation); err != nil {
-		spinner.Stop("Confirmation required", false)
-		return err
-	}
-	result, err := client.CallTool(ctx, tool.Name, arguments)
-	if err != nil {
-		spinner.Stop("Remote tool call failed", false)
+		spinner.Stop("Legacy remote tool call failed", false)
 		return err
 	}
 	spinner.Stop("Remote tool call completed", !result.IsError)
@@ -360,35 +706,15 @@ func (a *App) executeTool(ctx context.Context, toolName string, arguments map[st
 		return err
 	}
 	if result.IsError {
-		return errors.New("remote MCP tool returned an error")
+		return errors.New("legacy remote MCP tool returned an error")
 	}
 	return nil
 }
 
-func (a *App) authenticatedClient(ctx context.Context) (*mcpclient.Client, error) {
-	stored, err := a.store.Read()
-	if err != nil {
-		return nil, err
-	}
-	server, err := a.resolveServer(stored.Server)
-	if err != nil {
-		return nil, err
-	}
-	if stored.Tokens == nil || stored.Tokens.AccessToken == "" || !sameServer(stored.Server, server) || !sessionUsable(stored) {
-		return nil, fmt.Errorf("not logged in to %s; run: wechat-article login --server %s", server, server)
-	}
-	handler := &savedOAuthHandler{store: a.store, server: server, httpClient: http.DefaultClient}
-	return mcpclient.Connect(ctx, mcpclient.Options{Endpoint: oauth.MCPURL(server), Version: Version, OAuthHandler: handler})
-}
-
 func (a *App) login(ctx context.Context, headless, noOpen bool) error {
-	stored, err := a.store.Read()
+	server, err := a.legacy.ResolveServer(a.server)
 	if err != nil {
-		return err
-	}
-	server, err := a.resolveServer(stored.Server)
-	if err != nil {
-		return err
+		return usage(err.Error())
 	}
 	callback, err := newCallbackServer(5 * time.Minute)
 	if err != nil {
@@ -396,13 +722,13 @@ func (a *App) login(ctx context.Context, headless, noOpen bool) error {
 	}
 	defer callback.Close()
 
-	httpClient := oauth.NewRegistrationHTTPClient(http.DefaultClient, a.store, server, callback.RedirectURL)
-	handler, err := oauth.NewPersistentHandler(oauth.BrowserOptions{
-		Store: a.store, Server: server, RedirectURL: callback.RedirectURL, HTTPClient: httpClient, ClientVersion: Version,
-		FetchCode: func(flowContext context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
-			authorizationURL, parseErr := url.Parse(args.URL)
+	spinner := a.spinner("Waiting for legacy OAuth authorization…")
+	toolCount, err := a.legacy.Login(ctx, legacyremote.LoginOptions{
+		Server: a.server, RedirectURL: callback.RedirectURL,
+		FetchCode: func(flowContext context.Context, rawURL string) (string, string, error) {
+			authorizationURL, parseErr := url.Parse(rawURL)
 			if parseErr != nil {
-				return nil, parseErr
+				return "", "", parseErr
 			}
 			if headless {
 				query := authorizationURL.Query()
@@ -411,108 +737,80 @@ func (a *App) login(ctx context.Context, headless, noOpen bool) error {
 			}
 			fmt.Fprintf(a.stderr, "Open this authorization URL:\n%s\n", authorizationURL.String())
 			if !noOpen && !headless {
-				_ = openBrowser(authorizationURL.String())
+				if err := a.openBrowser(flowContext, authorizationURL.String()); err != nil {
+					return "", "", err
+				}
 			}
 			result, waitErr := callback.Wait(flowContext, authorizationURL.Query().Get("state"))
 			if waitErr != nil {
-				return nil, waitErr
+				return "", "", waitErr
 			}
-			return &auth.AuthorizationResult{Code: result.Code, State: result.State}, nil
+			return result.Code, result.State, nil
 		},
 	})
 	if err != nil {
+		spinner.Stop("Legacy OAuth authorization failed", false)
 		return err
 	}
-	spinner := a.spinner("Waiting for OAuth authorization…")
-	client, err := mcpclient.Connect(ctx, mcpclient.Options{Endpoint: oauth.MCPURL(server), Version: Version, HTTPClient: httpClient, OAuthHandler: handler})
-	if err != nil {
-		spinner.Stop("OAuth authorization failed", false)
-		return err
-	}
-	defer client.Close()
-	tools, err := client.ListTools(ctx)
-	if err != nil {
-		spinner.Stop("OAuth verification failed", false)
-		return err
-	}
-	spinner.Stop("OAuth authorization completed", true)
-	return a.output(map[string]any{"success": true, "data": map[string]any{"server": server, "authenticated": true, "toolCount": len(tools)}})
+	spinner.Stop("Legacy OAuth authorization completed", true)
+	return a.output(map[string]any{"success": true, "data": map[string]any{"server": server, "authenticated": true, "toolCount": toolCount, "legacy": true}})
 }
 
-func (a *App) printStatus() error {
-	stored, err := a.store.Read()
-	if err != nil {
-		return err
+func (a *App) openBrowser(ctx context.Context, target string) error {
+	if a.runtimes != nil && a.runtimes.browser != nil {
+		browser, err := a.runtimes.browser.FindChromium(ctx)
+		if err != nil {
+			return fmt.Errorf("discover local browser: %w", err)
+		}
+		if strings.TrimSpace(browser.Path) == "" {
+			return errors.New("browser discovery returned an empty executable path")
+		}
+		return launchBrowserExecutable(browser.Path, target)
 	}
-	server, err := a.resolveServer(stored.Server)
+	return openBrowser(target)
+}
+
+func (a *App) printLegacyStatus() error {
+	status, err := a.legacy.Status(a.server)
 	if err != nil {
-		return err
+		return usage(err.Error())
 	}
-	authenticated := stored.Tokens != nil && stored.Tokens.AccessToken != "" && sameServer(stored.Server, server) && sessionUsable(stored)
 	data := map[string]any{
-		"server":        server,
-		"authenticated": authenticated,
-		"refreshable":   authenticated && stored.Tokens.RefreshToken != "",
-		"configPath":    a.store.Path(),
+		"server": status.Server, "authenticated": status.Authenticated,
+		"refreshable": status.Refreshable, "configPath": status.ConfigPath, "legacy": true,
 	}
 	if a.jsonOut || !tui.IsInteractive(a.stdin, a.stdout) {
 		return a.output(map[string]any{"success": true, "data": data})
 	}
-	detail := fmt.Sprintf("server: %s\nconfig: %s", server, a.store.Path())
-	tui.RenderStatus(a.stdout, tui.Status{Label: statusLabel(authenticated), Detail: detail, Success: authenticated})
+	detail := fmt.Sprintf("legacy server: %s\nconfig: %s", status.Server, status.ConfigPath)
+	tui.RenderStatus(a.stdout, tui.Status{Label: statusLabel(status.Authenticated), Detail: detail, Success: status.Authenticated})
 	return nil
 }
 
 func (a *App) runDashboard(ctx context.Context) error {
-	choice, err := tui.Choose(ctx, a.stdin, a.stdout, "WeChat Article CLI", []tui.MenuItem{
-		{Title: "查看登录状态", Description: "本地 OAuth 凭据与远端地址", Value: "status"},
-		{Title: "登录 / 重新授权", Description: "在浏览器完成 OAuth 2.1 授权", Value: "login"},
-		{Title: "查看远端工具", Description: "动态读取 MCP server 的工具列表", Value: "tools"},
-		{Title: "退出登录", Description: "清除本地 token，保留 server 地址", Value: "logout"},
-	})
+	if a.active == nil {
+		return errors.New("active profile runtime is unavailable")
+	}
+	configuration, _, err := profiles.NewConfigStore(a.active.Profile.Paths.Config).Read()
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil
-		}
 		return err
 	}
-	switch choice {
-	case "status":
-		return a.printStatus()
-	case "login":
-		return a.login(ctx, false, false)
-	case "tools":
-		client, err := a.authenticatedClient(ctx)
-		if err != nil {
-			return err
-		}
-		defer client.Close()
-		tools, err := client.ListTools(ctx)
-		if err != nil {
-			return err
-		}
-		return a.output(map[string]any{"success": true, "data": map[string]any{"count": len(tools), "tools": tools}})
-	case "logout":
-		_, err := a.store.ClearSession()
-		return err
-	default:
-		return nil
+	options := tui.WorkspaceOptions{
+		Application: a.core,
+		Extensions:  newWorkspaceExtensions(a),
+		Input:       a.stdin,
+		Output:      a.stdout,
+		Force:       a.forceWorkspace,
+		NoColor:     configuration.Preferences.Display.NoColor,
+		ASCII:       configuration.Preferences.Display.ASCII,
+		Plain:       configuration.Preferences.Display.Plain,
+		PageSize:    configuration.Preferences.Sync.PageSize,
 	}
-}
-
-func (a *App) resolveServer(saved string) (string, error) {
-	value := a.server
-	if value == "" {
-		value = saved
+	runner := a.workspaceRunner
+	if runner == nil {
+		runner = tui.RunWorkspace
 	}
-	if value == "" {
-		value = DefaultServer
-	}
-	server, err := oauth.NormalizeServer(value)
-	if err != nil {
-		return "", usage(err.Error())
-	}
-	return server, nil
+	return runner(ctx, options)
 }
 
 func (a *App) spinner(label string) *tui.Spinner {
@@ -520,20 +818,6 @@ func (a *App) spinner(label string) *tui.Spinner {
 		return nil
 	}
 	return tui.StartSpinner(a.stderr, label)
-}
-
-func (a *App) output(value any) error {
-	if !a.jsonOut && tui.IsInteractive(a.stdin, a.stdout) {
-		if result, ok := value.(*mcp.CallToolResult); ok {
-			if renderToolResult(a.stdout, result) {
-				return nil
-			}
-		}
-	}
-	encoder := json.NewEncoder(a.stdout)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false)
-	return encoder.Encode(value)
 }
 
 func renderToolResult(output io.Writer, result *mcp.CallToolResult) bool {
@@ -546,7 +830,7 @@ func renderToolResult(output io.Writer, result *mcp.CallToolResult) bool {
 		if !ok {
 			return false
 		}
-		texts = append(texts, text.Text)
+		texts = append(texts, safety.RedactText(text.Text))
 	}
 	for _, text := range texts {
 		fmt.Fprintln(output, text)
@@ -561,19 +845,6 @@ func isCobraUsageError(err error) bool {
 		strings.Contains(message, "accepts ") ||
 		strings.Contains(message, "requires at least") ||
 		strings.Contains(message, "requires no arguments")
-}
-
-func findTool(ctx context.Context, client *mcpclient.Client, name string) (*mcp.Tool, error) {
-	tools, err := client.ListTools(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, tool := range tools {
-		if tool.Name == name {
-			return tool, nil
-		}
-	}
-	return nil, fmt.Errorf("MCP tool not found: %s", name)
 }
 
 func exactArgs(count int, message string) cobra.PositionalArgs {
@@ -592,99 +863,8 @@ func statusLabel(authenticated bool) string {
 	return "Not authenticated"
 }
 
-func sameServer(left, right string) bool {
-	if left == "" {
-		return false
-	}
-	normalizedLeft, leftErr := oauth.NormalizeServer(left)
-	normalizedRight, rightErr := oauth.NormalizeServer(right)
-	return leftErr == nil && rightErr == nil && normalizedLeft == normalizedRight
-}
-
-func sessionUsable(stored config.File) bool {
-	expiry := stored.TokenExpiry()
-	if expiry.IsZero() || time.Now().Before(expiry) {
-		return true
-	}
-	return stored.Tokens != nil && stored.Tokens.RefreshToken != "" && stored.TokenEndpoint != "" &&
-		stored.ClientInformation != nil && stored.ClientInformation.ClientID != ""
-}
-
-type savedOAuthHandler struct {
-	store      *config.Store
-	server     string
-	httpClient *http.Client
-}
-
-func (h *savedOAuthHandler) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
-	stored, err := h.store.Read()
-	if err != nil {
-		return nil, err
-	}
-	if stored.Tokens == nil || stored.Tokens.AccessToken == "" || !sameServer(stored.Server, h.server) {
-		return nil, nil
-	}
-	token := &oauth2.Token{
-		AccessToken: stored.Tokens.AccessToken, TokenType: stored.Tokens.TokenType, RefreshToken: stored.Tokens.RefreshToken,
-	}
-	if expiry := stored.TokenExpiry(); !expiry.IsZero() {
-		token.Expiry = expiry
-	}
-	if stored.TokenEndpoint == "" || stored.ClientInformation == nil || stored.ClientInformation.ClientID == "" {
-		return oauth2.StaticTokenSource(token), nil
-	}
-	config := oauth2.Config{
-		ClientID: stored.ClientInformation.ClientID, ClientSecret: stored.ClientInformation.ClientSecret,
-		Endpoint: oauth2.Endpoint{TokenURL: stored.TokenEndpoint, AuthStyle: tokenAuthStyle(stored.ClientInformation.TokenEndpointAuthMethod)},
-	}
-	refreshContext := context.WithValue(ctx, oauth2.HTTPClient, h.httpClient)
-	return &persistentTokenSource{source: config.TokenSource(refreshContext, token), store: h.store, server: h.server}, nil
-}
-
-func (h *savedOAuthHandler) Authorize(_ context.Context, _ *http.Request, response *http.Response) error {
-	response.Body.Close()
-	return fmt.Errorf("saved OAuth credentials were rejected; run: wechat-article login --server %s", h.server)
-}
-
-type persistentTokenSource struct {
-	source oauth2.TokenSource
-	store  *config.Store
-	server string
-}
-
-func (s *persistentTokenSource) Token() (*oauth2.Token, error) {
-	token, err := s.source.Token()
-	if err != nil {
-		return nil, err
-	}
-	err = s.store.Update(func(value *config.File) error {
-		value.Server = s.server
-		value.Tokens = &config.Tokens{AccessToken: token.AccessToken, TokenType: token.TokenType, RefreshToken: token.RefreshToken}
-		if !token.Expiry.IsZero() {
-			value.Tokens.ExpiresIn = max(0, int64(time.Until(token.Expiry).Seconds()))
-		}
-		if scope, ok := token.Extra("scope").(string); ok {
-			value.Tokens.Scope = scope
-		}
-		value.TokenSavedAt = time.Now().UnixMilli()
-		return nil
-	})
-	return token, err
-}
-
-func tokenAuthStyle(method string) oauth2.AuthStyle {
-	switch method {
-	case "client_secret_basic":
-		return oauth2.AuthStyleInHeader
-	case "client_secret_post", "none":
-		return oauth2.AuthStyleInParams
-	default:
-		return oauth2.AuthStyleAutoDetect
-	}
-}
-
 func (a *App) debugf(format string, args ...any) {
 	if a.debug {
-		fmt.Fprintf(a.stderr, "debug: "+format+"\n", args...)
+		fmt.Fprintln(a.stderr, "debug: "+safety.RedactText(fmt.Sprintf(format, args...)))
 	}
 }

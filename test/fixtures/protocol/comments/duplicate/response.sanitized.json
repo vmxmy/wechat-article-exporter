@@ -1,0 +1,14 @@
+{
+  "elected_comment": [
+    {
+      "content_id": "fixture-comment-001",
+      "nick_name": "读者甲",
+      "content": "第一条"
+    },
+    {
+      "content_id": "fixture-comment-001",
+      "nick_name": "读者甲",
+      "content": "第一条"
+    }
+  ]
+}

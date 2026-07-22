@@ -1,0 +1,122 @@
+{
+  "schemaVersion": "wechat-article.normalized/v1",
+  "identity": {
+    "businessId": "RklYVFVSRQ==",
+    "messageId": "2247000001",
+    "index": 2,
+    "signature": "fixture-signature",
+    "appMessageId": "article-001"
+  },
+  "title": "Safe \u0026 Sound",
+  "description": "A sanitized fixture",
+  "author": "Fixture Author",
+  "account": {
+    "username": "gh_fixture",
+    "businessId": "RklYVFVSRQ==",
+    "nickname": "Fixture Account",
+    "alias": "fixture_account",
+    "avatarUrl": "https://images.example.test/avatar.png",
+    "hdAvatarUrl": "https://images.example.test/avatar-hd.png",
+    "signature": "Account signature"
+  },
+  "canonicalUrl": "https://mp.weixin.qq.com/s/example?x=1\u0026y=2",
+  "sourceUrl": "https://source.example.test/post",
+  "content": "\u003csection\u003eBody \u0026 details\u003c/section\u003e",
+  "timestamps": {
+    "publishedAt": "2023-11-14T22:13:20Z",
+    "displayedAt": "2023-11-15T06:13:00+08:00",
+    "serverAt": "2023-11-14T22:13:21Z",
+    "filteredAt": "2023-11-14T22:13:19Z"
+  },
+  "message": {
+    "type": "image_share",
+    "upstreamCode": 8
+  },
+  "payment": {
+    "required": true,
+    "description": "Members only",
+    "fee": 299,
+    "weCoinAmount": 30,
+    "previewPercent": 25,
+    "giftCount": 2
+  },
+  "media": {
+    "coverUrl": "https://images.example.test/cover.jpg",
+    "images": [
+      {
+        "url": "https://images.example.test/one.png?x=1\u0026y=2",
+        "width": 1200,
+        "height": 800,
+        "format": "jpeg",
+        "watermark": true
+      }
+    ],
+    "audio": [
+      {
+        "id": "voice-1",
+        "listenId": "listen-1",
+        "title": "Fixture audio",
+        "url": "https://media.example.test/audio.mp3",
+        "durationMs": 42000,
+        "fileSize": 1024
+      }
+    ],
+    "videos": [
+      {
+        "id": "video-1",
+        "title": "Fixture video",
+        "url": "https://media.example.test/video.mp4",
+        "coverUrl": "https://images.example.test/video.jpg",
+        "durationMs": 12000,
+        "fileSize": 4096,
+        "width": 1920,
+        "height": 1080,
+        "formatId": 10001,
+        "qualityLevel": 4,
+        "quality": "1080p",
+        "mpVideo": true
+      }
+    ]
+  },
+  "albums": [
+    {
+      "id": "album-1",
+      "title": "Fixture Album",
+      "url": "https://mp.weixin.qq.com/mp/appmsgalbum?album_id=album-1",
+      "contentCount": 9,
+      "paid": true,
+      "updating": true
+    },
+    {
+      "id": "album-2",
+      "title": "Second Album",
+      "url": "https://mp.weixin.qq.com/mp/appmsgalbum?album_id=album-2",
+      "contentCount": 4
+    }
+  ],
+  "comments": {
+    "id": "comment-1",
+    "segmentId": "segment-1",
+    "extraId": "extra-1",
+    "enabled": true,
+    "selectedCount": 13
+  },
+  "engagement": {
+    "reads": 101,
+    "likes": 11,
+    "oldLikes": 7,
+    "shares": 5,
+    "collections": 3,
+    "comments": 2
+  },
+  "copyright": {
+    "status": 11,
+    "cartoonCopyright": true
+  },
+  "language": "zh_CN",
+  "ipLocation": {
+    "country": "中国",
+    "province": "上海",
+    "city": "上海"
+  }
+}

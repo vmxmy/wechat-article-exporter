@@ -1,0 +1,11 @@
+{
+  "completed": [
+    "fixture-comment-001"
+  ],
+  "failed": [
+    {
+      "content_id": "fixture-comment-002",
+      "error": "temporary upstream failure"
+    }
+  ]
+}

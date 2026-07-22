@@ -1,0 +1,827 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "test/baseline/capture.ts",
+  "sampleCount": 34,
+  "groups": {
+    "author": 1,
+    "作者已删除": 6,
+    "内容违规": 2,
+    "图片分享": 5,
+    "文本分享": 9,
+    "文章分享": 4,
+    "普通图文": 6,
+    "该内容暂时无法查看": 1
+  },
+  "records": [
+    {
+      "path": "samples/author/01.html",
+      "group": "author",
+      "hasContent": true,
+      "sourceBytes": 3279434,
+      "sourceSha256": "e2a550b408abcdb57389d2ef1b12d3b0048400aba4b960cd2cd95f53c0ba0c9a",
+      "validation": [
+        "Success",
+        "4324402950480543747"
+      ],
+      "cgiScript": {
+        "bytes": 30356,
+        "sha256": "8d9358b27a8e4788c1df48607312ec42a735adedabe413289ba4ff34df7996b0"
+      },
+      "normalized": {
+        "bytes": 12723,
+        "sha256": "dd4f6e14b644fd2b86b3a38f840699acd5de3e31e2a03c35d7bbbc210e784fb3"
+      },
+      "normalizedText": {
+        "bytes": 4624,
+        "sha256": "b7038b0af6d25dbeda2e88d8354beb002860ae46cc61a1c7c32df73e92636a01"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 11521,
+        "sha256": "be79fb9d42a117b36b9414b41c21a767b958492692e293604928338dd58a270c"
+      }
+    },
+    {
+      "path": "samples/作者已删除/01.html",
+      "group": "作者已删除",
+      "hasContent": false,
+      "sourceBytes": 37698,
+      "sourceSha256": "1b4697fa2ea3dd023ccad4190d9e597a337b175412107a0c3c703583f54e118e",
+      "validation": [
+        "Deleted",
+        null
+      ],
+      "cgiScript": null,
+      "normalized": null,
+      "normalizedText": null,
+      "normalizedMarkdownHtml": null
+    },
+    {
+      "path": "samples/作者已删除/02.html",
+      "group": "作者已删除",
+      "hasContent": false,
+      "sourceBytes": 37698,
+      "sourceSha256": "1b4697fa2ea3dd023ccad4190d9e597a337b175412107a0c3c703583f54e118e",
+      "validation": [
+        "Deleted",
+        null
+      ],
+      "cgiScript": null,
+      "normalized": null,
+      "normalizedText": null,
+      "normalizedMarkdownHtml": null
+    },
+    {
+      "path": "samples/作者已删除/03.html",
+      "group": "作者已删除",
+      "hasContent": false,
+      "sourceBytes": 37698,
+      "sourceSha256": "699bfddf090778e2e48ecc68d084ea513bff7aa39e316b5f3a5c0fe47ad29b42",
+      "validation": [
+        "Deleted",
+        null
+      ],
+      "cgiScript": null,
+      "normalized": null,
+      "normalizedText": null,
+      "normalizedMarkdownHtml": null
+    },
+    {
+      "path": "samples/作者已删除/04.html",
+      "group": "作者已删除",
+      "hasContent": false,
+      "sourceBytes": 37698,
+      "sourceSha256": "699bfddf090778e2e48ecc68d084ea513bff7aa39e316b5f3a5c0fe47ad29b42",
+      "validation": [
+        "Deleted",
+        null
+      ],
+      "cgiScript": null,
+      "normalized": null,
+      "normalizedText": null,
+      "normalizedMarkdownHtml": null
+    },
+    {
+      "path": "samples/作者已删除/05.html",
+      "group": "作者已删除",
+      "hasContent": false,
+      "sourceBytes": 37698,
+      "sourceSha256": "699bfddf090778e2e48ecc68d084ea513bff7aa39e316b5f3a5c0fe47ad29b42",
+      "validation": [
+        "Deleted",
+        null
+      ],
+      "cgiScript": null,
+      "normalized": null,
+      "normalizedText": null,
+      "normalizedMarkdownHtml": null
+    },
+    {
+      "path": "samples/作者已删除/06.html",
+      "group": "作者已删除",
+      "hasContent": false,
+      "sourceBytes": 38834,
+      "sourceSha256": "0a4bea9a8b291955bfba68dfca5ff0dd13582cbdc11c5df53f42ca3beee42e29",
+      "validation": [
+        "Deleted",
+        null
+      ],
+      "cgiScript": null,
+      "normalized": null,
+      "normalizedText": null,
+      "normalizedMarkdownHtml": null
+    },
+    {
+      "path": "samples/内容违规/01.html",
+      "group": "内容违规",
+      "hasContent": false,
+      "sourceBytes": 38463,
+      "sourceSha256": "ab6ed8f16f2db60633bc3d400a55eed5651e02249a65fa5696cee403cd10434d",
+      "validation": [
+        "Exception",
+        "此内容因违规无法查看"
+      ],
+      "cgiScript": null,
+      "normalized": null,
+      "normalizedText": null,
+      "normalizedMarkdownHtml": null
+    },
+    {
+      "path": "samples/内容违规/02.html",
+      "group": "内容违规",
+      "hasContent": false,
+      "sourceBytes": 38619,
+      "sourceSha256": "8fe3613956de682996ce666624abf38903ff8f0eca414a4eab585290a0f86059",
+      "validation": [
+        "Exception",
+        "此内容因违规无法查看"
+      ],
+      "cgiScript": null,
+      "normalized": null,
+      "normalizedText": null,
+      "normalizedMarkdownHtml": null
+    },
+    {
+      "path": "samples/图片分享/01.html",
+      "group": "图片分享",
+      "hasContent": true,
+      "sourceBytes": 2377738,
+      "sourceSha256": "c6ff737da11d0d4660d485e080c2ed5c1383dbe77c4e6aa74a644514b963f4a3",
+      "validation": [
+        "Success",
+        "4240325838052622343"
+      ],
+      "cgiScript": {
+        "bytes": 1733310,
+        "sha256": "97561e37ab69854495d803f574c116db83d6a1f983df4c187aa501cb3fd5beb6"
+      },
+      "normalized": {
+        "bytes": 2812,
+        "sha256": "f8320fe3690db305c1b67d7455aa4608c864762f565c4e7a931d488f37a0ebf7"
+      },
+      "normalizedText": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 1538,
+        "sha256": "1e4f5e5c0e4338e44f0bd6bf71ec6a9db85c6206779e34336325d669b86d855d"
+      }
+    },
+    {
+      "path": "samples/图片分享/02.html",
+      "group": "图片分享",
+      "hasContent": true,
+      "sourceBytes": 2330946,
+      "sourceSha256": "dba5d44ed1e7a66781f75b6c48692a349fbe4acc3df6bf097be2d57bbb1e7fca",
+      "validation": [
+        "Success",
+        "4173303576027938819"
+      ],
+      "cgiScript": {
+        "bytes": 1683021,
+        "sha256": "f055d661586a00474cda9a2571df2c7b98a220ab0cf353ae1e9827717bd6a538"
+      },
+      "normalized": {
+        "bytes": 2812,
+        "sha256": "f8320fe3690db305c1b67d7455aa4608c864762f565c4e7a931d488f37a0ebf7"
+      },
+      "normalizedText": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 1538,
+        "sha256": "1e4f5e5c0e4338e44f0bd6bf71ec6a9db85c6206779e34336325d669b86d855d"
+      }
+    },
+    {
+      "path": "samples/图片分享/03.html",
+      "group": "图片分享",
+      "hasContent": true,
+      "sourceBytes": 2313185,
+      "sourceSha256": "25c09b562c737a23de4055bb2f198fa5dbfe972f99021271cb668448f1364d5e",
+      "validation": [
+        "Success",
+        "4231181344900235268"
+      ],
+      "cgiScript": {
+        "bytes": 1672343,
+        "sha256": "d4d4454081a51e4e0ea5f1c4e1b291590836dba6af8a4719064cd8892da60379"
+      },
+      "normalized": {
+        "bytes": 2812,
+        "sha256": "f8320fe3690db305c1b67d7455aa4608c864762f565c4e7a931d488f37a0ebf7"
+      },
+      "normalizedText": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 1538,
+        "sha256": "1e4f5e5c0e4338e44f0bd6bf71ec6a9db85c6206779e34336325d669b86d855d"
+      }
+    },
+    {
+      "path": "samples/图片分享/04.html",
+      "group": "图片分享",
+      "hasContent": true,
+      "sourceBytes": 2323760,
+      "sourceSha256": "d6faae546382fff47abcfa0e32a5b6e6b8318b1f91b5634461e69e1c2737f918",
+      "validation": [
+        "Success",
+        "3917126761510830085"
+      ],
+      "cgiScript": {
+        "bytes": 1681508,
+        "sha256": "4925878f321e62d5068ec3c9301e31eec68d37a64c9d50f97e4df1dd5225941d"
+      },
+      "normalized": {
+        "bytes": 2812,
+        "sha256": "f8320fe3690db305c1b67d7455aa4608c864762f565c4e7a931d488f37a0ebf7"
+      },
+      "normalizedText": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 1538,
+        "sha256": "1e4f5e5c0e4338e44f0bd6bf71ec6a9db85c6206779e34336325d669b86d855d"
+      }
+    },
+    {
+      "path": "samples/图片分享/05.html",
+      "group": "图片分享",
+      "hasContent": true,
+      "sourceBytes": 2296746,
+      "sourceSha256": "e50d4f7064e84b1c933827cbac1dfdf99278a464e3aac3463f0bb65f603d5a95",
+      "validation": [
+        "Success",
+        "4302632633084674052"
+      ],
+      "cgiScript": {
+        "bytes": 32978,
+        "sha256": "0f6e0fa9a66f50a4c983aaa513f02bddcaf0de107b3803e228369664e8939930"
+      },
+      "normalized": {
+        "bytes": 2893,
+        "sha256": "7f0a675d59e10b21a22633d03d186b2b37963714abde20beedbd48fd01ad7903"
+      },
+      "normalizedText": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 1619,
+        "sha256": "c154eb9e8c9dfe180992244821b571926e7a3770a76fd541784bef26fa3c99bf"
+      }
+    },
+    {
+      "path": "samples/文本分享/01.html",
+      "group": "文本分享",
+      "hasContent": true,
+      "sourceBytes": 2573433,
+      "sourceSha256": "ecfbe55793df7edde370d21bbc2899881e180e98c7feeb5f39af4834d5f80ef2",
+      "validation": [
+        "Success",
+        "4198083962549256199"
+      ],
+      "cgiScript": {
+        "bytes": 1988019,
+        "sha256": "ce025281f705af81ea363c0b900509d7161c8fcecc7e210f934c07549209785a"
+      },
+      "normalized": {
+        "bytes": 4711,
+        "sha256": "a845b6fc1c1b99ec8f6ae4f8d3a0c2a282bdaa49aa7395de1e2485b37db9e948"
+      },
+      "normalizedText": {
+        "bytes": 64,
+        "sha256": "d32404b2dd952ec83189e57b34f0c6e9b564fd2c9126892eee16d345ab852870"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 3436,
+        "sha256": "d2cb9bba2aea51e77e7aee4cf17b70eaa2940ad8b2198c9f1dfe57d2b4d82f6a"
+      }
+    },
+    {
+      "path": "samples/文本分享/02.html",
+      "group": "文本分享",
+      "hasContent": true,
+      "sourceBytes": 2562176,
+      "sourceSha256": "82ccab37e2e550cc1451e28738f69cace7cf29c838180ed64d2420caccc50e51",
+      "validation": [
+        "Success",
+        "1357201980061712387"
+      ],
+      "cgiScript": {
+        "bytes": 1981211,
+        "sha256": "1337200a1e42f20f4727f1c4663066bbf04ba5e86061e25a635c2e3bf04a90ff"
+      },
+      "normalized": {
+        "bytes": 4629,
+        "sha256": "9a81cc2b26d1fa468044ff1517caf3094b5b37b7b46d84ccd5ad3c9fd28d28bf"
+      },
+      "normalizedText": {
+        "bytes": 27,
+        "sha256": "d85173cf0f10901c6a3de3ab8cb4ee4dccead249c682bcb372493b5fc4978f7a"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 3354,
+        "sha256": "d16e0866e0de7dc655426b0055758db2db57d037154d2887f82262dee318c456"
+      }
+    },
+    {
+      "path": "samples/文本分享/03.html",
+      "group": "文本分享",
+      "hasContent": true,
+      "sourceBytes": 2616582,
+      "sourceSha256": "5f30c4ade8ebe4aa89ac98d4f58048a1fa8b8a11ab27ab5ff9a948bdcd047ef5",
+      "validation": [
+        "Success",
+        "4210725033188229121"
+      ],
+      "cgiScript": {
+        "bytes": 2031532,
+        "sha256": "99253a12fc5adb3e284cfeecbbcacff8804848bcdf64fa6d36cc619e09ad5e61"
+      },
+      "normalized": {
+        "bytes": 4629,
+        "sha256": "7a6a03c0f7bde163160bf5fd09d6b5055717cd89344eb084a68d664179ee9683"
+      },
+      "normalizedText": {
+        "bytes": 27,
+        "sha256": "c3af2fa75d4ac19e4bb2fbb630f372082e478404a9adc6f0d3eff9af4a5a537c"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 3354,
+        "sha256": "c5c01be42449a0b3973befd3f47fd481975c569eae7407cad2f506ae9062c0da"
+      }
+    },
+    {
+      "path": "samples/文本分享/04.html",
+      "group": "文本分享",
+      "hasContent": true,
+      "sourceBytes": 2603946,
+      "sourceSha256": "704c38f718b1b888a3a92c427bfa1bd6588f833d50cba5d2588a3338914199e0",
+      "validation": [
+        "Success",
+        "2069818738387812358"
+      ],
+      "cgiScript": {
+        "bytes": 2022312,
+        "sha256": "058197bc2c1f2147370b7190978828cb380c44fa57d2f352b5e837738bd3cd48"
+      },
+      "normalized": {
+        "bytes": 4632,
+        "sha256": "478d59264fb3b9ffff69e8bbaf4bb865533c4e4a6463d29cde1e55fe92286a4b"
+      },
+      "normalizedText": {
+        "bytes": 30,
+        "sha256": "77bea721545f64c90f44e0777f9253374b7ce307637582273971c0447252c433"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 3357,
+        "sha256": "03ff7add9684f4d852971176a4a16623d5c3dc15662755a7fe195d69eb208b4e"
+      }
+    },
+    {
+      "path": "samples/文本分享/c01.html",
+      "group": "文本分享",
+      "hasContent": true,
+      "sourceBytes": 2412252,
+      "sourceSha256": "242c0c51534ba7070ecfab41463a5f6d7b32951b20d296ba2d0ad8d981dfce06",
+      "validation": [
+        "Success",
+        "3835559380407058433"
+      ],
+      "cgiScript": {
+        "bytes": 23787,
+        "sha256": "82ae687aa4f8af7495bcc7de7e217bbd6f6c5b7016836e14c4fe694d71b30379"
+      },
+      "normalized": {
+        "bytes": 3532,
+        "sha256": "8bf79a776c7d8e0a693fcac43f1fe4fc24dfd43da4ef591d87a4f1dc851efaac"
+      },
+      "normalizedText": {
+        "bytes": 24,
+        "sha256": "e5df266d62600b0accc173491121294238f5d37aab7c8ec8290eb4f6061d81c1"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 2236,
+        "sha256": "a635ec346e37fc342ac7bfa8b3749f39360e6a030601700b58f843135ee214b3"
+      }
+    },
+    {
+      "path": "samples/文本分享/c02.html",
+      "group": "文本分享",
+      "hasContent": true,
+      "sourceBytes": 2409276,
+      "sourceSha256": "13dbc7877cb417a5f1f074efd20036ba447034cbd504cd431352cecc30392e58",
+      "validation": [
+        "Success",
+        "3664626620074934274"
+      ],
+      "cgiScript": {
+        "bytes": 22038,
+        "sha256": "82804c989aa08c3457c0b13597f09be58ae7dd9b1dfa23c43b47900f7f2f6cab"
+      },
+      "normalized": {
+        "bytes": 3532,
+        "sha256": "8bf79a776c7d8e0a693fcac43f1fe4fc24dfd43da4ef591d87a4f1dc851efaac"
+      },
+      "normalizedText": {
+        "bytes": 24,
+        "sha256": "e5df266d62600b0accc173491121294238f5d37aab7c8ec8290eb4f6061d81c1"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 2236,
+        "sha256": "a635ec346e37fc342ac7bfa8b3749f39360e6a030601700b58f843135ee214b3"
+      }
+    },
+    {
+      "path": "samples/文本分享/c03.html",
+      "group": "文本分享",
+      "hasContent": true,
+      "sourceBytes": 2411988,
+      "sourceSha256": "194006c76e1df9993bad148e795e40556a29e49fe9af23a97a3e2a606568188b",
+      "validation": [
+        "Success",
+        "2977718297842745350"
+      ],
+      "cgiScript": {
+        "bytes": 22420,
+        "sha256": "db02e787186f049d247b73c29982d3932039ed89220ac6f7022d96cc6adbc704"
+      },
+      "normalized": {
+        "bytes": 3485,
+        "sha256": "0849e41cbfb30b26a7911e9bf88b5e13fa8f459dfe2d88008a3675962fdd64f4"
+      },
+      "normalizedText": {
+        "bytes": 24,
+        "sha256": "e5df266d62600b0accc173491121294238f5d37aab7c8ec8290eb4f6061d81c1"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 2189,
+        "sha256": "606012a8e45b8c1328327724e048d0c99ab4b8f7dd67eb46c0093445c39c3c4c"
+      }
+    },
+    {
+      "path": "samples/文本分享/c04.html",
+      "group": "文本分享",
+      "hasContent": true,
+      "sourceBytes": 2420214,
+      "sourceSha256": "60533fab0133e1c4fdd1998277c1bdb48388fc073c45de866193b0fa7cffb991",
+      "validation": [
+        "Success",
+        "4286825203000590352"
+      ],
+      "cgiScript": {
+        "bytes": 25816,
+        "sha256": "3926199d9c1f9c4f57d2193c25635f31f740e30d59d3f4049d5c32283a56796f"
+      },
+      "normalized": {
+        "bytes": 3488,
+        "sha256": "fd6042da5e275ab64bf6b1a9daf5d2cfe2daa832823a419b7b2bd7350dc87fd5"
+      },
+      "normalizedText": {
+        "bytes": 27,
+        "sha256": "d85173cf0f10901c6a3de3ab8cb4ee4dccead249c682bcb372493b5fc4978f7a"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 2192,
+        "sha256": "f98483b85a2fbdae70f39450f89f923c2458d4a0bd0a6c01ea9fc042467f5a4e"
+      }
+    },
+    {
+      "path": "samples/文本分享/c05.html",
+      "group": "文本分享",
+      "hasContent": true,
+      "sourceBytes": 2416088,
+      "sourceSha256": "ad4a0216c339104b65ef12763258dcbc720205ef90fa9f37a350bd66ab6100ea",
+      "validation": [
+        "Success",
+        "4198083962549256199"
+      ],
+      "cgiScript": {
+        "bytes": 26881,
+        "sha256": "cfd38d16087edb51c59cccaa22c57b49f6fed9298889008d728587beef427d87"
+      },
+      "normalized": {
+        "bytes": 3535,
+        "sha256": "9de17ae54a3cd0ad64b0a570643167275aa031056e9c89bc29e8c63655149eaa"
+      },
+      "normalizedText": {
+        "bytes": 27,
+        "sha256": "d85173cf0f10901c6a3de3ab8cb4ee4dccead249c682bcb372493b5fc4978f7a"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 2239,
+        "sha256": "314e31251d63131c4a7dd4f1b5007902010aaa9a3be7bd06816fd82a05c93e15"
+      }
+    },
+    {
+      "path": "samples/文章分享/01.html",
+      "group": "文章分享",
+      "hasContent": true,
+      "sourceBytes": 3183395,
+      "sourceSha256": "4145d8cb5c4227b539b45bfe2af1cab845d87384a0ac00c4e5e6c6aa7e20c8d0",
+      "validation": [
+        "Success",
+        "4248446346677813258"
+      ],
+      "cgiScript": {
+        "bytes": 2340828,
+        "sha256": "5e8fced18baf82773d9ff213a7f1adccc9e0a50e9f95e64be78e380639d1cba9"
+      },
+      "normalized": {
+        "bytes": 142311,
+        "sha256": "2bd0bc98353641430406730aace495c2fb4de9efa5a81c05ed710659fce1ef91"
+      },
+      "normalizedText": {
+        "bytes": 11947,
+        "sha256": "2b45b4f1668394b6e24a206088deb13d44a9ffa836308df788ffd9080c8eefb0"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 141061,
+        "sha256": "1e13406c3d9f3984bc433eb8efbf67410db2d2b8f8ba4e98ef6c7772e7f2f5b6"
+      }
+    },
+    {
+      "path": "samples/文章分享/02.html",
+      "group": "文章分享",
+      "hasContent": true,
+      "sourceBytes": 3048269,
+      "sourceSha256": "4dc26d23d95178c0acd6efc14fb93a02d59109f58a9c7d5b6e33dff05a6817c9",
+      "validation": [
+        "Success",
+        "4241250330820132893"
+      ],
+      "cgiScript": {
+        "bytes": 2259576,
+        "sha256": "f9da55180ec9b4ad581a135951ec027ce629eb5332b76aa787fcf6e1a23704ce"
+      },
+      "normalized": {
+        "bytes": 86133,
+        "sha256": "ab3dbe5d04c13f2977a476c4bb2fb6416a17f615279311d4afea4aca315fd3d1"
+      },
+      "normalizedText": {
+        "bytes": 6808,
+        "sha256": "6c650e4ad61c2906ab501fac29b8a623fbe5a30b9b49c1e5c778874bce3f349d"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 84883,
+        "sha256": "38b65686062e3a2d33a389ace1113d4b44f04af549358ba5b5437b7eed1217e5"
+      }
+    },
+    {
+      "path": "samples/文章分享/03.html",
+      "group": "文章分享",
+      "hasContent": true,
+      "sourceBytes": 3709331,
+      "sourceSha256": "00b80620f645534b989b34112b489912aa1d50ac0b14a8789da2517e2fca19d0",
+      "validation": [
+        "Success",
+        "1092052005197086721"
+      ],
+      "cgiScript": {
+        "bytes": 2998629,
+        "sha256": "d75d8f5035d6a4021ac8ab3d2b480485af602f8f535a9a3ef526e14a6f8c08ae"
+      },
+      "normalized": {
+        "bytes": 6519,
+        "sha256": "0a97ad58a83896122c2adfc354426eeea701a2e4ecaace133e52498801af5d3b"
+      },
+      "normalizedText": {
+        "bytes": 201,
+        "sha256": "aaafa8f2b79af161c302f1d7299054f423b05ed2ee8f927b2b96c7237f966e18"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 5269,
+        "sha256": "ca93e21ff24a6ff65286af89769e21d29e1fa5ad3dd85223dd0bd78f5e4a98c1"
+      }
+    },
+    {
+      "path": "samples/文章分享/04.html",
+      "group": "文章分享",
+      "hasContent": true,
+      "sourceBytes": 3734120,
+      "sourceSha256": "38a863daa1fb5b90b85540aed0c17543970dc9e08b0f196405371c291ba6b4a2",
+      "validation": [
+        "Success",
+        "3699176129744355328"
+      ],
+      "cgiScript": {
+        "bytes": 2657550,
+        "sha256": "a7485accf09a10190e529b4bd3eda9e67316a91cf3edfbffc86cb76fa843dc04"
+      },
+      "normalized": {
+        "bytes": 362463,
+        "sha256": "84acd2deeff87415dd108083594af611495f2368123e49b2a462fb745b1fab8a"
+      },
+      "normalizedText": {
+        "bytes": 43803,
+        "sha256": "e94692019a8f84b6fc6abde997c38cfffdd1514d11615d0a0536e751b4dc20b7"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 361213,
+        "sha256": "3a608da49fa2a7e1786536b27e3e226be8daac10bb68e5307894726852614507"
+      }
+    },
+    {
+      "path": "samples/普通图文/01.html",
+      "group": "普通图文",
+      "hasContent": true,
+      "sourceBytes": 3057769,
+      "sourceSha256": "dfccc263c8c8136ddd775785b8434a3e269672287ce5087133d0a18a2efe03c2",
+      "validation": [
+        "Success",
+        "4247234702597603332"
+      ],
+      "cgiScript": {
+        "bytes": 2284713,
+        "sha256": "f235f6fb7961e1198a17a097619c14adcc5c795bd2bc12aecbe669d802603008"
+      },
+      "normalized": {
+        "bytes": 69245,
+        "sha256": "e8301f2725da4d4dceb331a1c524562945ea4775216017eee791beff2c26914e"
+      },
+      "normalizedText": {
+        "bytes": 5349,
+        "sha256": "f5528bd161d084e6c59c7b1131c96b3c87cda230f1e588a272598fcbfad40712"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 67995,
+        "sha256": "7033f172df24ddecdbad6d4de8354584908340039492ec34fc55dc71f268f526"
+      }
+    },
+    {
+      "path": "samples/普通图文/02.html",
+      "group": "普通图文",
+      "hasContent": true,
+      "sourceBytes": 3577379,
+      "sourceSha256": "c352ae9f9f7a361ab39415f4ac7201faf396b11436ea5d4009d6d13237c0a6e4",
+      "validation": [
+        "Success",
+        "4242675013045977103"
+      ],
+      "cgiScript": {
+        "bytes": 2586309,
+        "sha256": "3bb329c74d4053792ef3aa3279558bed5d1217dc54e43c7b02681503e498774d"
+      },
+      "normalized": {
+        "bytes": 287052,
+        "sha256": "a94b6d4bb8a9267224955fc20770fbb6f2c360901c2df1bf9f6d6d3f55a82446"
+      },
+      "normalizedText": {
+        "bytes": 20155,
+        "sha256": "c2881a7d2c00dbc5d96874b06daf115eb34cb32a63c1a83760d6ad63ce5e401e"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 285802,
+        "sha256": "10fa503c33ea95071fbcf7bef49c814c1785979765b0bb5acd286e3727186fa7"
+      }
+    },
+    {
+      "path": "samples/普通图文/03.html",
+      "group": "普通图文",
+      "hasContent": true,
+      "sourceBytes": 3034143,
+      "sourceSha256": "955998960680aa5de7fb10b873c19224e7fb821b9ed12bd0d688f471a18cf4a9",
+      "validation": [
+        "Success",
+        "4248693307011678242"
+      ],
+      "cgiScript": {
+        "bytes": 2273391,
+        "sha256": "101d0c7b7fa482dcca1f6127e4a94c311c7a45062343b72b9cf052a198807dd1"
+      },
+      "normalized": {
+        "bytes": 56573,
+        "sha256": "b779b940f4edacec60a12a944a97cf89c43f77349da9a941d43331488ea76875"
+      },
+      "normalizedText": {
+        "bytes": 5093,
+        "sha256": "ceb0308131ff6fc28775b66c94b79ea76d3883c1bc4d2255688230458ce95b1b"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 55323,
+        "sha256": "15094b3d245d5cfa8aecb6578271d761622adb617e98504b66c4edc7ae7cba64"
+      }
+    },
+    {
+      "path": "samples/普通图文/04.html",
+      "group": "普通图文",
+      "hasContent": true,
+      "sourceBytes": 2909009,
+      "sourceSha256": "a65413c7d3e4501878dd4c4c9f4029b5f1829c702b8c06717082b1c2ec24f639",
+      "validation": [
+        "Success",
+        "4238778016866156564"
+      ],
+      "cgiScript": {
+        "bytes": 2195698,
+        "sha256": "6a8e7880fb3d2f3231cbf6ccfea203295cca8580c94a31c7df355be1f9a6a0a2"
+      },
+      "normalized": {
+        "bytes": 11349,
+        "sha256": "853fc75a42d36965e0ce73acb7fe477b913fbe1b240fcef8327402612c8758eb"
+      },
+      "normalizedText": {
+        "bytes": 2360,
+        "sha256": "86f685ced8113d4d550424ab88d82f615812bb5679172dc1db2e7af04a805efa"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 10099,
+        "sha256": "f87c81184486c500608fc591925d2c10528e18b2cff6d503ea1086cf66f4557d"
+      }
+    },
+    {
+      "path": "samples/普通图文/c01.html",
+      "group": "普通图文",
+      "hasContent": true,
+      "sourceBytes": 2876611,
+      "sourceSha256": "2a2084f478b9b6d53d4594ac0859ae3acbe04e4286e93858922a3fa17f7f4a69",
+      "validation": [
+        "Success",
+        "4282366089721282576"
+      ],
+      "cgiScript": {
+        "bytes": 98740,
+        "sha256": "4ebe4d9fcebe0868b38ffb0dd7ffce5b9af9d645e808f4a7c846f8bfa8e01363"
+      },
+      "normalized": {
+        "bytes": 61617,
+        "sha256": "ade32c35c43448172977580b1ee2a5358b5f9bd1bc3b12bb5f7a6cbd480abc9a"
+      },
+      "normalizedText": {
+        "bytes": 1305,
+        "sha256": "3a30ea3775fd07e7eb40224a2984aba69403c138a6376828b0d1ee91b34ae76b"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 60346,
+        "sha256": "988b4c7d937179129ceff5c3b29344bb65c2592ddb137d4092451d4220ddbdc3"
+      }
+    },
+    {
+      "path": "samples/普通图文/c02.html",
+      "group": "普通图文",
+      "hasContent": true,
+      "sourceBytes": 4027715,
+      "sourceSha256": "ff5286bb85507da185eb30a72184c5d7f4d98dc6126885b20638759cd8f29061",
+      "validation": [
+        "Success",
+        "4453437265893294083"
+      ],
+      "cgiScript": {
+        "bytes": 410643,
+        "sha256": "417df887600c027fa78550708866f4320d0d5eebd273ed35cfc3679cba72f60b"
+      },
+      "normalized": {
+        "bytes": 368147,
+        "sha256": "85b7857a6e2a9e038fbb9f7e430088a41e68894852740006bfa61fb0230df1d0"
+      },
+      "normalizedText": {
+        "bytes": 48272,
+        "sha256": "d2c7649a98d28a142983b35da65e23ba75a33e0b8d7015da865faf653de9d36c"
+      },
+      "normalizedMarkdownHtml": {
+        "bytes": 366876,
+        "sha256": "09769a5de4cb00ef565b1ab075e5d2f5a5d0e9b90b70d0e4688c4e8b4f44e3aa"
+      }
+    },
+    {
+      "path": "samples/该内容暂时无法查看/01.html",
+      "group": "该内容暂时无法查看",
+      "hasContent": false,
+      "sourceBytes": 934,
+      "sourceSha256": "a91c2124c4f15ddb983b2f204ec66196c1e367583f6b37f69e935623e30a90e4",
+      "validation": [
+        "Exception",
+        "该内容暂时无法查看"
+      ],
+      "cgiScript": null,
+      "normalized": null,
+      "normalizedText": null,
+      "normalizedMarkdownHtml": null
+    }
+  ]
+}

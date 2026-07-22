@@ -1,0 +1,6 @@
+{
+  "action": "getalbum",
+  "__biz": "fixture-account-001",
+  "album_id": "fixture-album-001",
+  "count": 20
+}

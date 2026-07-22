@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "fakeid": "fixture-account-001",
+      "name": "示例公众号",
+      "alias": "fixture_one",
+      "avatarUrl": "https://mmbiz.qpic.cn/mmbiz_png/fixture/0"
+    },
+    {
+      "fakeid": "fixture-account-002",
+      "name": "示例周刊",
+      "alias": "fixture_two",
+      "avatarUrl": "https://mmbiz.qpic.cn/mmbiz_png/fixture/1"
+    }
+  ],
+  "total": 3,
+  "offset": 0,
+  "limit": 2,
+  "hasMore": true
+}

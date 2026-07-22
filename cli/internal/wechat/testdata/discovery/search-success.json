@@ -1,0 +1,22 @@
+{
+  "base_resp": { "ret": 0, "err_msg": "ok" },
+  "list": [
+    {
+      "fakeid": "fixture-account-a",
+      "nickname": "Fixture Account",
+      "alias": "fixture_alias",
+      "signature": "Sanitized account used by protocol tests.",
+      "round_head_img": "https://mmbiz.qpic.cn/sanitized/avatar-a/0",
+      "service_type": 2
+    },
+    {
+      "fakeid": "fixture-account-b",
+      "nickname": "Fixture Account Labs",
+      "alias": "fixture_labs",
+      "signature": "Second sanitized result.",
+      "round_head_img": "https://mmbiz.qpic.cn/sanitized/avatar-b/0",
+      "service_type": 1
+    }
+  ],
+  "total": 7
+}

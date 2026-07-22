@@ -1,0 +1,10 @@
+{
+  "articleId": "fixture-article-001",
+  "readCount": 1200,
+  "oldLikeCount": 31,
+  "shareCount": 17,
+  "likeCount": 42,
+  "commentCount": 6,
+  "credentialRef": "credential:fixture-account-001",
+  "capturedAt": "2026-07-22T00:00:00.000Z"
+}

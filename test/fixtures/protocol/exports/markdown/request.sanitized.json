@@ -1,0 +1,8 @@
+{
+  "format": "markdown",
+  "frontMatter": true,
+  "allowUnsafeHTML": false,
+  "articleIds": [
+    "fixture-article-001"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "errorCode": "wechat_session_expired",
+  "retryable": false,
+  "action": "login"
+}

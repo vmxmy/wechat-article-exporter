@@ -1,0 +1,31 @@
+{
+  "base_resp": {
+    "ret": 0
+  },
+  "getalbum_resp": {
+    "base_info": {
+      "title": "示例合集",
+      "nickname": "示例公众号",
+      "article_count": "3",
+      "is_reverse": "0"
+    },
+    "article_list": [
+      {
+        "msgid": "10001",
+        "itemidx": "1",
+        "title": "第一篇",
+        "url": "https://mp.weixin.qq.com/s/fixture-album-1",
+        "create_time": "1767225600"
+      },
+      {
+        "msgid": "10002",
+        "itemidx": "1",
+        "title": "第二篇",
+        "url": "https://mp.weixin.qq.com/s/fixture-album-2",
+        "create_time": "1767139200"
+      }
+    ],
+    "continue_flag": "1",
+    "reverse_continue_flag": "0"
+  }
+}

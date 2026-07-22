@@ -1,0 +1,17 @@
+{
+  "extension": ".html",
+  "mediaType": "text/html; charset=utf-8",
+  "offline": true,
+  "requiredSelectors": [
+    "#js_article",
+    "#js_content"
+  ],
+  "forbiddenSelectors": [
+    "script",
+    "#js_top_ad_area"
+  ],
+  "localResources": [
+    "./assets/fixture-image.jpg"
+  ],
+  "includesComments": true
+}

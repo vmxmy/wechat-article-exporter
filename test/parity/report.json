@@ -1,0 +1,1253 @@
+{
+  "schemaVersion": 1,
+  "task": "16.7",
+  "auditDate": "2026-07-22",
+  "change": "replace-web-with-local-go-cli",
+  "signOff": {
+    "status": "signed-off",
+    "note": "All 24 mandatory parity entries have implementation, fixture or controlled-account evidence. This signs off task 16.7 only; compatibility release publication, final Web-capable archive, operational cloud shutdown, and clean-room retirement validation remain separate gates."
+  },
+  "executions": [
+    {
+      "command": "cd cli && go test ./...",
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -race ./...",
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test ./internal/exporter -run 'TestRealChromiumRendersCuratedSelfContainedPDF|TestGeneratedDOCXOpensInLibreOfficeHeadless' -count=1 -v",
+      "result": "passed",
+      "note": "Real Google Chrome PDF rendering and LibreOffice DOCX open/conversion both passed on macOS."
+    },
+    {
+      "command": "cd cli && go test ./internal/app -run 'TestCLIWorkspaceRealPTYNavigationResizeAndCleanExit' -count=1 -v",
+      "result": "passed"
+    },
+    {
+      "command": "controlled-account local QR smoke: login -> restart/status -> logout",
+      "result": "passed",
+      "note": "On 2026-07-22 an isolated portable profile exercised the live WeChat flow through waiting, scanned, and confirmed states; a new CLI process revalidated the persisted OS-keyring session as authenticated/valid; public JSON contained no token or cookies; logout removed the session manifest, chunks, and profile index. No live credential, QR image, account identifier, or article data is committed as evidence."
+    },
+    {
+      "command": "GitHub Actions native-terminal-verification run 29914112307 (ubuntu-latest, macos-15-intel, windows-latest)",
+      "result": "passed",
+      "note": "The real pseudo-terminal navigation, resize, and clean-exit smoke passed on all three native runners: https://github.com/vmxmy/wechat-article-exporter/actions/runs/29914112307"
+    },
+    {
+      "command": "cd cli && go vet ./... && go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 -checks='SA*,S1*,QF*' ./...",
+      "result": "passed"
+    },
+    {
+      "command": "CGO_ENABLED=0 GOOS/GOARCH cross-build matrix: darwin amd64/arm64, linux amd64/arm64, windows amd64/arm64",
+      "result": "passed"
+    },
+    {
+      "command": "yarn test:baseline && yarn test:api-core && ./node_modules/.bin/vite-node -c test/vite.config.ts test/legacy-export/archive.test.ts",
+      "result": "passed"
+    },
+    {
+      "command": "yarn build",
+      "result": "passed"
+    },
+    {
+      "command": "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/release-cli.yml",
+      "result": "passed"
+    },
+    {
+      "command": "openspec validate replace-web-with-local-go-cli --strict && git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "yarn test:parity",
+      "result": "passed"
+    },
+    {
+      "command": "yarn test:parity:gate",
+      "result": "passed",
+      "note": "All 24 mandatory parity entries passed after the controlled-account QR smoke and cross-platform terminal verification."
+    }
+  ],
+  "releaseGate": {
+    "name": "local-cli-full-parity",
+    "rule": "Every mandatory entry must be passed before tasks 17.3-17.8 may start.",
+    "result": "passed",
+    "execution": "executed",
+    "mandatoryPassed": 24,
+    "mandatoryTotal": 24,
+    "blocking": []
+  },
+  "summary": {
+    "entries": 31,
+    "classifications": {
+      "mandatory-parity": 24,
+      "intentional-retirement": 4,
+      "migration-only": 2,
+      "dev-only": 1
+    },
+    "statuses": {
+      "not-implemented": 0,
+      "partial": 0,
+      "passed": 26,
+      "retirement-approved": 5
+    }
+  },
+  "mandatoryEntries": [
+    {
+      "id": "auth.qr-login",
+      "workflow": "微信公众号后台扫码登录",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Go protocol fixtures and a controlled-account smoke test cover waiting, scanned, confirmed, expired, cancelled, and headless QR flows.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/wechat ./internal/secrets ./internal/app",
+          "controlled-account local QR smoke: login -> restart/status -> logout"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/wechat/wechat_test.go",
+            "symbol": "TestBeginLoginCapturesUUIDAndReturnsUpstreamQRImage"
+          },
+          {
+            "path": "cli/internal/wechat/wechat_test.go",
+            "symbol": "TestBeginLoginAcceptsCurrentUpstreamJPEGQRImage"
+          },
+          {
+            "path": "cli/internal/wechat/wechat_test.go",
+            "symbol": "TestBeginLoginRestoresUUIDFromCurrentJSONResponse"
+          },
+          {
+            "path": "cli/internal/wechat/wechat_test.go",
+            "symbol": "TestPollLoginStatusFixtures"
+          },
+          {
+            "path": "cli/internal/wechat/wechat_test.go",
+            "symbol": "TestLoginRefreshesExpiredQRWithinBound"
+          },
+          {
+            "path": "cli/internal/wechat/wechat_test.go",
+            "symbol": "TestLoginCancellationStopsPollingWithoutCompletingOrPersistingSession"
+          },
+          {
+            "path": "cli/internal/secrets/keyring_test.go",
+            "symbol": "TestKeyringStoreChunksLargeSecretsAndReassemblesThem"
+          },
+          {
+            "path": "cli/internal/secrets/keyring_test.go",
+            "symbol": "TestKeyringStoreDeletesChunkedSecretsAcrossProcessRestart"
+          },
+          {
+            "path": "cli/internal/app/app_test.go",
+            "symbol": "TestLocalLoginRequiresQROutputWhenNonInteractive"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "auth.session-lifecycle",
+      "workflow": "会话保存、状态检查、过期、切换账号和退出",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "A persisted local profile survives restart, reports identity without secrets, switches account where available, and clears local secrets on logout.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/wechat ./internal/secrets ./internal/app"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/wechat/wechat_test.go",
+            "symbol": "TestCompleteLoginPersistsTokenCookieAttributesAndIdentity"
+          },
+          {
+            "path": "cli/internal/wechat/wechat_test.go",
+            "symbol": "TestPersistedSessionSurvivesClientAndProcessRuntimeRecreation"
+          },
+          {
+            "path": "cli/internal/wechat/wechat_test.go",
+            "symbol": "TestSessionStatusExpiredAndNetworkUnknown"
+          },
+          {
+            "path": "cli/internal/wechat/wechat_test.go",
+            "symbol": "TestAccountSwitchFixture"
+          },
+          {
+            "path": "cli/internal/wechat/wechat_test.go",
+            "symbol": "TestLogoutDeletesLocalSecretWhenUpstreamFails"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "accounts.search-resolve",
+      "workflow": "搜索公众号及从文章 URL 解析公众号",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Fixture-backed application tests return normalized paginated accounts and reject non-WeChat or unsafe URLs before networking.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/wechat ./internal/application"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/wechat/discovery_test.go",
+            "symbol": "TestSearchAccountsUsesFixturePaginationAndNormalizes"
+          },
+          {
+            "path": "cli/internal/wechat/discovery_test.go",
+            "symbol": "TestResolveAccountNameRejectsUnsupportedURLBeforeRequest"
+          },
+          {
+            "path": "cli/internal/wechat/discovery_test.go",
+            "symbol": "TestResolveAccountNameRejectsRedirectOutsideAllowedHosts"
+          },
+          {
+            "path": "cli/internal/application/application_test.go",
+            "symbol": "TestApplicationDiscoveryMethodsUseSharedGateway"
+          }
+        ],
+        "fixtures": [
+          "cli/internal/wechat/testdata/discovery/search-success.json",
+          "cli/internal/wechat/testdata/discovery/search-empty.json",
+          "cli/internal/wechat/testdata/discovery/article-account.html",
+          "cli/internal/wechat/testdata/discovery/author-success.json"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "accounts.library",
+      "workflow": "公众号添加、列表、详情、删除、批量导入和导出",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Application-level tests cover add/upsert, query, manifest round-trip, merge, transactional delete, and shared-object retention.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/library ./internal/application"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/library/accounts_test.go",
+            "symbol": "TestSaveQueryExportAndImportAccountsPreserveRicherLocalMetadata"
+          },
+          {
+            "path": "cli/internal/library/accounts_test.go",
+            "symbol": "TestSaveAccountMergesWithoutOverwritingRicherLocalMetadata"
+          },
+          {
+            "path": "cli/internal/library/accounts_test.go",
+            "symbol": "TestImportAccountsValidatesEntireManifestBeforeWriting"
+          },
+          {
+            "path": "cli/internal/library/accounts_test.go",
+            "symbol": "TestDeleteAccountsIsTransactionalAndLeavesObjectsForGarbageCollection"
+          },
+          {
+            "path": "cli/internal/application/application_test.go",
+            "symbol": "TestApplicationAccountOperationsUseSharedLibrary"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "articles.sync",
+      "workflow": "单公众号和多公众号文章列表全量/增量同步",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Fake-upstream tests cover pagination, page commits, resume, deduplication, auth expiry, totals, and last-sync updates.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/wechat ./internal/sync ./internal/library"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/wechat/discovery_test.go",
+            "symbol": "TestBuildAndParseArticleListFixtures"
+          },
+          {
+            "path": "cli/internal/sync/sync_test.go",
+            "symbol": "TestRunnerCommitsPagesPacesAndStopsAtDateBoundary"
+          },
+          {
+            "path": "cli/internal/sync/sync_test.go",
+            "symbol": "TestRunnerResumesFromCheckpointAndBlocksOnAuthentication"
+          },
+          {
+            "path": "cli/internal/library/articles_test.go",
+            "symbol": "TestSaveArticlePageTracksPaginationCompletionAndAllowsTotalCorrection"
+          },
+          {
+            "path": "cli/internal/library/articles_test.go",
+            "symbol": "TestSaveArticlePageDeduplicatesRepeatedPagesAndPersistsFinalSyncTime"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestLocalSyncRuntimeCreatesOneDurableMultiAccountJobWithIndependentItems"
+          }
+        ],
+        "fixtures": [
+          "cli/internal/wechat/testdata/discovery/article-page-one.json",
+          "cli/internal/wechat/testdata/discovery/article-page-top-level-total.json",
+          "cli/internal/wechat/testdata/discovery/search-auth-expired.json"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "articles.sync-range",
+      "workflow": "同步频率和日期范围控制",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Deterministic clock tests cover every current range choice, explicit date boundary, all-history mode, pacing, jitter, and unsafe-delay confirmation.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/sync ./internal/app"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/sync/sync_test.go",
+            "symbol": "TestResolveBoundarySupportsCurrentRangesAndIncrementalState"
+          },
+          {
+            "path": "cli/internal/sync/sync_test.go",
+            "symbol": "TestRunnerCommitsPagesPacesAndStopsAtDateBoundary"
+          },
+          {
+            "path": "cli/internal/sync/sync_test.go",
+            "symbol": "TestValidatePacingWarnsAndRequiresConfirmationForPersistentUnsafeValue"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "articles.query-filter",
+      "workflow": "文章本地搜索、排序、分页和复合筛选",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "SQLite contract tests cover account, keyword, author, date, deletion, content/comment state, originality, payment, message type, album, and engagement filters.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/library"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/library/article_query_test.go",
+            "symbol": "TestQueryArticlesAppliesAllCompoundFiltersLocally"
+          },
+          {
+            "path": "cli/internal/library/article_query_test.go",
+            "symbol": "TestQueryArticlesStableSortAndPaginationUseIDTieBreak"
+          },
+          {
+            "path": "cli/internal/library/article_query_test.go",
+            "symbol": "TestQueryArticlesRejectsUntrustedSortSQL"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "articles.single",
+      "workflow": "单篇文章 URL 添加、下载、fakeid 修复和预览",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Application tests normalize URL variants, deduplicate canonical URLs, persist provisional records, and repair account identity from parsed content.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/library ./internal/tui"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/library/single_test.go",
+            "symbol": "TestNormalizeArticleURLRemovesTrackingFragmentsAndCanonicalizesHost"
+          },
+          {
+            "path": "cli/internal/library/single_test.go",
+            "symbol": "TestProvisionalSingleArticleDeduplicatesAndRepairsRealFakeID"
+          },
+          {
+            "path": "cli/internal/library/single_test.go",
+            "symbol": "TestRepairSingleArticleMergesCollidingContentCommentsRepliesAndCheckpoint"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestSingleArticleDownloadRepairsProvisionalIdentityAndKeepsContentReadable"
+          },
+          {
+            "path": "cli/internal/tui/workspace_test.go",
+            "symbol": "TestWorkspaceSafePreviewAndExplicitHTMLHandoff"
+          }
+        ],
+        "fixtures": [
+          "samples/普通图文/01.html"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "albums.traverse",
+      "workflow": "合集列表、正倒序分页、抓取全部链接和批量下载",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Fixture-backed tests cover metadata, order, continuation identifiers, all-page traversal, deduplication, resume, and batch selection.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/wechat ./internal/sync ./internal/library ./internal/exporter"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/wechat/album_test.go",
+            "symbol": "TestListAlbumArticlesNormalizesForwardReverseAndContinuation"
+          },
+          {
+            "path": "cli/internal/wechat/album_test.go",
+            "symbol": "TestTraverseAlbumResumesDeduplicatesAndPersistsCheckpoint"
+          },
+          {
+            "path": "cli/internal/sync/album_test.go",
+            "symbol": "TestAlbumRunnerPersistsStableGlobalOrderAcrossPages"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestLocalAlbumRuntimeTraversesPagesThenQueuesOneBatchDownloadJob"
+          },
+          {
+            "path": "cli/internal/exporter/selection_test.go",
+            "symbol": "TestBuildSelectionManifestAcceptsEverySelectionSource"
+          }
+        ],
+        "fixtures": [
+          "cli/internal/wechat/testdata/discovery/album-forward.json",
+          "cli/internal/wechat/testdata/discovery/album-reverse.json",
+          "cli/internal/wechat/testdata/discovery/album-continuation.json"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "download.article-html",
+      "workflow": "文章正文下载、缓存、强制刷新和状态识别",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Fake-route tests cover cache hit, valid, deleted, unavailable, risk-control, parse error, retry, force refresh, and debug capture.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/download ./internal/processor ./internal/app"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/download/download_test.go",
+            "symbol": "TestArticleDownloaderSkipsValidCachedContent"
+          },
+          {
+            "path": "cli/internal/download/download_test.go",
+            "symbol": "TestArticleDownloaderForceRefreshBypassesValidCachedContent"
+          },
+          {
+            "path": "cli/internal/download/e2e_test.go",
+            "symbol": "TestFakeUpstreamArticleCasesCachedSuccessDeletedRestrictedRiskAndProxyFailure"
+          },
+          {
+            "path": "cli/internal/download/download_test.go",
+            "symbol": "TestArticleDownloaderClassifiesAndCapturesRiskControlWithoutValidCommit"
+          },
+          {
+            "path": "cli/internal/download/jobs_test.go",
+            "symbol": "TestPersistentArticleJobClassifiesDeletedRiskAndProxyFailures"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestNoWaitDownloadDetachedWorkerCompletesAfterParentReturns"
+          }
+        ],
+        "fixtures": [
+          "samples/普通图文/01.html",
+          "samples/作者已删除/01.html",
+          "samples/内容违规/01.html",
+          "samples/该内容暂时无法查看/01.html"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "download.resources",
+      "workflow": "图片、CSS、背景图、音频和视频资源下载",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Processor and object-store tests discover all supported resource classes, normalize URLs, deduplicate bytes, reuse cache, and report missing objects.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/processor ./internal/download ./internal/library ./internal/objects"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/processor/render_test.go",
+            "symbol": "TestDiscoverResourcesCoversSupportedKindsAndNormalizesURLs"
+          },
+          {
+            "path": "cli/internal/download/download_test.go",
+            "symbol": "TestResourceDownloaderReusesCacheAndRecordsMissing"
+          },
+          {
+            "path": "cli/internal/library/content_test.go",
+            "symbol": "TestCommitResourceDeduplicatesBySourceAndTracksArticleMapping"
+          },
+          {
+            "path": "cli/internal/objects/store_test.go",
+            "symbol": "TestFileStoreStreamsDeduplicatesAndValidates"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestResourceDownloadDiscoversStoredArticleResources"
+          }
+        ],
+        "fixtures": [
+          "cli/internal/processor/testdata/sanitized/rich-content.html"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "download.metrics",
+      "workflow": "阅读、点赞、分享、喜欢和留言数抓取",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Credential-aware fake-upstream tests persist normalized metrics with capture time and reject missing/invalid credentials before requests.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/wechat ./internal/download ./internal/library"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/wechat/content_test.go",
+            "symbol": "TestContentEndpointUsesSensitiveClassesWithoutLeakingArticleCredentialIntoURL"
+          },
+          {
+            "path": "cli/internal/download/metadata_test.go",
+            "symbol": "TestMetadataDownloaderPreflightsCredentialAndPersistsProvenance"
+          },
+          {
+            "path": "cli/internal/download/metadata_test.go",
+            "symbol": "TestMetadataDownloaderRejectsMissingCredentialBeforeNetwork"
+          },
+          {
+            "path": "cli/internal/download/metadata_test.go",
+            "symbol": "TestMetadataDownloaderMarksExpiredCredentialInvalid"
+          },
+          {
+            "path": "cli/internal/library/metrics_test.go",
+            "symbol": "TestMetricSnapshotsPersistCaptureTimeAndCredentialProvenance"
+          }
+        ],
+        "fixtures": [
+          "cli/internal/wechat/testdata/content/engagement-success.json",
+          "cli/internal/wechat/testdata/content/credential-expired.html"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "download.comments",
+      "workflow": "留言和留言回复分页抓取",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Synthetic fixtures cover multi-page comments, continuation buffers, deduplication, incomplete replies, partial failure, and resume.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/wechat ./internal/download ./internal/library"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/wechat/content_test.go",
+            "symbol": "TestContentEndpointBuildsCommentContinuationAndReplyRequests"
+          },
+          {
+            "path": "cli/internal/download/comments_test.go",
+            "symbol": "TestCommentsDownloaderPagesDeduplicatesAndResumesReplyFailures"
+          },
+          {
+            "path": "cli/internal/download/comments_test.go",
+            "symbol": "TestCommentsDownloaderKeepsContinuationCheckpointOnPageFailure"
+          },
+          {
+            "path": "cli/internal/library/comments_test.go",
+            "symbol": "TestCommitCommentPageDeduplicatesAndPersistsContinuationAtomically"
+          },
+          {
+            "path": "cli/internal/library/replies_test.go",
+            "symbol": "TestReplyThreadPartialFailurePersistsAndResumeTargetsOnlyIncomplete"
+          }
+        ],
+        "fixtures": [
+          "cli/internal/wechat/testdata/content/comments-page-one.json",
+          "cli/internal/wechat/testdata/content/comments-page-two.json",
+          "cli/internal/wechat/testdata/content/replies-page.json"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "processing.article-types",
+      "workflow": "普通图文、文本、图片、文章、音频/视频分享和异常文章解析",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "The Go semantic golden corpus passes every supported committed sample category with reviewed structural assertions.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/processor"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/processor/processor_test.go",
+            "symbol": "TestRepresentativeSamples"
+          },
+          {
+            "path": "cli/internal/processor/processor_test.go",
+            "symbol": "TestRepresentativeUnavailableSamples"
+          },
+          {
+            "path": "cli/internal/processor/render_test.go",
+            "symbol": "TestMessageTypeFixturesRender"
+          },
+          {
+            "path": "cli/internal/processor/render_test.go",
+            "symbol": "TestSampleSemanticAndStructuralGoldenSuite"
+          },
+          {
+            "path": "cli/internal/processor/processor_test.go",
+            "symbol": "TestNoExecutionSentinel"
+          }
+        ],
+        "fixtures": [
+          "samples/普通图文/01.html",
+          "samples/文本分享/01.html",
+          "samples/图片分享/01.html",
+          "samples/文章分享/01.html",
+          "samples/作者已删除/01.html",
+          "samples/内容违规/01.html",
+          "samples/该内容暂时无法查看/01.html",
+          "cli/internal/processor/testdata/types/audio.html",
+          "cli/internal/processor/testdata/types/video.html",
+          "cli/internal/processor/testdata/golden/sample_semantics.json"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "export.html",
+      "workflow": "离线自包含 HTML 和资源打包",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Golden exports load offline, contain no executable remote scripts, resolve local resources, and honor strict/best-effort and comment options.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/exporter ./internal/processor"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/exporter/html_test.go",
+            "symbol": "TestExportHTMLArticleWritesSelfContainedResourcesAndComments"
+          },
+          {
+            "path": "cli/internal/exporter/html_test.go",
+            "symbol": "TestExportHTMLArticleStrictMissingResourcePublishesNothing"
+          },
+          {
+            "path": "cli/internal/exporter/html_test.go",
+            "symbol": "TestExportHTMLArticleBestEffortReportsMissingResources"
+          },
+          {
+            "path": "cli/internal/exporter/html_test.go",
+            "symbol": "TestExportHTMLBatchArchiveIsDeterministicAndPortable"
+          },
+          {
+            "path": "cli/internal/exporter/regression_test.go",
+            "symbol": "TestFormatSpecificGoldenAndStructuralRegression"
+          }
+        ],
+        "fixtures": [
+          "cli/internal/exporter/testdata/regression_article.json",
+          "cli/internal/exporter/testdata/regression_golden.json"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "export.text-markdown-json",
+      "workflow": "TXT、Markdown 和 JSON 导出",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Golden outputs verify stable semantic order, UTF-8, metadata options, versioned JSON, optional content/metrics/comments/replies, and deterministic names.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/exporter"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/exporter/text_test.go",
+            "symbol": "TestRenderTextProducesUTF8WithOptionalMetadataHeader"
+          },
+          {
+            "path": "cli/internal/exporter/markdown_test.go",
+            "symbol": "TestRenderMarkdownFrontMatterAndDefaultHTMLPolicy"
+          },
+          {
+            "path": "cli/internal/exporter/json_test.go",
+            "symbol": "TestMarshalJSONExportIncludesOptionalContentMetricsCommentsRepliesAlbumsAndProvenance"
+          },
+          {
+            "path": "cli/internal/exporter/json_test.go",
+            "symbol": "TestExportJSONFileIsDeterministicForExplicitTimestamp"
+          },
+          {
+            "path": "cli/internal/exporter/naming_test.go",
+            "symbol": "TestRenderFilenameUsesDeterministicTemplatesAcrossPlatforms"
+          },
+          {
+            "path": "cli/internal/exporter/regression_test.go",
+            "symbol": "TestFormatSpecificGoldenAndStructuralRegression"
+          }
+        ],
+        "fixtures": [
+          "cli/internal/exporter/testdata/regression_article.json",
+          "cli/internal/exporter/testdata/regression_golden.json"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "export.excel",
+      "workflow": "Excel 导出和可选文章正文",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Workbook structural tests verify stable sheets/columns/types and a large fixture verifies bounded memory behavior.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/exporter"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/exporter/xlsx_test.go",
+            "symbol": "TestWriteXLSXStreamsStableColumnsAndOptionalContent"
+          },
+          {
+            "path": "cli/internal/exporter/xlsx_test.go",
+            "symbol": "TestWriteXLSXUsesDeterministicPackageOrder"
+          },
+          {
+            "path": "cli/internal/exporter/batch_test.go",
+            "symbol": "TestLargeBatchXLSXMemoryAndThroughput"
+          },
+          {
+            "path": "cli/internal/exporter/regression_test.go",
+            "symbol": "TestFormatSpecificGoldenAndStructuralRegression"
+          }
+        ],
+        "fixtures": [
+          "cli/internal/exporter/testdata/xlsx_columns.json"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "export.docx",
+      "workflow": "Word DOCX 导出",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "OpenXML package validation and supported-office smoke tests cover headings, lists, links, tables, images, metadata, and comments.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/exporter",
+          "cd cli && go test ./internal/exporter -run TestGeneratedDOCXOpensInLibreOfficeHeadless -count=1 -v"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/exporter/docx_test.go",
+            "symbol": "TestWriteDOCXEmbedsSemanticStructureMediaAndComments"
+          },
+          {
+            "path": "cli/internal/exporter/docx_test.go",
+            "symbol": "TestWriteAndValidateDOCXEnforceBoundsAndCancellation"
+          },
+          {
+            "path": "cli/internal/exporter/docx_test.go",
+            "symbol": "TestGeneratedDOCXOpensInLibreOfficeHeadless"
+          },
+          {
+            "path": "cli/internal/exporter/regression_test.go",
+            "symbol": "TestFormatSpecificGoldenAndStructuralRegression"
+          }
+        ],
+        "fixtures": [
+          "cli/internal/exporter/testdata/docx_article.html"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "export.pdf",
+      "workflow": "高保真 PDF 导出",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Local Chromium renders curated fixtures without upload; discovery, cancellation, timeout, missing-browser, and visual regression cases pass.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/exporter ./internal/app",
+          "cd cli && go test ./internal/exporter -run TestRealChromiumRendersCuratedSelfContainedPDF -count=1 -v"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/exporter/pdf_test.go",
+            "symbol": "TestDiscoverChromiumUsesDeterministicSupportedCandidates"
+          },
+          {
+            "path": "cli/internal/exporter/pdf_test.go",
+            "symbol": "TestRenderPDFUsesOnlyLocalSelfContainedHTML"
+          },
+          {
+            "path": "cli/internal/exporter/pdf_test.go",
+            "symbol": "TestRenderPDFRejectsRemoteResourcesTimeoutAndCancellation"
+          },
+          {
+            "path": "cli/internal/exporter/pdf_test.go",
+            "symbol": "TestRealChromiumRendersCuratedSelfContainedPDF"
+          },
+          {
+            "path": "cli/internal/exporter/regression_test.go",
+            "symbol": "TestCuratedHTMLPDFVisualAndStructuralRegression"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestLocalExportRuntimeExecutesPDFAndPersistsManifestState"
+          }
+        ],
+        "fixtures": [
+          "cli/internal/exporter/testdata/pdf_self_contained.html",
+          "cli/internal/exporter/testdata/regression_golden.json"
+        ]
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "storage.local-library",
+      "workflow": "本地数据库、跨进程查询、备份、恢复、校验和清理",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "SQLite/object-store tests cover transactions, concurrent readers, migrations, backups, failed restore, integrity repair guidance, and GC dry run.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/library ./internal/objects"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/library/database_test.go",
+            "symbol": "TestWithTxRollsBackAllRelatedChanges"
+          },
+          {
+            "path": "cli/internal/library/database_test.go",
+            "symbol": "TestDatabaseTypedQueriesAreStableAndProfileIsolated"
+          },
+          {
+            "path": "cli/internal/library/database_test.go",
+            "symbol": "TestSQLiteWALSupportsSeparateProcessReaderDuringWriterAndSeesCommittedStateAfterward"
+          },
+          {
+            "path": "cli/internal/library/migrations_test.go",
+            "symbol": "TestMigrationFailureRollsBackVersionAndSchema"
+          },
+          {
+            "path": "cli/internal/library/backup_restore_test.go",
+            "symbol": "TestRestoreValidatesBeforeMutationAndRollsBackBeforeCommit"
+          },
+          {
+            "path": "cli/internal/library/integrity_test.go",
+            "symbol": "TestIntegrityMarksArticleIncompleteWhenSharedObjectIsMissing"
+          },
+          {
+            "path": "cli/internal/library/gc_test.go",
+            "symbol": "TestLibraryGarbageCollectionDryRunConfirmationAndRetention"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "settings.preferences",
+      "workflow": "导出、下载、同步、代理和显示偏好",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Profile configuration round-trips all retained preferences, validates risky values, migrates versions atomically, and exposes effective values.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/profiles ./internal/network ./internal/sync"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/profiles/config_test.go",
+            "symbol": "TestConfigStoreWritesAtomicVersionedConfiguration"
+          },
+          {
+            "path": "cli/internal/profiles/config_test.go",
+            "symbol": "TestConfigStoreMigratesVersionZeroWithBackup"
+          },
+          {
+            "path": "cli/internal/profiles/config_test.go",
+            "symbol": "TestConfigStoreRoundTripsAllRetainedPreferences"
+          },
+          {
+            "path": "cli/internal/profiles/config_test.go",
+            "symbol": "TestConfigStoreMigratesVersionOneWithBackupAndPreservesValues"
+          },
+          {
+            "path": "cli/internal/profiles/config_test.go",
+            "symbol": "TestConfigStoreRejectsUnsafePacingWithoutConfirmation"
+          },
+          {
+            "path": "cli/internal/profiles/config_test.go",
+            "symbol": "TestConfigStoreSerializesConcurrentUpdates"
+          },
+          {
+            "path": "cli/internal/sync/sync_test.go",
+            "symbol": "TestValidatePacingWarnsAndRequiresConfirmationForPersistentUnsafeValue"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestLocalStatusJSONExposesAllEffectiveRetainedPreferences"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "automation.cobra",
+      "workflow": "非交互命令、JSON、补全、退出码和中断",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "CLI integration tests verify all command groups, JSON purity, stderr progress, exact confirmations, exit 0/1/2, redaction, completion, and interruption.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/app ./internal/safety"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestLocalCommandGroupsArePresentInHelp"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestLocalJSONSuccessEnvelopeIsOnePureDocument"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestLocalErrorExitCodesAndVersionedJSON"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestAsyncJobStartWaitAndFollowKeepProgressOnStderr"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestResumeJobRelaunchesPersistentWorker"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestSignalInterruptionProducesDistinctStructuredResult"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestDestructiveCommandsRequireExactConfirmation"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestCompletionWritesShellScriptWithoutJSONEnvelope"
+          },
+          {
+            "path": "cli/internal/app/app_test.go",
+            "symbol": "TestOutputAppliesCentralRedactionBeforeJSONSerialization"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "ui.terminal-workspace",
+      "workflow": "完整 Bubble Tea 终端工作区",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "Model tests and manual smoke cover onboarding, all navigation areas, tables, filters, selection, previews, jobs, settings, narrow terminals, no-color, and keyboard-only use.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/tui ./internal/app",
+          "cd cli && go test ./internal/app -run TestCLIWorkspaceRealPTYNavigationResizeAndCleanExit -count=1 -v",
+          "GitHub Actions native-terminal-verification run 29914112307 (ubuntu-latest, macos-15-intel, windows-latest)"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/tui/workspace_test.go",
+            "symbol": "TestWorkspaceInitialLoadAndMajorNavigationUseApplicationSeam"
+          },
+          {
+            "path": "cli/internal/tui/workspace_test.go",
+            "symbol": "TestWorkspaceArticleSelectionStartsOneDownloadJobForStableIDs"
+          },
+          {
+            "path": "cli/internal/tui/workspace_test.go",
+            "symbol": "TestWorkspaceSafePreviewAndExplicitHTMLHandoff"
+          },
+          {
+            "path": "cli/internal/tui/workspace_test.go",
+            "symbol": "TestWorkspaceOnboardingQRAndOfflineEntryPoints"
+          },
+          {
+            "path": "cli/internal/tui/workspace_test.go",
+            "symbol": "TestWorkspaceNoColorUnicodeFallbackStateRoundTripAndNonTTYGuard"
+          },
+          {
+            "path": "cli/internal/tui/workspace_test.go",
+            "symbol": "TestWorkspaceAreasExposeAllOpenSpecWorkflows"
+          },
+          {
+            "path": "cli/internal/tui/workspace_test.go",
+            "symbol": "TestWorkspaceQuerySearchPagesAndColumnSelection"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestNoSubcommandRoutesInteractiveStartupToFullWorkspaceWithSavedDisplayPreferences"
+          },
+          {
+            "path": "cli/internal/app/workspace_pty_unix_test.go",
+            "symbol": "TestCLIWorkspaceRealPTYNavigationResizeAndCleanExit"
+          },
+          {
+            "path": "cli/internal/app/workspace_pty_windows_test.go",
+            "symbol": "TestCLIWorkspaceRealPTYNavigationResizeAndCleanExit"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": [
+        "The terminal workspace preserves workflows and query power rather than reproducing the browser/AG Grid visual layout."
+      ]
+    },
+    {
+      "id": "automation.local-mcp",
+      "workflow": "本地 stdio MCP 工具",
+      "classification": "mandatory-parity",
+      "status": "passed",
+      "acceptance": "MCP conformance tests cover framing, tool schemas, shared results, async job IDs, policy restrictions, malformed messages, EOF, and zero remote service dependency.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/mcp ./internal/app"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/mcp/adapter_test.go",
+            "symbol": "TestToolSchemasAreStableCompleteAndAnnotated"
+          },
+          {
+            "path": "cli/internal/mcp/adapter_test.go",
+            "symbol": "TestSharedApplicationContractReturnsMatchingQueriesAndPersistentJobs"
+          },
+          {
+            "path": "cli/internal/mcp/adapter_test.go",
+            "symbol": "TestPolicyReadOnlyAllowDenyConfirmationAndSensitiveRestrictions"
+          },
+          {
+            "path": "cli/internal/mcp/adapter_test.go",
+            "symbol": "TestServerFramingIsolationMalformedBoundsAndEOF"
+          },
+          {
+            "path": "cli/internal/mcp/adapter_test.go",
+            "symbol": "TestToolErrorsAreRedactedAndPackageHasNoRemoteOAuthDependency"
+          },
+          {
+            "path": "cli/internal/mcp/adapter_test.go",
+            "symbol": "TestGoSDKClientConformsToLocalJSONRPCServer"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestLocalMCPServeUsesStdioAndProfilePolicy"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": [
+        "The local MCP server uses stdio under the local OS account and intentionally does not retain remote OAuth or an HTTP transport."
+      ]
+    }
+  ],
+  "migrationEntries": [
+    {
+      "id": "migration.web-export-import",
+      "workflow": "旧浏览器 Dexie 数据导出和本地导入",
+      "classification": "migration-only",
+      "status": "passed",
+      "acceptance": "Versioned archives round-trip all supported records and objects with checksums, conflicts, missing-resource reporting, and no upload.",
+      "evidence": {
+        "commands": [
+          "./node_modules/.bin/vite-node -c test/vite.config.ts test/legacy-export/archive.test.ts",
+          "cd cli && go test ./internal/migration ./internal/app"
+        ],
+        "tests": [
+          {
+            "path": "test/legacy-export/archive.test.ts",
+            "symbol": "run"
+          },
+          {
+            "path": "cli/internal/migration/migration_test.go",
+            "symbol": "TestPlanSupportsRepresentativeDexieVersions"
+          },
+          {
+            "path": "cli/internal/migration/migration_test.go",
+            "symbol": "TestPlanSupportsWebExporterArchiveShape"
+          },
+          {
+            "path": "cli/internal/migration/migration_test.go",
+            "symbol": "TestPlanCoversLegacyArchiveDataAndReconcilesDuplicates"
+          },
+          {
+            "path": "cli/internal/migration/migration_test.go",
+            "symbol": "TestPlanAllowsPartialArchiveAndReportsMissingResources"
+          },
+          {
+            "path": "cli/internal/migration/migration_test.go",
+            "symbol": "TestImportDeduplicatesObjectsAndPreservesLocallyNewerRecords"
+          },
+          {
+            "path": "cli/internal/migration/migration_test.go",
+            "symbol": "TestImportRefusesChangedArchiveAfterPlanning"
+          },
+          {
+            "path": "cli/internal/migration/migration_test.go",
+            "symbol": "TestValidateRejectsUnsafeZIPs"
+          },
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestMigrationCommandsImportAndVerifyWebArchive"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": []
+    },
+    {
+      "id": "migration.remote-cli",
+      "workflow": "旧 remote-only CLI 配置检测和迁移提示",
+      "classification": "migration-only",
+      "status": "passed",
+      "acceptance": "Migration tests preserve legacy config for rollback, ignore OAuth tokens for local auth, and guide profile creation/login.",
+      "evidence": {
+        "commands": [
+          "cd cli && go test ./internal/app ./internal/config"
+        ],
+        "tests": [
+          {
+            "path": "cli/internal/app/local_commands_test.go",
+            "symbol": "TestLocalFirstSessionCommandsAndLegacyMigrationMessaging"
+          },
+          {
+            "path": "cli/internal/app/app_test.go",
+            "symbol": "TestLegacyCommandPreservesRemoteStatusBehavior"
+          },
+          {
+            "path": "cli/internal/config/config_test.go",
+            "symbol": "TestStoreWritesMode0600AndKeepsExistingConfigShape"
+          }
+        ],
+        "fixtures": []
+      },
+      "blockers": [],
+      "intentionalDifferences": [
+        "Legacy OAuth tokens are deliberately preserved only for rollback and are never imported as local WeChat credentials."
+      ]
+    }
+  ],
+  "knownIntentionalDifferences": [
+    {
+      "id": "ui.terminal-workspace",
+      "differences": [
+        "The terminal workspace preserves workflows and query power rather than reproducing the browser/AG Grid visual layout."
+      ]
+    },
+    {
+      "id": "automation.local-mcp",
+      "differences": [
+        "The local MCP server uses stdio under the local OS account and intentionally does not retain remote OAuth or an HTTP transport."
+      ]
+    },
+    {
+      "id": "migration.remote-cli",
+      "differences": [
+        "Legacy OAuth tokens are deliberately preserved only for rollback and are never imported as local WeChat credentials."
+      ]
+    },
+    {
+      "id": "web.proxy-monitoring",
+      "differences": [
+        "Hosted fleet monitoring and IP-block dashboards are not local-product workflows; configured-route health and diagnostics are the local replacement."
+      ]
+    },
+    {
+      "id": "web.api-docs",
+      "differences": [
+        "Browser-only API exploration is replaced by Cobra help, structured JSON contracts, examples, and MCP tool discovery."
+      ]
+    },
+    {
+      "id": "web.support",
+      "differences": [
+        "Support, sponsor, and community links are static documentation rather than native application workflows."
+      ]
+    },
+    {
+      "id": "web.cloud-sync",
+      "differences": [
+        "Multi-tenant D1 synchronization is intentionally replaced by per-profile local SQLite, backups, and explicit migration archives."
+      ]
+    },
+    {
+      "id": "dev.pages",
+      "differences": [
+        "Development-only demonstration and diagnostic pages are not shipped as native product workflows."
+      ]
+    }
+  ]
+}

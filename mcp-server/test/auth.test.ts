@@ -44,6 +44,20 @@ test('GET /authorize 可预选无浏览器服务器模式', async () => {
   assert.match(body, /name=headless value=1 checked/);
 });
 
+test('公告截止时间后拒绝新授权并返回本地迁移指引', async () => {
+	const env = createEnv('http://127.0.0.1:4321/callback');
+	const response = await authHandler.fetch(new Request('https://mptext.ziikoo.app/authorize'), {
+		...env,
+		REMOTE_OAUTH_DISABLE_AFTER: '2000-01-01T00:00:00Z',
+		LOCAL_CLI_MIGRATION_URL: 'https://example.test/local-cli',
+	});
+	const body = await response.json() as Record<string, unknown>;
+	assert.equal(response.status, 410);
+	assert.equal(body.error, 'remote_oauth_retired');
+	assert.equal(body.migration, 'https://example.test/local-cli');
+	assert.equal(body.command, 'wechat-article login');
+});
+
 test('普通授权继续直接跳转到客户端回调', async () => {
   globalThis.fetch = async () => Response.json({ base_resp: { ret: 0 } });
   const redirectTo = 'http://127.0.0.1:4321/callback?code=one-time-code&state=client-state';

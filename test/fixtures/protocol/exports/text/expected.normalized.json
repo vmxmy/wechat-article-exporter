@@ -1,0 +1,5 @@
+{
+  "extension": ".txt",
+  "encoding": "utf-8",
+  "exactText": "离线基线文章\n\n一级标题\n第一段，包含 链接。\n列表项\n引用\nfmt.Println(\"fixture\")\n单元格\n[图片: 示例图]"
+}

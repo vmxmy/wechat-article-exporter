@@ -1,0 +1,10 @@
+{
+  "extension": ".pdf",
+  "mediaType": "application/pdf",
+  "magic": "%PDF-",
+  "pageFormat": "A4",
+  "printBackground": true,
+  "remoteRequests": 0,
+  "localChromiumRequired": true,
+  "includesComments": true
+}

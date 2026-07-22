@@ -1,0 +1,5 @@
+{
+  "classification": "authentication_expired",
+  "status": 200,
+  "bodyKind": "login_page"
+}

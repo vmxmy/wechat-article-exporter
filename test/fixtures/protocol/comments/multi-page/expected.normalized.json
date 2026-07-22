@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "id": "fixture-comment-001",
+      "author": "读者甲",
+      "content": "第一条"
+    },
+    {
+      "id": "fixture-comment-002",
+      "author": "读者乙",
+      "content": "第二条"
+    }
+  ],
+  "pageCount": 2,
+  "complete": true
+}

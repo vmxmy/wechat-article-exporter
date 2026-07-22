@@ -1,0 +1,35 @@
+{
+  "base_resp": { "ret": 0, "err_msg": "ok" },
+  "getalbum_resp": {
+    "base_info": {
+      "title": "Fixture Album",
+      "description": "Sanitized album used by offline tests.",
+      "nickname": "Fixture Account",
+      "article_count": "3",
+      "is_paid": "0"
+    },
+    "article_list": [
+      {
+        "msgid": "10001",
+        "itemidx": "1",
+        "title": "First album article",
+        "url": "https://mp.weixin.qq.com/s/fixture-album-1",
+        "cover_img_1_1": "https://mmbiz.qpic.cn/sanitized/album-1/0",
+        "create_time": "1767225600",
+        "item_show_type": "0",
+        "is_pay_subscribe": "0"
+      },
+      {
+        "msgid": "10002",
+        "itemidx": "1",
+        "title": "Second album article",
+        "url": "https://mp.weixin.qq.com/s/fixture-album-2",
+        "create_time": "1767139200",
+        "item_show_type": "5",
+        "is_pay_subscribe": "1"
+      }
+    ],
+    "continue_flag": "1",
+    "reverse_continue_flag": "0"
+  }
+}

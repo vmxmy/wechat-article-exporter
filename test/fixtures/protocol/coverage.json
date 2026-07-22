@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "domains": {
+    "searchbiz": { "status": "captured", "required": ["success-page", "empty", "auth-expired", "malformed"] },
+    "appmsgpublish": {
+      "status": "captured",
+      "required": ["multi-page", "empty", "auth-expired", "malformed", "date-boundary"]
+    },
+    "album": { "status": "captured", "required": ["forward", "reverse", "continuation", "empty", "duplicate"] },
+    "metadata": { "status": "captured", "required": ["success", "missing-credential", "expired-credential"] },
+    "comments": { "status": "captured", "required": ["multi-page", "duplicate", "continuation"] },
+    "replies": { "status": "captured", "required": ["complete", "partial-failure", "resume"] },
+    "exports": { "status": "captured", "required": ["html", "text", "markdown", "json", "xlsx", "docx", "pdf"] }
+  }
+}

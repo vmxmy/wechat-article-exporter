@@ -1,4 +1,4 @@
-import { normalizeHtml } from '#shared/utils/html';
+import { normalizeHtml } from '../shared/utils/html';
 import { read, samples, write } from './common';
 
 function normalizeOutPath(input: string): string {

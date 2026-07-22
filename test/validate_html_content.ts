@@ -1,4 +1,4 @@
-import { validateHTMLContent } from '#shared/utils/html';
+import { validateHTMLContent } from '../shared/utils/html';
 import { read, samples } from './common';
 
 function run() {

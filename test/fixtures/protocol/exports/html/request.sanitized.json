@@ -1,0 +1,8 @@
+{
+  "format": "html",
+  "includeComments": true,
+  "strictResources": true,
+  "articleIds": [
+    "fixture-article-001"
+  ]
+}

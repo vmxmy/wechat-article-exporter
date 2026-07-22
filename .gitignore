@@ -20,7 +20,22 @@ logs
 .idea
 debug
 design
-docs
+docs/*
+!docs/architecture/
+!docs/architecture/**
+!docs/archive/
+!docs/archive/**
+!docs/getting-started/
+!docs/getting-started/**
+!docs/guides/
+!docs/guides/**
+!docs/migration/
+!docs/migration/**
+!docs/operations/
+!docs/operations/**
+!docs/release/
+!docs/release/**
+!docs/compatibility-retirement.md
 samples/**/output
 
 # Local env files
@@ -33,3 +48,9 @@ samples/**/output
 .omx/
 .omc/
 mcp-server/.ralph-prd.json
+
+# Local agent and generated media workspaces
+.baoyu-skills/
+.codex/
+cover-image/
+output/

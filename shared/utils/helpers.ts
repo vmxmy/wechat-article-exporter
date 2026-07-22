@@ -1,5 +1,5 @@
 import dayjs from 'dayjs';
-import { ITEM_SHOW_TYPE } from '~/config';
+import { ITEM_SHOW_TYPE } from '../../config';
 
 export function sleep(ms: number = 1000): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));

@@ -1,0 +1,24 @@
+{
+  "articleId": "article-regression",
+  "title": "离线导出回归文章",
+  "description": "覆盖文本、Markdown、HTML、JSON、XLSX、DOCX 与 PDF 的固定基线。",
+  "author": "示例作者",
+  "account": "示例公众号",
+  "canonicalUrl": "https://mp.weixin.qq.com/s/regression",
+  "publishedAt": "2026-01-02T03:04:05Z",
+  "content": "<h2>核心结论</h2><p>正文包含 <strong>粗体</strong>、<em>斜体</em>、<a href=\"https://example.com/reference\">参考链接</a>和本地图片。</p><blockquote>稳定、离线、可验证。</blockquote><ul><li>第一项</li><li>第二项</li></ul><table><tbody><tr><th>格式</th><th>状态</th></tr><tr><td>HTML</td><td>通过</td></tr></tbody></table><p><img src=\"https://cdn.example.test/regression.png\" alt=\"回归图\"></p>",
+  "comments": [
+    {
+      "id": "comment-regression",
+      "author": "读者甲",
+      "content": "这篇文章很有帮助。",
+      "replies": [
+        {
+          "id": "reply-regression",
+          "author": "示例作者",
+          "content": "谢谢阅读。"
+        }
+      ]
+    }
+  ]
+}

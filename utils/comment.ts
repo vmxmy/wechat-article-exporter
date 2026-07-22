@@ -1,40 +1,14 @@
-import { formatTimeStamp } from '#shared/utils/helpers';
 import { getCommentCache } from '~/store/v2/comment';
 import { getCommentReplyCache } from '~/store/v2/comment_reply';
 import { getMetadataCache } from '~/store/v2/metadata';
+import { formatTimeStamp } from '../shared/utils/helpers';
+
+export { extractCommentId } from '../shared/utils/comment-id';
 
 /**
  * 从文章 HTML 中提取 comment_id。
  * 文本分享与普通图文的页面结构不同，因此需要兼容多种写法。
  */
-export function extractCommentId(html: string): string | null {
-  const patterns = [
-    // 普通图文: var comment_id = 'xxx' || '0';
-    /var comment_id = '(?<comment_id>\d+)' \|\| '0';/,
-    // 文本分享等: d.comment_id = xml ? getXmlValue('comment_id.DATA') : 'xxx';
-    /comment_id:\s*JsDecode\('(?<comment_id>\d+)'\)/,
-    // 有些模板里以 JsDecode 形式写在配置里
-    /d\.comment_id\s*=\s*xml \? getXmlValue\('comment_id\.DATA'\) : '(?<comment_id>\d+)';/,
-    // 兜底: window.segment_comment_id = 'xxx';
-    /window\.comment_id\s*=\s*'(?<comment_id>\d+)'/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    if (match) {
-      // 优先使用命名分组，否则退回第一个分组
-      if ('groups' in match && match.groups && match.groups.comment_id) {
-        return match.groups.comment_id;
-      }
-      if (match[1]) {
-        return match[1];
-      }
-    }
-  }
-
-  return null;
-}
-
 /**
  * 渲染文章的评论内容
  * @param url 文章链接

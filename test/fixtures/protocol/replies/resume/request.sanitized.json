@@ -1,0 +1,12 @@
+{
+  "completedContentIds": [
+    "fixture-comment-001"
+  ],
+  "pendingContentIds": [
+    "fixture-comment-002"
+  ],
+  "checkpoint": {
+    "max_reply_id": 8
+  },
+  "key": "<redacted>"
+}

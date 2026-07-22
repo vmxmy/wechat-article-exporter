@@ -1,0 +1,13 @@
+{
+  "album": {
+    "id": "fixture-album-001",
+    "title": "示例合集",
+    "articleCount": 3
+  },
+  "order": "forward",
+  "itemCount": 2,
+  "next": {
+    "beginMsgID": "10002",
+    "beginItemIndex": "1"
+  }
+}

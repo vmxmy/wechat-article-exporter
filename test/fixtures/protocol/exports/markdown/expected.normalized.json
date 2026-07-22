@@ -1,0 +1,6 @@
+{
+  "extension": ".md",
+  "encoding": "utf-8",
+  "exactMarkdown": "# 离线基线文章\n\n# 一级标题\n\n第一段，包含 [链接](https://example.com/reference)。\n\n- 列表项\n\n> 引用\n\n```\nfmt.Println(\"fixture\")\n```\n\n| 单元格 |\n| --- |\n| 单元格 |\n\n![示例图](./assets/fixture-image.jpg)\n",
+  "unsafeHTML": false
+}

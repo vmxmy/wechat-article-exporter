@@ -8,6 +8,10 @@
  */
 export interface Env {
   EXPORTER_BASE_URL: string;
+	// Optional compatibility-window controls. Operators set the deadline when
+	// the retirement release is announced; until then behavior is unchanged.
+	REMOTE_OAUTH_DISABLE_AFTER?: string;
+	LOCAL_CLI_MIGRATION_URL?: string;
   OAUTH_PROVIDER: {
     parseAuthRequest(request: Request): Promise<AuthRequest>;
     completeAuthorization(opts: {
@@ -28,8 +32,10 @@ interface AuthRequest {
 export const authHandler = {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
+	const migration = remoteOAuthMigration(env);
 
     if (url.pathname === '/authorize') {
+		if (migration.disabled) return migrationResponse(migration, 410);
       if (request.method === 'GET') {
         const oauthReq = await env.OAUTH_PROVIDER.parseAuthRequest(request);
         const state = encodeAuthorizationState(oauthReq);
@@ -74,11 +80,45 @@ export const authHandler = {
 
     // 健康检查 / 根路径
     if (url.pathname === '/' || url.pathname === '/health') {
-      return Response.json({ service: 'wechat-article-mcp', status: 'ok' });
+		return Response.json({
+			service: 'wechat-article-mcp',
+			status: migration.disabled ? 'migration-only' : 'ok',
+			remoteOAuth: migration.disabled ? 'disabled' : 'compatibility-window',
+			migration: migration.url,
+		});
     }
     return new Response('Not found', { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
+
+interface RemoteOAuthMigration {
+	disabled: boolean;
+	deadline?: string;
+	url: string;
+}
+
+function remoteOAuthMigration(env: Env): RemoteOAuthMigration {
+	const raw = env.REMOTE_OAUTH_DISABLE_AFTER?.trim();
+	const deadline = raw ? new Date(raw) : undefined;
+	return {
+		disabled: Boolean(deadline && !Number.isNaN(deadline.getTime()) && Date.now() >= deadline.getTime()),
+		deadline: deadline && !Number.isNaN(deadline.getTime()) ? deadline.toISOString() : undefined,
+		url: env.LOCAL_CLI_MIGRATION_URL?.trim() || 'https://github.com/wechat-article/wechat-article-exporter#local-cli',
+	};
+}
+
+function migrationResponse(migration: RemoteOAuthMigration, status: number): Response {
+	return Response.json(
+		{
+			error: 'remote_oauth_retired',
+			message: 'Remote OAuth no longer accepts new authorizations. Install the local wechat-article binary, create a profile, and log in with a local WeChat QR code.',
+			deadline: migration.deadline,
+			migration: migration.url,
+			command: 'wechat-article login',
+		},
+		{ status, headers: { 'cache-control': 'no-store' } }
+	);
+}
 
 async function verifyToken(apiToken: string, base: string): Promise<boolean> {
   try {
@@ -134,6 +174,7 @@ function renderConsent(state: string, exporterUrl: string, error = '', headless 
  .headless{display:flex;gap:8px;align-items:flex-start;margin:8px 0 16px}.headless input{margin-top:5px}
  .err{color:#dc2626;margin:8px 0}.muted{color:#6b7280;font-size:13px}
 </style></head><body>
+<p class=muted>Remote OAuth 已进入兼容迁移期，计划最早于 2026-12-31 退役，且必须先满足稳定本地版和功能对等门禁。新工作流请安装本地 <code>wechat-article</code> 并扫码登录。</p>
 <h1>授权 AI 访问你的「微信文章导出」</h1>
 ${error ? `<p class=err>⚠ ${escapeHtml(error)}</p>` : ''}
 <ol>

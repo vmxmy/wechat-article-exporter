@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
-import { EXTERNAL_API_SERVICE } from '~/config';
-import { extractCommentId } from '~/utils/comment';
+import { EXTERNAL_API_SERVICE } from '../../config';
+import { extractCommentId } from './comment-id';
 
 /**
  * 处理文章的 html 内容

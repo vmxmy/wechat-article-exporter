@@ -1,0 +1,8 @@
+{
+  "base_resp": { "ret": 0, "err_msg": "ok" },
+  "getalbum_resp": {
+    "base_info": { "title": "Malformed Fixture Album", "nickname": "Fixture Account", "article_count": "1" },
+    "article_list": [{ "msgid": "10001", "itemidx": "1", "title": "Missing URL" }],
+    "continue_flag": "0"
+  }
+}

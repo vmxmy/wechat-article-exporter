@@ -1,0 +1,20 @@
+{
+  "extension": ".docx",
+  "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "requiredPackageEntries": [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "word/document.xml"
+  ],
+  "structures": [
+    "heading",
+    "paragraph",
+    "hyperlink",
+    "list",
+    "quote",
+    "code",
+    "table",
+    "image",
+    "comments"
+  ]
+}

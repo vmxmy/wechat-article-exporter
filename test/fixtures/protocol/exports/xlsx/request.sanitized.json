@@ -1,0 +1,7 @@
+{
+  "format": "xlsx",
+  "includeContent": true,
+  "articleIds": [
+    "fixture-article-001"
+  ]
+}

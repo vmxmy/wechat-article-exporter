@@ -1,0 +1,12 @@
+{
+  "base_resp": { "ret": 0, "err_msg": "ok" },
+  "data": {
+    "fakeid": "fixture-account-a",
+    "nickname": "Fixture Account",
+    "alias": "fixture_alias",
+    "signature": "Sanitized account used by protocol tests.",
+    "round_head_img": "https://mmbiz.qpic.cn/sanitized/avatar-a/0",
+    "principal_name": "Fixture Organization",
+    "verify_info": "Sanitized verification statement"
+  }
+}

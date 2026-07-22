@@ -1,0 +1,36 @@
+{
+  "pages": [
+    {
+      "base_resp": {
+        "ret": 0
+      },
+      "continue_flag": true,
+      "buffer": "fixture-buffer-2",
+      "elected_comment": [
+        {
+          "content_id": "fixture-comment-001",
+          "nick_name": "读者甲",
+          "content": "第一条",
+          "create_time": 1767225600,
+          "like_num": 2
+        }
+      ]
+    },
+    {
+      "base_resp": {
+        "ret": 0
+      },
+      "continue_flag": false,
+      "buffer": "",
+      "elected_comment": [
+        {
+          "content_id": "fixture-comment-002",
+          "nick_name": "读者乙",
+          "content": "第二条",
+          "create_time": 1767225601,
+          "like_num": 1
+        }
+      ]
+    }
+  ]
+}
