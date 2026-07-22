@@ -428,6 +428,7 @@ jobs:
           XDG_CACHE_HOME="$smoke_root/cache" \
           XDG_STATE_HOME="$smoke_root/state" \
             "$binary" status --json > "$smoke_root/status.json"
+          echo 'status command completed'
           jq -e '.success == true' "$smoke_root/status.json" >/dev/null
           echo 'status envelope verified'
           jq -e '.data.runtime.storage.databaseAvailable == true' "$smoke_root/status.json" >/dev/null
