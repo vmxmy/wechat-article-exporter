@@ -33,6 +33,22 @@ func (injectedClock) After(time.Duration) <-chan time.Time {
 	return make(chan time.Time)
 }
 
+func TestSecretBackendEnvironmentSupportsEphemeralSmokeRuntime(t *testing.T) {
+	t.Setenv("WECHAT_ARTICLE_SECRET_BACKEND", "memory")
+	store, err := defaultSecretStoreFromEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Backend() != "memory-ephemeral" {
+		t.Fatalf("Backend() = %q", store.Backend())
+	}
+
+	t.Setenv("WECHAT_ARTICLE_SECRET_BACKEND", "plaintext")
+	if _, err := defaultSecretStoreFromEnvironment(); err == nil {
+		t.Fatal("unsupported secret backend was accepted")
+	}
+}
+
 func TestHelpDocumentsStableCommandsAndStructuredInput(t *testing.T) {
 	application, stdout, _ := newTestApp(t)
 	if err := application.Execute(context.Background(), []string{"help"}); err != nil {

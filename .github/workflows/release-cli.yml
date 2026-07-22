@@ -416,6 +416,7 @@ jobs:
           BINARY_NAME: ${{ matrix.binary }}
           EXPECTED_GOOS: ${{ matrix.goos }}
           EXPECTED_GOARCH: ${{ matrix.goarch }}
+          WECHAT_ARTICLE_SECRET_BACKEND: memory
         run: |
           set -euo pipefail
           binary="$(find smoke -type f -name "$BINARY_NAME" -print -quit)"

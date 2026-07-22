@@ -77,7 +77,10 @@ func NewWithDependencies(
 	}
 	secretStore := dependencies.Secrets
 	if secretStore == nil {
-		secretStore = secrets.NewKeyringStore("")
+		secretStore, err = defaultSecretStoreFromEnvironment()
+		if err != nil {
+			return nil, err
+		}
 		dependencies.Secrets = secretStore
 	}
 	registry := profiles.NewRegistry(paths, secretStore)
@@ -114,6 +117,17 @@ func pathOptionsFromEnvironment() profiles.PathOptions {
 		DataRoot:   strings.TrimSpace(os.Getenv("WECHAT_ARTICLE_DATA_ROOT")),
 		CacheRoot:  strings.TrimSpace(os.Getenv("WECHAT_ARTICLE_CACHE_ROOT")),
 		StateRoot:  strings.TrimSpace(os.Getenv("WECHAT_ARTICLE_STATE_ROOT")),
+	}
+}
+
+func defaultSecretStoreFromEnvironment() (secrets.Store, error) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("WECHAT_ARTICLE_SECRET_BACKEND"))) {
+	case "", "os-keyring":
+		return secrets.NewKeyringStore(""), nil
+	case "memory":
+		return secrets.NewMemoryStore(), nil
+	default:
+		return nil, errors.New("WECHAT_ARTICLE_SECRET_BACKEND must be os-keyring or memory")
 	}
 }
 
