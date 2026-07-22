@@ -9,6 +9,18 @@ This document is the non-secret operational record for the final repository vers
 
 The archive tag is created only after the compatibility release workflow has passed. Record the immutable tag and source commit in the release body and in the commands below; never archive from an uncommitted working tree.
 
+## Immutable archive identity
+
+- Archive tag: `wechat-article-web-final-2026-07-22`
+- Source commit: `bda9f3bc3605c8c47e5b4f4cad20bf35c35844e4`
+- Git tree: `ae633b07c33be7fc855148ef84e114eab492ab3b`
+- Compatibility release: <https://github.com/vmxmy/wechat-article-exporter/releases/tag/wechat-article-v2.0.0>
+- Final Web-capable archive release: <https://github.com/vmxmy/wechat-article-exporter/releases/tag/wechat-article-web-final-2026-07-22>
+
+The archive release was published at `2026-07-22T14:42:57Z`. Its annotated tag resolves to the source commit and tree above. The tag is not claimed to carry a GPG signature.
+
+The release contains a deterministic `git archive` source tarball and `checksums.txt`. The published checksum was verified after re-downloading both assets. The extracted archive was checked for every preserved behavior, fixture, schema, migration, documentation, Web, Nitro, and Worker path listed below.
+
 ## Preserved behavior and schemas
 
 - Mandatory and intentionally retired behavior: `test/parity/matrix.json` and `docs/release/parity-report.md`.

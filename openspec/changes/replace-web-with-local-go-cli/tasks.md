@@ -169,7 +169,7 @@
 ## 17. Web and cloud retirement
 
 - [x] 17.1 Block new remote OAuth authorization after the announced deadline and return actionable local migration responses during the grace period.
-- [ ] 17.2 Tag and archive the final Web-capable release, sanitized fixtures, schema references, and operational rollback instructions.
+- [x] 17.2 Tag and archive the final Web-capable release, sanitized fixtures, schema references, and operational rollback instructions.
 - [ ] 17.3 Remove Nuxt pages, components, composables, browser-only state, AG Grid, Monaco, and obsolete frontend assets and dependencies.
 - [ ] 17.4 Remove Nitro APIs, server session/KV code, D1 mirroring, PDF server rendering, Web Docker artifacts, and Cloudflare Pages configuration.
 - [ ] 17.5 Remove the Cloudflare Worker MCP/OAuth implementation, bindings, secrets, deployment workflows, and remote client compatibility packages.
