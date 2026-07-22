@@ -162,7 +162,7 @@
 - [x] 16.2 Define the supported database compatibility window and add upgrade tests from every promised baseline.
 - [x] 16.3 Publish installation and upgrade instructions for macOS, Linux, and Windows, including Go-free release installation.
 - [x] 16.4 Rewrite primary documentation for local data paths, profiles, security, credentials, trusted proxies, backups, PDF browser requirements, Cobra, TUI, and stdio MCP.
-- [ ] 16.5 Publish the compatibility release with complete local functionality while retaining Web and remote MCP services.
+- [x] 16.5 Publish the compatibility release with complete local functionality while retaining Web and remote MCP services.
 - [x] 16.6 Publish deprecation notices and retirement dates in the Web UI, remote MCP authorization page, CLI status, README, and release notes.
 - [x] 16.7 Run the complete mandatory parity matrix and record the signed-off results and known intentional differences.
 

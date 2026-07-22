@@ -1,6 +1,6 @@
 # Web 与 remote MCP 兼容退役计划
 
-文档状态：2026-07-22。Nuxt Web、Nitro APIs 和 remote MCP/OAuth 当前仍在兼容期内，供旧用户导出浏览器数据和紧急回滚。本页是计划，不代表兼容版已经发布，也不代表退役操作已经完成。
+文档状态：2026-07-22。Nuxt Web、Nitro APIs 和 remote MCP/OAuth 当前仍在兼容期内，供旧用户导出浏览器数据和紧急回滚。兼容版 `wechat-article-v2.0.0` 已发布；最终 Web-capable 归档、云资源关闭和源码退役尚未完成。
 
 ## 门禁
 
@@ -12,7 +12,7 @@
 4. 最后一个 Web-capable tag、sanitized fixtures、schema 和回滚操作手册已归档；
 5. 用户已获得明确、带日期的迁移窗口和远程 OAuth 截止公告。
 
-当前 parity 报告见 [parity-report.md](./release/parity-report.md)。门禁未通过时，不删除 Web、Nitro、Worker、Cloudflare binding 或 secret。
+当前 parity 报告见 [parity-report.md](./release/parity-report.md)，兼容版见 [GitHub Release](https://github.com/vmxmy/wechat-article-exporter/releases/tag/wechat-article-v2.0.0)。最终 Web-capable 归档完成前，不删除 Web、Nitro、Worker、Cloudflare binding 或 secret。
 
 ## 公告时间线
 

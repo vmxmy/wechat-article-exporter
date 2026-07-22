@@ -20,7 +20,7 @@
 
 ## 发布与兼容期状态
 
-> 文档状态日期：**2026-07-22**。本地二进制的首个完整兼容版尚未在本文档中宣告发布；不要把现有 `v2.3.x` Web 版本理解为本地二进制版本。只有 GitHub Release 中出现 `wechat-article-v*` 标签及对应原生压缩包、`checksums.txt` 后，下面的免 Go 安装流程才可用于正式安装。
+> 文档状态日期：**2026-07-22**。首个完整本地兼容版 [`wechat-article-v2.0.0`] 已发布，包含 5 个原生平台压缩包、对应 CycloneDX SBOM 和 `checksums.txt`。现有 `v2.3.x` Web 版本与本地二进制版本号相互独立。
 
 Web 和 remote MCP 当前仍保留在兼容期内，供旧用户继续使用、导出数据和回滚。它们已进入弃用流程，**计划最早退役日期为 2026-12-31**；退役还必须同时满足：
 
@@ -277,5 +277,6 @@ MIT，详见 [LICENSE](./LICENSE)。
 [GitHub forks]: https://img.shields.io/github/forks/wechat-article/wechat-article-exporter?style=social&label=Fork
 [GitHub License]: https://img.shields.io/github/license/wechat-article/wechat-article-exporter?label=License
 [GitHub Releases]: https://github.com/wechat-article/wechat-article-exporter/releases
+[`wechat-article-v2.0.0`]: https://github.com/vmxmy/wechat-article-exporter/releases/tag/wechat-article-v2.0.0
 [Star History Chart]: https://api.star-history.com/svg?repos=wechat-article/wechat-article-exporter&type=Timeline
 [Star History Chart Link]: https://star-history.com/#wechat-article/wechat-article-exporter&Timeline
