@@ -423,11 +423,21 @@ jobs:
           "$binary" --version
           smoke_root="$RUNNER_TEMP/wechat-article-smoke"
           mkdir -p "$smoke_root/config" "$smoke_root/data" "$smoke_root/cache" "$smoke_root/state"
+          WECHAT_ARTICLE_CONFIG_ROOT="$smoke_root/config" \
+          WECHAT_ARTICLE_DATA_ROOT="$smoke_root/data" \
+          WECHAT_ARTICLE_CACHE_ROOT="$smoke_root/cache" \
+          WECHAT_ARTICLE_STATE_ROOT="$smoke_root/state" \
+          WECHAT_ARTICLE_CLI_CONFIG="$smoke_root/legacy-cli.json" \
           XDG_CONFIG_HOME="$smoke_root/config" \
           XDG_DATA_HOME="$smoke_root/data" \
           XDG_CACHE_HOME="$smoke_root/cache" \
           XDG_STATE_HOME="$smoke_root/state" \
-            "$binary" status --json > "$smoke_root/status.json"
+            "$binary" status --json > "$smoke_root/status.json" 2> "$smoke_root/status.stderr" || {
+              status=$?
+              sed -n '1,160p' "$smoke_root/status.stderr" >&2
+              test -s "$smoke_root/status.json" && sed -n '1,160p' "$smoke_root/status.json" >&2
+              exit "$status"
+            }
           echo 'status command completed'
           jq -e '.success == true' "$smoke_root/status.json" >/dev/null
           echo 'status envelope verified'
