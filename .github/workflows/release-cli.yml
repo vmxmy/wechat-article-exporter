@@ -354,6 +354,7 @@ jobs:
           grep -Fq "GOOS=$EXPECTED_GOOS" "$build_info"
           grep -Fq "GOARCH=$EXPECTED_GOARCH" "$build_info"
           grep -Fq 'CGO_ENABLED=0' "$build_info"
+          echo 'archive build metadata verified'
           jq -e --arg version "$RELEASE_VERSION" '.metadata.component.version == $version' "$sbom" >/dev/null
           jq -e --arg value "$EXPECTED_GOOS" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOOS" and .value == $value)' "$sbom" >/dev/null
           jq -e --arg value "$EXPECTED_GOARCH" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOARCH" and .value == $value)' "$sbom" >/dev/null
@@ -428,13 +429,19 @@ jobs:
           XDG_STATE_HOME="$smoke_root/state" \
             "$binary" status --json > "$smoke_root/status.json"
           jq -e '.success == true' "$smoke_root/status.json" >/dev/null
+          echo 'status envelope verified'
           jq -e '.data.runtime.storage.databaseAvailable == true' "$smoke_root/status.json" >/dev/null
+          echo 'database availability verified'
           jq -e '.data.runtime.storage.objectStoreReady == true' "$smoke_root/status.json" >/dev/null
+          echo 'object store readiness verified'
           build_info="$(dirname "$binary")/build-info.txt"
           test -f "$build_info"
           grep -Fq "GOOS=$EXPECTED_GOOS" "$build_info"
+          echo 'archive GOOS verified'
           grep -Fq "GOARCH=$EXPECTED_GOARCH" "$build_info"
+          echo 'archive GOARCH verified'
           grep -Fq 'CGO_ENABLED=0' "$build_info"
+          echo 'archive CGO policy verified'
 
   release:
     if: startsWith(github.ref, 'refs/tags/wechat-article-v')
