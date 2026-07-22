@@ -531,7 +531,7 @@ func TestEngineCancellationStopsNewItemsAndPersistsCancelledState(t *testing.T) 
 	}
 	engine, err := jobs.NewEngine(store, jobs.EngineOptions{
 		Owner: "worker-a", Scheduler: jobs.NewScheduler(jobs.Limits{Global: 1}),
-		LeaseDuration: time.Second, PollInterval: time.Millisecond, MaxAttempts: 1,
+		LeaseDuration: time.Second, PollInterval: 100 * time.Millisecond, MaxAttempts: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
