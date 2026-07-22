@@ -351,9 +351,9 @@ jobs:
           test -f "$(dirname "$binary")/LICENSE"
           test -f "$(dirname "$binary")/build-info.txt"
           build_metadata="$(go version -m "$binary")"
-          grep -q "GOOS=$EXPECTED_GOOS" <<<"$build_metadata"
-          grep -q "GOARCH=$EXPECTED_GOARCH" <<<"$build_metadata"
-          grep -q 'CGO_ENABLED=0' <<<"$build_metadata"
+          grep -Fq "GOOS=$EXPECTED_GOOS" <<<"$build_metadata"
+          grep -Fq "GOARCH=$EXPECTED_GOARCH" <<<"$build_metadata"
+          grep -Fq 'CGO_ENABLED=0' <<<"$build_metadata"
           jq -e --arg version "$RELEASE_VERSION" '.metadata.component.version == $version' "$sbom" >/dev/null
           jq -e --arg value "$EXPECTED_GOOS" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOOS" and .value == $value)' "$sbom" >/dev/null
           jq -e --arg value "$EXPECTED_GOARCH" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOARCH" and .value == $value)' "$sbom" >/dev/null
@@ -431,9 +431,9 @@ jobs:
           jq -e '.data.runtime.storage.databaseAvailable == true' "$smoke_root/status.json" >/dev/null
           jq -e '.data.runtime.storage.objectStoreReady == true' "$smoke_root/status.json" >/dev/null
           build_metadata="$(go version -m "$binary")"
-          grep -q "GOOS=$EXPECTED_GOOS" <<<"$build_metadata"
-          grep -q "GOARCH=$EXPECTED_GOARCH" <<<"$build_metadata"
-          if grep -q 'CGO_ENABLED=1' <<<"$build_metadata"; then
+          grep -Fq "GOOS=$EXPECTED_GOOS" <<<"$build_metadata"
+          grep -Fq "GOARCH=$EXPECTED_GOARCH" <<<"$build_metadata"
+          if grep -Fq 'CGO_ENABLED=1' <<<"$build_metadata"; then
             echo 'release binary unexpectedly enables CGO' >&2
             exit 1
           fi
