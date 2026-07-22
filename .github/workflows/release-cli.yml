@@ -350,10 +350,10 @@ jobs:
           test -f "$(dirname "$binary")/README.md"
           test -f "$(dirname "$binary")/LICENSE"
           test -f "$(dirname "$binary")/build-info.txt"
-          build_metadata="$(go version -m "$binary")"
-          grep -Fq "GOOS=$EXPECTED_GOOS" <<<"$build_metadata"
-          grep -Fq "GOARCH=$EXPECTED_GOARCH" <<<"$build_metadata"
-          grep -Fq 'CGO_ENABLED=0' <<<"$build_metadata"
+          build_info="$(dirname "$binary")/build-info.txt"
+          grep -Fq "GOOS=$EXPECTED_GOOS" "$build_info"
+          grep -Fq "GOARCH=$EXPECTED_GOARCH" "$build_info"
+          grep -Fq 'CGO_ENABLED=0' "$build_info"
           jq -e --arg version "$RELEASE_VERSION" '.metadata.component.version == $version' "$sbom" >/dev/null
           jq -e --arg value "$EXPECTED_GOOS" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOOS" and .value == $value)' "$sbom" >/dev/null
           jq -e --arg value "$EXPECTED_GOARCH" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOARCH" and .value == $value)' "$sbom" >/dev/null
@@ -430,10 +430,11 @@ jobs:
           jq -e '.success == true' "$smoke_root/status.json" >/dev/null
           jq -e '.data.runtime.storage.databaseAvailable == true' "$smoke_root/status.json" >/dev/null
           jq -e '.data.runtime.storage.objectStoreReady == true' "$smoke_root/status.json" >/dev/null
-          build_metadata="$(go version -m "$binary")"
-          grep -Fq "GOOS=$EXPECTED_GOOS" <<<"$build_metadata"
-          grep -Fq "GOARCH=$EXPECTED_GOARCH" <<<"$build_metadata"
-          grep -Fq 'CGO_ENABLED=0' <<<"$build_metadata"
+          build_info="$(dirname "$binary")/build-info.txt"
+          test -f "$build_info"
+          grep -Fq "GOOS=$EXPECTED_GOOS" "$build_info"
+          grep -Fq "GOARCH=$EXPECTED_GOARCH" "$build_info"
+          grep -Fq 'CGO_ENABLED=0' "$build_info"
 
   release:
     if: startsWith(github.ref, 'refs/tags/wechat-article-v')
