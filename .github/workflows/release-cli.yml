@@ -476,13 +476,18 @@ jobs:
           sha256sum --check checksums.txt
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: source
 
       - env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         shell: bash
-        run: >-
-          gh release create "$GITHUB_REF_NAME" "$GITHUB_WORKSPACE"/artifacts/*
-          --title "$GITHUB_REF_NAME — local compatibility release"
-          --notes-file RELEASE_NOTES.md
-          --verify-tag
+        run: |
+          set -euo pipefail
+          mapfile -d '' assets < <(find "$GITHUB_WORKSPACE/artifacts" -maxdepth 1 -type f -print0 | sort -z)
+          test "${#assets[@]}" -eq 11
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+            --title "$GITHUB_REF_NAME — local compatibility release" \
+            --notes-file "$GITHUB_WORKSPACE/source/RELEASE_NOTES.md" \
+            --verify-tag
