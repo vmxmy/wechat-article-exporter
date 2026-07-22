@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -199,12 +198,12 @@ func (runner *fakePDFRunner) Run(ctx context.Context, path string, args []string
 	for _, argument := range args {
 		if strings.HasPrefix(argument, "file://") {
 			runner.inputURL = argument
-			parsed, err := url.Parse(argument)
+			inputPath, err := fileURLPath(argument)
 			if err != nil {
 				runner.mu.Unlock()
 				return err
 			}
-			runner.inputPath = parsed.Path
+			runner.inputPath = inputPath
 			contents, err := os.ReadFile(runner.inputPath)
 			if err != nil {
 				runner.mu.Unlock()

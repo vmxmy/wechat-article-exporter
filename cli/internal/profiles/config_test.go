@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/runtimeutil"
 )
 
 func TestConfigStoreWritesAtomicVersionedConfiguration(t *testing.T) {
@@ -19,13 +21,7 @@ func TestConfigStoreWritesAtomicVersionedConfiguration(t *testing.T) {
 	if err := store.Write(configuration); err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("config mode = %o", info.Mode().Perm())
-	}
+	runtimeutil.AssertPrivatePermissions(t, path, 0o600)
 	read, _, err := store.Read()
 	if err != nil {
 		t.Fatal(err)

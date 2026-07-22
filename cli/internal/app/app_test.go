@@ -21,6 +21,7 @@ import (
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/network"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/runtime"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/runtimeutil"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
@@ -462,13 +463,7 @@ func TestProcessContractReusesSavedTokenAndCallsDomainAlias(t *testing.T) {
 	if !ok || text.Text != "text:https://mp.weixin.qq.com/s/example" {
 		t.Fatalf("content[0] = %#v", output.Content[0])
 	}
-	info, err := os.Stat(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("config mode = %o", info.Mode().Perm())
-	}
+	runtimeutil.AssertPrivatePermissions(t, configPath, 0o600)
 }
 
 func newTestApp(t *testing.T) (*App, *bytes.Buffer, *bytes.Buffer) {

@@ -42,9 +42,14 @@ func TestProcessSanitizedGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	expected = normalizeGoldenLineEndings(expected)
 	if !bytes.Equal(actual, expected) {
 		t.Fatalf("golden mismatch\n--- expected\n%s\n--- actual\n%s", expected, actual)
 	}
+}
+
+func normalizeGoldenLineEndings(value []byte) []byte {
+	return bytes.ReplaceAll(value, []byte("\r\n"), []byte("\n"))
 }
 
 func TestSupportedPayloadVariants(t *testing.T) {

@@ -1,11 +1,11 @@
 package profiles
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/runtimeutil"
 )
 
 func TestResolvePortablePathsStayBelowExplicitRoot(t *testing.T) {
@@ -26,13 +26,7 @@ func TestResolvePortablePathsStayBelowExplicitRoot(t *testing.T) {
 	if err := paths.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(paths.DataRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o700 {
-		t.Fatalf("data root mode = %o", info.Mode().Perm())
-	}
+	runtimeutil.AssertPrivatePermissions(t, paths.DataRoot, 0o700)
 }
 
 func TestResolvePathsRejectsUnsafePortableConfiguration(t *testing.T) {

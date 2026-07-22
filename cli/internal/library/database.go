@@ -112,7 +112,7 @@ func (database *Database) Backup(ctx context.Context, destination string) error 
 	if err != nil {
 		return fmt.Errorf("create database backup: %w", err)
 	}
-	if file, openErr := os.Open(temporary); openErr == nil {
+	if file, openErr := os.OpenFile(temporary, os.O_RDWR, 0); openErr == nil {
 		if syncErr := file.Sync(); syncErr != nil {
 			file.Close()
 			_ = os.Remove(temporary)

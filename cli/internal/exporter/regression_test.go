@@ -385,7 +385,11 @@ func (runner *deterministicRegressionPDFRunner) Run(ctx context.Context, _ strin
 	inputPath := ""
 	for _, argument := range args {
 		if strings.HasPrefix(argument, "file://") {
-			inputPath = strings.TrimPrefix(argument, "file://")
+			path, err := fileURLPath(argument)
+			if err != nil {
+				return err
+			}
+			inputPath = path
 		}
 	}
 	data, err := os.ReadFile(inputPath)

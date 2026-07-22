@@ -1,9 +1,10 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/runtimeutil"
 )
 
 func TestStoreWritesMode0600AndKeepsExistingConfigShape(t *testing.T) {
@@ -20,13 +21,7 @@ func TestStoreWritesMode0600AndKeepsExistingConfigShape(t *testing.T) {
 	if err := store.Write(want); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat() error = %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("config mode = %o, want 600", got)
-	}
+	runtimeutil.AssertPrivatePermissions(t, path, 0o600)
 	got, err := store.Read()
 	if err != nil {
 		t.Fatalf("Read() error = %v", err)

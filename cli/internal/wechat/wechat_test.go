@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/runtimeutil"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 )
 
@@ -567,13 +567,7 @@ func TestWriteAndRenderQRImage(t *testing.T) {
 	if err := WriteQRImage(path, pngBytes); err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("mode = %o", info.Mode().Perm())
-	}
+	runtimeutil.AssertPrivatePermissions(t, path, 0o600)
 	text, err := RenderQRImageText(pngBytes)
 	if err != nil {
 		t.Fatal(err)

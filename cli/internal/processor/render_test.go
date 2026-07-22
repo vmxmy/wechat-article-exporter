@@ -349,7 +349,7 @@ func readGolden(t *testing.T, name string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(data)
+	return strings.ReplaceAll(string(data), "\r\n", "\n")
 }
 
 func assertJSONEqual(t *testing.T, actual, expected any) {

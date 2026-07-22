@@ -1,0 +1,9 @@
+* text=auto
+
+# Parser/export fixtures are byte-level compatibility contracts. Keep their
+# line endings stable on Windows so golden tests remain cross-platform.
+cli/internal/processor/testdata/** text eol=lf
+test/baseline/** text eol=lf
+test/fixtures/** text eol=lf
+test/parity/** text eol=lf
+samples/** text eol=lf

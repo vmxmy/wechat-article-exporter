@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/runtimeutil"
 )
 
 var fastVaultParameters = VaultParameters{Memory: 8 * 1024, Iterations: 1, Parallelism: 1}
@@ -31,13 +33,7 @@ func TestVaultRequiresInitializationAndUnlock(t *testing.T) {
 	if strings.Contains(string(data), "secret-cookie") {
 		t.Fatalf("vault contains plaintext: %s", data)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("vault mode = %o", info.Mode().Perm())
-	}
+	runtimeutil.AssertPrivatePermissions(t, path, 0o600)
 	store.Lock()
 	if _, err := store.Get(context.Background(), ref); !errors.Is(err, ErrVaultLocked) {
 		t.Fatalf("Get(locked) error = %v", err)

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -483,6 +484,13 @@ func copyWithContext(ctx context.Context, destination io.Writer, source io.Reade
 }
 
 func syncDirectory(path string) error {
+	if runtime.GOOS == "windows" {
+		// Windows does not provide durable directory fsync semantics through
+		// os.File.Sync; opening a directory handle and flushing it commonly
+		// returns ERROR_ACCESS_DENIED. The staged file itself is synced before
+		// the atomic commit.
+		return nil
+	}
 	directory, err := os.Open(path)
 	if err != nil {
 		return err

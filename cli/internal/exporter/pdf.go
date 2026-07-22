@@ -562,11 +562,22 @@ func pdfCSSURLs(value string) []string {
 }
 
 func fileURL(path string) string {
-	path = filepath.ToSlash(path)
-	if len(path) > 1 && path[1] == ':' {
-		path = "/" + path
+	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
+}
+
+func fileURLPath(value string) (string, error) {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", err
 	}
-	return (&url.URL{Scheme: "file", Path: path}).String()
+	if parsed.Scheme != "file" {
+		return "", fmt.Errorf("expected file URL")
+	}
+	path := parsed.Path
+	if runtime.GOOS == "windows" && len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+		path = path[1:]
+	}
+	return filepath.FromSlash(path), nil
 }
 
 func normalizePDFPageFormat(value string) (string, error) {
