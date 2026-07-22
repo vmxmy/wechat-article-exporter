@@ -562,7 +562,14 @@ func pdfCSSURLs(value string) []string {
 }
 
 func fileURL(path string) string {
-	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
+	path = filepath.ToSlash(path)
+	if len(path) >= 2 && path[1] == ':' {
+		// RFC 8089 represents an absolute Windows drive path with an empty
+		// authority and a leading slash: file:///C:/path. Without it net/url
+		// treats the drive letter as the host.
+		path = "/" + path
+	}
+	return (&url.URL{Scheme: "file", Path: path}).String()
 }
 
 func fileURLPath(value string) (string, error) {
@@ -572,6 +579,9 @@ func fileURLPath(value string) (string, error) {
 	}
 	if parsed.Scheme != "file" {
 		return "", fmt.Errorf("expected file URL")
+	}
+	if parsed.Host != "" && parsed.Host != "localhost" {
+		return "", fmt.Errorf("unexpected file URL authority %q", parsed.Host)
 	}
 	path := parsed.Path
 	if runtime.GOOS == "windows" && len(path) >= 3 && path[0] == '/' && path[2] == ':' {

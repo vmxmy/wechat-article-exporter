@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -83,6 +84,21 @@ func TestRenderPDFUsesOnlyLocalSelfContainedHTML(t *testing.T) {
 	data, err := os.ReadFile(runner.inputPath)
 	if err == nil || len(data) != 0 {
 		t.Fatalf("temporary HTML survived render: err=%v bytes=%d", err, len(data))
+	}
+}
+
+func TestFileURLRoundTripsPlatformAbsolutePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "parent with spaces", "article.html")
+	value := fileURL(path)
+	parsed, err := fileURLPath(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed != path {
+		t.Fatalf("file URL round trip = %q, want %q (URL %q)", parsed, path, value)
+	}
+	if runtime.GOOS == "windows" && !strings.HasPrefix(value, "file:///") {
+		t.Fatalf("Windows absolute file URL = %q, want file:/// prefix", value)
 	}
 }
 
