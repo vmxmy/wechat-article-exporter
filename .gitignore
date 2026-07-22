@@ -5,6 +5,7 @@
 .nitro
 .cache
 dist
+cli/bin
 
 # Node dependencies
 node_modules
