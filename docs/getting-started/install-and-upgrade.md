@@ -2,7 +2,7 @@
 
 `wechat-article` 的正式发行物是 GitHub Release 中的原生压缩包。普通用户不需要安装 Go、Node.js、Docker 或数据库服务。
 
-> 当前仓库仍处于兼容版开发阶段。只有出现 `wechat-article-v*` 稳定标签、目标平台压缩包、SBOM 和 `checksums.txt` 后，才表示对应版本已正式发布。
+只有出现 `wechat-article-v*` 稳定标签、目标平台压缩包、SBOM 和 `checksums.txt` 后，才表示对应版本已正式发布。首个完整本地稳定版为 `wechat-article-v2.0.0`。
 
 ## 选择发行物
 

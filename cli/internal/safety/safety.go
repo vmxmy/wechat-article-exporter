@@ -8,57 +8,13 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
-
-var currentReadTools = map[string]struct{}{
-	"download_article":    {},
-	"search_accounts":     {},
-	"list_articles":       {},
-	"get_account_by_url":  {},
-	"get_account_details": {},
-	"get_author_info":     {},
-	"list_album":          {},
-	"get_account_name":    {},
-}
 
 var sensitiveKey = regexp.MustCompile(`(?i)(?:authorization|proxy[_-]?authorization|access[_-]?token|refresh[_-]?token|appmsg[_-]?token|pass[_-]?ticket|session(?:id|token|cookie|secret)?$|api[_-]?token|auth[_-]?key|api[_-]?key|client[_-]?secret|private[_-]?key|password|cookies?|credentials?(?:value|data|payload|secret|ref)?$|secrets?(?:value|data|payload|ref)?$|uin|user[_-]?uin|wxtoken|(^|[_-])token($|[_-])|(^|[_-])key($|[_-]))`)
 var sensitiveQueryKey = regexp.MustCompile(`(?i)^(?:access_token|refresh_token|appmsg_token|pass_ticket|key|uin|user_uin|wxtoken|auth_key|authorization|proxy_authorization|cookie|credential|session)$`)
 var bearerValue = regexp.MustCompile(`(?i)\b(Bearer|Basic)\s+[^\s,;]+`)
 var headerValue = regexp.MustCompile(`(?im)\b(?:proxy-authorization|authorization|set-cookie|cookie)\s*:\s*[^\r\n]+`)
 var namedSecretValue = regexp.MustCompile(`(?i)["']?\b(?:access[_-]?token|refresh[_-]?token|appmsg[_-]?token|pass[_-]?ticket|auth[_-]?key|proxy[_-]?authorization|authorization|cookies?|set[-_]?cookie|session(?:id)?|sid|bizuin|uuid|key)["']?\s*[:=]\s*["']?[^&\s,;"'}]+["']?`)
-
-func RequiredConfirmation(tool *mcp.Tool) string {
-	if tool.Annotations != nil {
-		if tool.Annotations.DestructiveHint != nil && *tool.Annotations.DestructiveHint {
-			return tool.Name
-		}
-	}
-	if _, ok := currentReadTools[tool.Name]; ok {
-		return ""
-	}
-	return tool.Name
-}
-
-func AssertConfirmation(tool *mcp.Tool, confirmation string) error {
-	required := RequiredConfirmation(tool)
-	if required != "" && confirmation != required {
-		return fmt.Errorf("refusing protected operation without exact confirmation; retry with --confirm %s, or inspect it first with --dry-run", required)
-	}
-	return nil
-}
-
-func DryRun(toolName string, arguments map[string]any) map[string]any {
-	return map[string]any{
-		"success":   true,
-		"dryRun":    true,
-		"operation": "mcp.tools/call",
-		"tool":      toolName,
-		"arguments": Redact(arguments, ""),
-		"note":      "No MCP connection or tool call was made.",
-	}
-}
 
 func Redact(value any, key string) any {
 	if isSensitiveKey(key) && !isPublicSessionContainer(value, key) {

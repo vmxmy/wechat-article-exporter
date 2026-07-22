@@ -1,71 +1,80 @@
 # 贡献指南
 
-感谢您对本项目的兴趣！我们非常欢迎各种形式的贡献，包括但不限于代码、文档、Bug 报告和功能建议。🙌
+本仓库维护 `wechat-article` 本地 Go 产品。请先阅读 [行为准则](./CODE_OF_CONDUCT.md)，并在提交前搜索现有 Issue。
 
-## 行为准则
+## 开发环境
 
-本项目遵循 [Contributor Covenant 行为准则](./CODE_OF_CONDUCT.md)。请在所有互动中保持友好和尊重。
+- Go 1.25 或更高版本；
+- Git；
+- 可选：本机 Chromium 系浏览器，用于 PDF 集成验证；
+- 可选：LibreOffice Writer，用于 DOCX 打开验证。
 
-## 开发环境搭建
-
-### 克隆仓库
-
-```shell
+```bash
 git clone git@github.com:wechat-article/wechat-article-exporter.git
+cd wechat-article-exporter/cli
+go mod download
+go test ./...
+go build -o ./bin/wechat-article ./cmd/wechat-article
 ```
 
-### 安装 NodeJS
+本地启动：
 
-> 本项目要求 Node >= 22
-
-按照 Node.js 官方的[安装指南](https://nodejs.org/en/download)进行安装。
-
-### 安装项目依赖
-
-> 本项目使用 yarn@1.22 进行依赖管理
-
-```shell
-corepack enable
-corepack prepare yarn@1.22.22 --activate
-yarn
+```bash
+cd cli
+go run ./cmd/wechat-article help
+go run ./cmd/wechat-article status --json
+go run ./cmd/wechat-article
 ```
 
-### 本地运行
+最后一条命令需要真实 TTY，进入 Bubble Tea 工作区。开发时可通过 `--debug` 打开脱敏的详细日志。
 
-```shell
-yarn dev
+## 代码与模块
+
+- `cli/internal/application`：Cobra、TUI、MCP 共用的用例层；
+- `wechat`、`network`：微信协议与路由策略；
+- `library`、`objects`、`jobs`：SQLite、对象存储和持久化任务；
+- `processor`、`exporter`：解析、渲染和所有导出格式；
+- `profiles`、`secrets`：profile 配置和凭据；
+- `tui`、`mcp`、`app`：三个产品适配器与组合根。
+
+业务规则应进入共享模块，不要在 Cobra、Bubble Tea 或 MCP 适配器中重复实现。
+
+## 提交前验证
+
+至少运行：
+
+```bash
+cd cli
+gofmt -w $(find . -name '*.go' -type f)
+go test ./...
+go vet ./...
 ```
 
+涉及并发、任务、数据库或资源生命周期时再运行：
 
-## 如何贡献
+```bash
+go test -race ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 -checks='SA*,S1*,QF*' ./...
+```
 
-### 1. 报告 Bug 或建议功能
-- 先搜索现有 [Issues](https://github.com/wechat-article/wechat-article-exporter/issues)，避免重复。
-- 如果没有找到，创建一个新 Issue。
-    - Bug 报告请包含：复现步骤、预期行为、实际行为、环境信息（操作系统、浏览器、版本等）。
-    - 功能建议请详细描述需求和使用场景。
+涉及解析和导出时，更新 `samples/` 或对应 `internal/*/testdata/` fixture，并运行相关 golden/结构测试。涉及数据库 schema 时，必须增加顺序 migration 和所有受支持 baseline 的升级测试。
 
-### 2. 提交代码
-请遵循以下流程：
+## 安全要求
 
-1. Fork 本仓库。
-2. 创建特性分支：`git checkout -b feature/你的功能描述` 或 `fix/你的修复描述`。
-3. 安装开发依赖并运行项目（参考 开发环境搭建）。
-4. 编写代码，确保：
-    - **仅提交必要文件**。
-    - 遵循项目代码风格（使用 Prettier 工具）。
-    - 添加或更新测试用例。
-    - 通过所有测试：`yarn test`（或你的测试命令）。
-5. 提交时使用清晰的 Commit 消息。
-6. Push 到你的 Fork 并打开 Pull Request。
-    - PR 标题和描述要清晰，引用相关 Issue（如 `fixes #123`）。
-    - **如果是重大更改，请先开 Issue 讨论**。
+- 不提交微信 Cookie、token、Credential、代理授权、文章私有数据或真实数据库；
+- fixture 必须脱敏；
+- 新日志、错误、JSON 和诊断字段必须经过统一 redaction；
+- 敏感请求不得默认经过未受信任代理；
+- MCP stdout 不得输出日志、banner 或进度；
+- 破坏性操作必须保留精确确认值和可恢复性说明。
 
-### 3. 文档或翻译贡献
-- 文档请修改 [docs](https://github.com/wechat-article/docs) 项目
-- 同样通过 Pull Request 提交
+## Pull Request
 
-### 4. 代码风格指南
-- 代码格式化采用 prettier
-- 变量命名采用 camelCase
-- import 顺序采用`yarn format`命令格式化
+PR 请说明用户可见变化、测试命令、配置/迁移影响、已知缺口。提交信息保持窄范围，例如：
+
+```text
+fix: resume comment replies from saved checkpoint
+feat: add deterministic markdown batch manifests
+```
+
+不要在同一提交中混入无关格式化或生成文件。

@@ -12,11 +12,9 @@ import (
 	"sync"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
-	"github.com/wechat-article/wechat-article-exporter/cli/internal/config"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/exporter"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/jobs"
-	"github.com/wechat-article/wechat-article-exporter/cli/internal/legacyremote"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/network"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/objects"
@@ -30,17 +28,16 @@ import (
 // Tests and embedders can replace every external dependency without changing
 // Cobra, Bubble Tea, MCP, or application behavior.
 type Dependencies struct {
-	LegacyConfig *config.Store
-	PathOptions  profiles.PathOptions
-	HTTP         network.Doer
-	Clock        runtimeenv.Clock
-	Filesystem   runtimeenv.Filesystem
-	Browser      runtimeenv.BrowserDiscovery
-	PDFRunner    exporter.ProcessRunner
-	Signals      runtimeenv.SignalSource
-	Secrets      secrets.Store
-	Executable   string
-	Worker       WorkerLauncher
+	PathOptions profiles.PathOptions
+	HTTP        network.Doer
+	Clock       runtimeenv.Clock
+	Filesystem  runtimeenv.Filesystem
+	Browser     runtimeenv.BrowserDiscovery
+	PDFRunner   exporter.ProcessRunner
+	Signals     runtimeenv.SignalSource
+	Secrets     secrets.Store
+	Executable  string
+	Worker      WorkerLauncher
 
 	// ApplicationFactory is primarily a contract-test seam. Production leaves
 	// it nil so the full profile-isolated SQLite/object/session runtime is built.
@@ -341,14 +338,6 @@ func defaultProfile(registry *profiles.Registry) (profiles.Profile, error) {
 		return profiles.Profile{}, fmt.Errorf("load active profile: %v; create default profile: %w", err, createErr)
 	}
 	return created, nil
-}
-
-func newLegacyAdapter(store *config.Store, httpDoer network.Doer) *legacyremote.Adapter {
-	httpClient, ok := httpDoer.(*http.Client)
-	if !ok {
-		httpClient = &http.Client{Transport: roundTripperFromDoer{doer: httpDoer}}
-	}
-	return legacyremote.New(store, Version, httpClient)
 }
 
 var _ jobs.Manager = (*library.JobStore)(nil)

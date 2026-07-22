@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/safety"
-	"github.com/wechat-article/wechat-article-exporter/cli/internal/tui"
 )
 
 const JSONSchemaVersion = "wechat-article-cli/v1"
@@ -30,18 +28,11 @@ type errorDetail struct {
 }
 
 func (a *App) output(value any) error {
-	if !a.jsonOut && tui.IsInteractive(a.stdin, a.stdout) {
-		if result, ok := value.(*mcp.CallToolResult); ok {
-			if renderToolResult(a.stdout, result) {
-				return nil
-			}
-		}
-	}
 	return writeSuccessJSON(a.stdout, value)
 }
 
 func writeSuccessJSON(output io.Writer, value any) error {
-	value = unwrapLegacySuccess(value)
+	value = normalizeSuccessData(value)
 	envelope := successEnvelope{SchemaVersion: JSONSchemaVersion, Success: true, Data: safety.Redact(value, "")}
 	encoder := json.NewEncoder(output)
 	encoder.SetIndent("", "  ")
@@ -49,7 +40,7 @@ func writeSuccessJSON(output io.Writer, value any) error {
 	return encoder.Encode(envelope)
 }
 
-func unwrapLegacySuccess(value any) any {
+func normalizeSuccessData(value any) any {
 	object, ok := value.(map[string]any)
 	if !ok {
 		return value

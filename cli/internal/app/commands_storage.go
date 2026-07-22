@@ -323,13 +323,9 @@ func (a *App) diagnosticsCommand() *cobra.Command {
 				}
 			}
 			browser, browserErr := a.core.DiscoverBrowser(command.Context())
-			migration, migrationErr := a.legacyMigration()
-			if migrationErr != nil {
-				return migrationErr
-			}
 			data := map[string]any{
 				"runtime": runtimeStatus, "session": session, "jobs": jobs, "proxies": routes,
-				"browser": browser, "legacyMigration": migration,
+				"browser": browser, "retirement": retirementState(),
 				"system": map[string]any{"goos": runtime.GOOS, "goarch": runtime.GOARCH, "goVersion": runtime.Version()},
 			}
 			if jobsErr != nil {
@@ -345,33 +341,15 @@ func (a *App) diagnosticsCommand() *cobra.Command {
 	return command
 }
 
-func (a *App) legacyMigration() (map[string]any, error) {
-	data := map[string]any{
-		"detected":  false,
-		"message":   "Normal commands are local-first. Use `wechat-article legacy ...` only during the compatibility window.",
-		"nextSteps": []string{"wechat-article profile create <name>", "wechat-article login --qr-output <path>"},
-		"compatibility": map[string]any{
-			"phase": "local-preview", "webRetained": true, "remoteMCPRetained": true,
-			"retirementBlocked": true,
-			"reason":            "A stable compatibility release and a signed green mandatory parity matrix are still required before Web or remote MCP retirement.",
-		},
+func retirementState() map[string]any {
+	return map[string]any{
+		"phase":             "retired",
+		"webRetained":       false,
+		"remoteMCPRetained": false,
+		"retirementBlocked": false,
+		"remoteOAuth":       false,
+		"message":           "Project-operated Web, remote MCP, and remote OAuth services are retired. Use local profiles and QR login.",
 	}
-	if a.store == nil {
-		return data, nil
-	}
-	legacy, err := a.store.Read()
-	if err != nil {
-		return nil, err
-	}
-	detected := strings.TrimSpace(legacy.Server) != "" || legacy.Tokens != nil || legacy.ClientInformation != nil
-	data["detected"] = detected
-	if detected {
-		data["configPath"] = a.store.Path()
-		data["preservedForRollback"] = true
-		data["oauthTokensImported"] = false
-		data["message"] = "Deprecated remote CLI configuration was detected and preserved for rollback. OAuth tokens are ignored by local login; create/use a local profile and scan a WeChat QR code."
-	}
-	return data, nil
 }
 
 func (a *App) completionCommand(root *cobra.Command) *cobra.Command {

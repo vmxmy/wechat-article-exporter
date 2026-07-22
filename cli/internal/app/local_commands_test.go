@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
-	"github.com/wechat-article/wechat-article-exporter/cli/internal/config"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/download"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/exporter"
@@ -1051,22 +1050,18 @@ func TestDestructiveCommandsRequireExactConfirmation(t *testing.T) {
 	}
 }
 
-func TestLocalFirstSessionCommandsAndLegacyMigrationMessaging(t *testing.T) {
+func TestLocalFirstSessionCommandsAndRetirementMessaging(t *testing.T) {
 	applicationAdapter, stdout, stderr := newTestApp(t)
 	core := &localSessionCommandApplication{commandJobApplication: commandJobApplication{}}
 	applicationAdapter.core = core
-	if err := applicationAdapter.store.Write(config.File{
-		Server: "https://legacy.example", Tokens: &config.Tokens{AccessToken: "legacy-secret"},
-	}); err != nil {
-		t.Fatal(err)
-	}
 
 	if err := applicationAdapter.Execute(context.Background(), []string{"status", "--json"}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), `"detected": true`) || !strings.Contains(stdout.String(), `"oauthTokensImported": false`) ||
-		strings.Contains(stdout.String(), "legacy-secret") {
-		t.Fatalf("local status migration message = %s", stdout.String())
+	for _, expected := range []string{`"phase": "retired"`, `"webRetained": false`, `"remoteMCPRetained": false`, `"remoteOAuth": false`} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("local retirement status missing %q: %s", expected, stdout.String())
+		}
 	}
 
 	stdout.Reset()
@@ -1092,13 +1087,9 @@ func TestLocalFirstSessionCommandsAndLegacyMigrationMessaging(t *testing.T) {
 	}
 
 	stdout.Reset()
-	if err := applicationAdapter.Execute(context.Background(), []string{"legacy", "--help"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, expected := range []string{"deprecated", "local profile", "never copied"} {
-		if !strings.Contains(strings.ToLower(stdout.String()), expected) {
-			t.Fatalf("legacy help missing %q:\n%s", expected, stdout.String())
-		}
+	err := applicationAdapter.Execute(context.Background(), []string{"legacy"})
+	if ExitCode(err) != 2 || !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("retired legacy command error=%v exit=%d", err, ExitCode(err))
 	}
 }
 

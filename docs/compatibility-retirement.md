@@ -1,42 +1,23 @@
-# Web 与 remote MCP 兼容退役计划
+# Web 与 remote MCP 退役状态
 
-文档状态：2026-07-22。Nuxt Web、Nitro APIs 和 remote MCP/OAuth 当前仍在兼容期内，供旧用户导出浏览器数据和紧急回滚。兼容版 `wechat-article-v2.0.0` 已发布；最终 Web-capable 归档、云资源关闭和源码退役尚未完成。
+文档状态：2026-07-22。
 
-## 门禁
+本地 `wechat-article` 已成为唯一产品。兼容版 `wechat-article-v2.0.0`、签署的 mandatory parity 报告和最终 Web-capable 归档均已发布；Nuxt、Nitro、Cloudflare Pages、Worker MCP/OAuth、远程 CLI 兼容包和 Web Docker 源码已从主线移除。
 
-退役只有在以下条件全部满足后才能开始：
+## 用户影响
 
-1. 发布至少一个包含完整本地功能和迁移工具的稳定 `wechat-article-v*` 兼容版；
-2. mandatory parity matrix 全绿并由发布负责人签署；
-3. Web 本地导出、CLI import/verify 和旧 remote 配置迁移均可用；
-4. 最后一个 Web-capable tag、sanitized fixtures、schema 和回滚操作手册已归档；
-5. 用户已获得明确、带日期的迁移窗口和远程 OAuth 截止公告。
+- 新安装和正常使用只需要本地二进制；
+- 账号搜索、同步、下载等联网功能从本机访问微信，或访问用户显式配置的代理；
+- 本地查询、导出、备份、完整性检查可在所需内容已经缓存时离线运行；
+- 历史 OAuth token 不会转换为本地微信会话，用户必须通过二维码登录；
+- 已在 Web 退役前导出的版本化 ZIP 仍可由 `migration inspect/import/verify` 导入。
 
-当前 parity 报告见 [parity-report.md](./release/parity-report.md)，兼容版见 [GitHub Release](https://github.com/vmxmy/wechat-article-exporter/releases/tag/wechat-article-v2.0.0)。最终 Web-capable 归档完成前，不删除 Web、Nitro、Worker、Cloudflare binding 或 secret。
+## 历史材料
 
-## 公告时间线
+最终 Web-capable tag、源代码归档、sanitized fixtures、schema 与无 secret 回滚说明见 [final-web-capable-release.md](./archive/final-web-capable-release.md)。兼容版发布证据见 [compatibility-release-v2.0.0.md](./release/compatibility-release-v2.0.0.md)，功能对等签署见 [parity-report.md](./release/parity-report.md)。
 
-计划最早退役日期为 2026-12-31，但它是门禁约束下的最早日期，不是无条件承诺。若 compatibility release、签署或迁移窗口晚于计划，日期必须向后调整并重新公告。
+历史服务恢复不属于正常用户支持路径。若运维应急恢复归档服务，不得修改、降级或导入用户的本地 SQLite；本地数据库继续由当前二进制的兼容窗口管理。
 
-## 用户迁移
+## 云端关闭证据
 
-1. 在兼容期 Web 的设置/迁移页面导出版本化 ZIP；该过程只读取浏览器 IndexedDB，不上传内容。
-2. 本地执行 `wechat-article migration inspect <archive.zip>`。
-3. 创建并选择 profile，执行 `migration import`，使用命令要求的精确确认值。
-4. 执行 `migration verify <archive.zip>`，核对记录、对象和缺失资源。
-5. 扫码建立新的本地微信会话。remote OAuth token 不会变成本地微信凭据。
-6. 在本地完成同步、下载、导出和备份 smoke 后，再删除浏览器站点数据。
-
-## remote OAuth grace period
-
-Worker 支持可选 `REMOTE_OAUTH_DISABLE_AFTER`。在真正公告截止日期前不配置该值，remote OAuth 保持兼容行为；截止后 `/authorize` 返回 HTTP 410 和本地迁移 URL。不得在仓库中写入虚构的生产截止时间。
-
-## 归档与回滚
-
-最后一个 Web-capable release 必须保留可复现源码、sanitized fixtures、Web archive schema、Cloudflare binding 清单和不包含 secret 的部署步骤。兼容期内的紧急回滚只恢复已归档 Web/MCP 服务，不修改或降级用户本地数据库。
-
-归档内容、历史基础设施清单和无 secret 回滚步骤见 [final-web-capable-release.md](./archive/final-web-capable-release.md)。
-
-## 最终关闭
-
-关闭阶段包括停止新授权、让旧客户端收到迁移响应、按政策到期 OAuth material、缩短并清理日志、删除 Pages/Worker/KV/D1 bindings 与 secret、验证无用户文章或凭据超期保留，最后才从生产代码移除 Web 和 Worker。
+项目关闭远程资源时必须保留不含 secret 和用户内容的操作收据：关闭前/后资源清单、删除响应、域名负向检查、时间戳、日志保留策略以及 KV/D1 不再保存用户文章或 Credential 的核验。具体证据记录在最终退役运维报告中，而不是在生产配置中保留 binding 或 secret。

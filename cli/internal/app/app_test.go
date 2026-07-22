@@ -5,23 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
-	"github.com/wechat-article/wechat-article-exporter/cli/internal/config"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
-	"github.com/wechat-article/wechat-article-exporter/cli/internal/legacyremote"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/network"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/runtime"
-	"github.com/wechat-article/wechat-article-exporter/cli/internal/runtimeutil"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
@@ -57,10 +51,15 @@ func TestHelpDocumentsStableCommandsAndStructuredInput(t *testing.T) {
 	output := stdout.String()
 	for _, expected := range []string{
 		"login", "logout", "profile", "article", "account", "album", "sync", "download", "metadata", "comments",
-		"credential", "proxy", "job", "export", "db", "diagnostics", "completion", "legacy", "--json",
+		"credential", "proxy", "job", "export", "db", "diagnostics", "completion", "--json",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("help output missing %q:\n%s", expected, output)
+		}
+	}
+	for _, command := range application.rootCommand().Commands() {
+		if command.Name() == "legacy" {
+			t.Fatalf("retired legacy command is still registered")
 		}
 	}
 }
@@ -152,33 +151,11 @@ func TestLocalLogoutUsesSharedApplication(t *testing.T) {
 	}
 }
 
-func TestLegacyCommandPreservesRemoteStatusBehavior(t *testing.T) {
-	applicationAdapter, stdout, _ := newTestApp(t)
-	server := "https://example.com"
-	if err := applicationAdapter.store.Write(config.File{
-		Server: server,
-		Tokens: &config.Tokens{AccessToken: "legacy-access", RefreshToken: "legacy-refresh"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := applicationAdapter.Execute(context.Background(), []string{"legacy", "status", "--json"}); err != nil {
-		t.Fatalf("Execute(legacy status) error = %v", err)
-	}
-	if strings.Contains(stdout.String(), "legacy-access") || strings.Contains(stdout.String(), "legacy-refresh") {
-		t.Fatalf("legacy status leaked token: %s", stdout.String())
-	}
-	var envelope struct {
-		Data struct {
-			Server        string `json:"server"`
-			Authenticated bool   `json:"authenticated"`
-			Legacy        bool   `json:"legacy"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
-		t.Fatal(err)
-	}
-	if envelope.Data.Server != server || !envelope.Data.Authenticated || !envelope.Data.Legacy {
-		t.Fatalf("legacy status = %#v", envelope.Data)
+func TestRetiredLegacyCommandIsAUsageError(t *testing.T) {
+	applicationAdapter, _, _ := newTestApp(t)
+	err := applicationAdapter.Execute(context.Background(), []string{"legacy", "status", "--json"})
+	if ExitCode(err) != 2 || !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("legacy command error=%v exit=%d", err, ExitCode(err))
 	}
 }
 
@@ -343,29 +320,6 @@ func TestInjectedBrowserDiscoveryRejectsEmptyExecutable(t *testing.T) {
 	}
 }
 
-func TestDryRunIsRedactedAndDoesNotNeedNetwork(t *testing.T) {
-	application, stdout, _ := newTestApp(t)
-	err := application.Execute(context.Background(), []string{
-		"legacy", "api", "call", "download_article",
-		"--input", `{"url":"https://mp.weixin.qq.com/s/example","auth_key":"secret"}`,
-		"--dry-run",
-	})
-	if err != nil {
-		t.Fatalf("Execute(dry-run) error = %v", err)
-	}
-	if strings.Contains(stdout.String(), "secret") {
-		t.Fatalf("dry-run leaked secret: %s", stdout.String())
-	}
-	var output map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
-		t.Fatalf("dry-run output is not JSON: %v", err)
-	}
-	data, ok := output["data"].(map[string]any)
-	if !ok || data["dryRun"] != true {
-		t.Fatalf("dryRun envelope = %#v", output)
-	}
-}
-
 func TestOutputAppliesCentralRedactionBeforeJSONSerialization(t *testing.T) {
 	applicationAdapter, stdout, _ := newTestApp(t)
 	applicationAdapter.jsonOut = true
@@ -392,20 +346,6 @@ func TestOutputAppliesCentralRedactionBeforeJSONSerialization(t *testing.T) {
 		if !strings.Contains(stdout.String(), retained) {
 			t.Fatalf("JSON output removed %q: %s", retained, stdout.String())
 		}
-	}
-}
-
-func TestAmbiguousInputAndCredentialedServerAreUsageErrors(t *testing.T) {
-	application, _, _ := newTestApp(t)
-	err := application.Execute(context.Background(), []string{"legacy", "api", "call", "download_article", "--input", "{}", "--stdin"})
-	if ExitCode(err) != 2 || !strings.Contains(err.Error(), "exactly one JSON input source") {
-		t.Fatalf("ambiguous input error = %v, code = %d", err, ExitCode(err))
-	}
-
-	application, _, _ = newTestApp(t)
-	err = application.Execute(context.Background(), []string{"legacy", "status", "--server", "https://user:password@example.com"})
-	if ExitCode(err) != 2 || !strings.Contains(err.Error(), "must not contain credentials") || strings.Contains(err.Error(), "password@example") {
-		t.Fatalf("credentialed server error = %v, code = %d", err, ExitCode(err))
 	}
 }
 
@@ -446,42 +386,6 @@ func TestCobraStatusMatchesApplicationRuntimeStatus(t *testing.T) {
 	}
 }
 
-func TestProcessContractReusesSavedTokenAndCallsDomainAlias(t *testing.T) {
-	server := newMCPTestServer(t)
-	application, stdout, _ := newTestApp(t)
-	configPath := filepath.Join(t.TempDir(), "cli.json")
-	application.store = config.NewStore(configPath)
-	application.legacy = legacyremote.New(application.store, Version, http.DefaultClient)
-	if err := application.store.Write(config.File{
-		Server: server.URL,
-		Tokens: &config.Tokens{AccessToken: "process-test-token", TokenType: "bearer", RefreshToken: "refresh-secret"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := application.Execute(context.Background(), []string{"legacy", "article", "download", "https://mp.weixin.qq.com/s/example", "--format", "text"}); err != nil {
-		t.Fatalf("Execute(article download) error = %v", err)
-	}
-	if strings.Contains(stdout.String(), "process-test-token") || strings.Contains(stdout.String(), "refresh-secret") {
-		t.Fatalf("CLI output leaked tokens: %s", stdout.String())
-	}
-	var envelope struct {
-		Data mcp.CallToolResult `json:"data"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
-		t.Fatalf("call output is not an MCP result: %v", err)
-	}
-	output := envelope.Data
-	if len(output.Content) != 1 {
-		t.Fatalf("content = %#v", output.Content)
-	}
-	text, ok := output.Content[0].(*mcp.TextContent)
-	if !ok || text.Text != "text:https://mp.weixin.qq.com/s/example" {
-		t.Fatalf("content[0] = %#v", output.Content[0])
-	}
-	runtimeutil.AssertPrivatePermissions(t, configPath, 0o600)
-}
-
 func newTestApp(t *testing.T) (*App, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	stdout := &bytes.Buffer{}
@@ -494,34 +398,7 @@ func newTestApp(t *testing.T) (*App, *bytes.Buffer, *bytes.Buffer) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = application.Close() })
-	application.store = config.NewStore(filepath.Join(t.TempDir(), "cli.json"))
-	application.legacy = legacyremote.New(application.store, Version, http.DefaultClient)
 	return application, stdout, stderr
-}
-
-func newMCPTestServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	server := mcp.NewServer(&mcp.Implementation{Name: "process-test", Version: "1.0.0"}, nil)
-	mcp.AddTool(server, &mcp.Tool{Name: "download_article", Description: "download article"}, func(_ context.Context, _ *mcp.CallToolRequest, input struct {
-		URL    string `json:"url"`
-		Format string `json:"format"`
-	}) (*mcp.CallToolResult, any, error) {
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: input.Format + ":" + input.URL}}}, nil, nil
-	})
-	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
-	testServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/mcp" {
-			http.NotFound(writer, request)
-			return
-		}
-		if request.Header.Get("Authorization") != "Bearer process-test-token" {
-			writer.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		handler.ServeHTTP(writer, request)
-	}))
-	t.Cleanup(testServer.Close)
-	return testServer
 }
 
 type fakeProxyManager struct {

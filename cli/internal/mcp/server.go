@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/safety"
 )
 
@@ -209,10 +208,8 @@ func (server *Server) logResponse(output io.Writer, response responseEnvelope) {
 		server.log(output, response.Error.Message)
 		return
 	}
-	result, ok := response.Result.(*sdk.CallToolResult)
+	result, ok := response.Result.(*CallToolResult)
 	if ok && result.IsError && len(result.Content) > 0 {
-		if text, textOK := result.Content[0].(*sdk.TextContent); textOK {
-			server.log(output, safety.RedactText(text.Text))
-		}
+		server.log(output, safety.RedactText(result.Content[0].Text))
 	}
 }

@@ -1,51 +1,59 @@
-# 本地 Go CLI 迁移与 Web 退役策略
+# 从旧 Web / remote CLI 迁移到本地 Go CLI
 
-本项目正在把 Nuxt Web、Nitro API、Cloudflare D1/KV、远程 MCP/OAuth 和 remote-only Go CLI 合并为一个本地优先的 Go 二进制。目标架构由 Cobra、Bubble Tea 和本地 stdio MCP 三个适配器共享同一套应用模块；正常使用不再依赖 `mp.ziikoo.app` 或 `mptext.ziikoo.app`。
+项目已完成从 Nuxt/Nitro/Cloudflare/remote OAuth 架构到本地 Go 二进制的迁移。主线不再包含可部署的旧 Web 或 Worker 服务；历史实现位于最终 Web-capable tag 和归档中。
 
-## 不会立即删除 Web
+## 已有 Web 导出 ZIP
 
-迁移按兼容窗口执行：
-
-1. 先冻结并自动校验功能对等矩阵。
-2. 实现本地配置、SQLite、对象存储、任务系统和安全凭据。
-3. 实现本地微信扫码登录、公众号发现、文章同步、下载、解析和导出。
-4. 实现完整 Bubble Tea 工作区和本地 stdio MCP。
-5. 提供浏览器 Dexie 数据导出和 CLI 导入工具。
-6. 至少发布一个完整本地版本，同时保留 Web 和远程 MCP 作为迁移与回滚窗口。
-7. 只有强制对等项全部通过，才允许删除 Web、Nitro、Cloudflare 和远程 MCP 代码。
-
-## 可执行退役门槛
-
-机器可读矩阵位于 `test/parity/matrix.json`。普通校验检查结构、分类和代码入口：
+如果你在服务退役前使用迁移页面生成了版本化 ZIP：
 
 ```bash
-npx vite-node --script test/parity/validate.ts
+wechat-article migration inspect ./legacy.zip
+wechat-article profile create imported
+wechat-article profile use imported
+wechat-article migration import ./legacy.zip \
+  --confirm 'import-legacy:./legacy.zip'
+wechat-article migration verify ./legacy.zip
 ```
 
-退役 gate 会在任一强制能力未通过时失败：
+`inspect` 在写入前验证 schema、manifest、记录和对象；`import` 使用 staging、对象去重和冲突策略；`verify` 比较源 manifest 与本地记录/对象计数和校验值。导入不会上传文章、资源、Cookie、Credential 或备份。
+
+## 没有 Web 导出 ZIP
+
+浏览器 IndexedDB 不能由本地 CLI 安全、通用地静默读取。若没有事先导出的 ZIP：
+
+1. 不要清理仍保存旧站点数据的浏览器 profile；
+2. 使用最后一个 Web-capable 归档在隔离环境中恢复仅供本地导出的历史前端；
+3. 按 [最终 Web 归档](../archive/final-web-capable-release.md) 的 immutable source、binding 清单和无 secret 回滚边界操作；
+4. 生成 ZIP 后立即回到当前 CLI 完成本地 inspect/import/verify；
+5. 不要把历史 Web 数据部署到公共多租户环境。
+
+历史恢复是数据救援流程，不是恢复项目运营服务的授权。
+
+## 旧 remote CLI 配置
+
+远程 MCP/OAuth 命令和兼容包已经移除。旧配置文件可以离线归档用于审计，但其 server、access token、refresh token 或 OAuth client 信息都不会被当前 CLI 读取或导入。
 
 ```bash
-npx vite-node --script test/parity/validate.ts -- --gate
+wechat-article profile create local
+wechat-article profile use local
+wechat-article login --qr-output ./wechat-login.png
 ```
 
-`tasks.md` 中 17.3–17.8 的删除任务不得在 gate 通过前开始。矩阵的 `passed` 必须有对应测试、fixture、产物或人工验收记录，不能只凭代码存在来修改。
+重新扫码后，会话保存在该 profile 的本地 secret store。不要把旧 OAuth token 复制到 profile 配置、SQLite 或 Credential 导入文件。
 
-## 分类口径
+## 迁移后验证
 
-- `mandatory-parity`：本地产品必须保留且验收通过。
-- `migration-only`：只为旧数据或旧客户端迁移保留，迁移窗口结束后可删除。
-- `intentional-retirement`：Web 托管形态特有能力，不迁移为本地产品功能。
-- `dev-only`：开发演示或调试页面，不是产品能力。
+```bash
+wechat-article status --json
+wechat-article db status --json
+wechat-article db integrity
+wechat-article article list --limit 20 --json
+wechat-article db backup --output ./backups/imported.zip
+wechat-article db verify ./backups/imported.zip
+```
 
-托管公共代理监控、Cloudflare D1 多租户同步、Web 内嵌 API 文档、支持/赞助页面和 `pages/dev/*` 属于明确退役项。它们的本地替代分别是本机代理健康、SQLite/备份、Cobra/MCP schema 文档、静态 README 链接和 Go 测试工具。
-
-## 用户数据与凭据
-
-- 浏览器 IndexedDB 不能在未经用户操作的情况下安全、通用地自动读取。
-- 最终 Web 兼容版本必须提供版本化导出包，CLI 在本地验证、暂存、导入并生成对账报告。
-- 旧 remote-only CLI 的 OAuth token 不会转换为本地微信会话；配置将保留用于回滚，同时引导用户建立 profile 并重新扫码。
-- 迁移过程不会上传文章、Cookie、Credential、代理认证或数据库备份。
+再完成一项联网同步、一篇正文及资源下载、所有所需格式导出和离线复查后，才删除旧浏览器 profile 或历史配置。PDF 还需分别验证“本机浏览器存在”和“浏览器缺失时返回明确依赖错误”两条路径。
 
 ## 回滚边界
 
-兼容窗口内的回滚只会重新部署已归档的 Web/MCP 版本，不会降级或修改用户的本地数据库。最终退役前必须保存最后一个 Web-capable Git tag、脱敏 fixtures、数据格式说明和运维恢复步骤。
+二进制升级回滚只遵守本地数据库兼容策略。历史 Web/MCP 归档即使被应急恢复，也不得修改或降级本地数据库。升级前使用 `db backup`；旧二进制遇到更新 schema 时必须拒绝写入。

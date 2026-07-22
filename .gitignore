@@ -1,13 +1,17 @@
-# Nuxt dev/build outputs
+# Go build and test outputs
+.cache
+dist
+cli/bin
+*.test
+*.out
+
+# Retired Web build outputs may still exist in old local workspaces
 .output
 .data
 .nuxt
 .nitro
-.cache
-dist
-cli/bin
 
-# Node dependencies
+# Local tooling dependencies (historical scripts or operator workspaces only)
 node_modules
 
 # Logs
@@ -38,12 +42,11 @@ docs/*
 !docs/compatibility-retirement.md
 samples/**/output
 
-# Local env files
+# Local environment files
 .env
 .env.*
-!.env.example
 
-# wrangler
+# Historical Cloudflare tooling state
 .wrangler
 .omx/
 .omc/

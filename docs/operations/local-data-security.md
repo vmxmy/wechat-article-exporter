@@ -1,6 +1,6 @@
 # 本地数据与安全
 
-`wechat-article` 默认把用户数据保存在本机。正常功能不依赖 `mp.ziikoo.app`、`mptext.ziikoo.app`、Cloudflare KV 或 D1；网络流量直接访问微信，或访问用户显式配置的代理。
+`wechat-article` 默认把用户数据保存在本机。项目运营的 Web、remote MCP、KV 和 D1 已退役；网络流量直接访问微信，或访问用户显式配置的代理。
 
 ## Profile 隔离
 
@@ -19,7 +19,7 @@ wechat-article status --json
 - 微信会话、文章 Credential 和代理 authorization 存入操作系统凭据库。
 - Linux 无可用 Secret Service 时，必须显式初始化并解锁加密 vault；不会静默回退到明文 JSON。
 - SQLite、普通配置、日志、诊断包和默认备份不保存 secret 字节。
-- 旧 remote OAuth token 只为兼容期回滚保留，不会导入本地微信会话。
+- 历史 remote OAuth token 不被当前 CLI 读取，也不会导入本地微信会话。
 
 不要把 Cookie、`key`、`pass_ticket`、`appmsg_token`、authorization 或 OAuth token 放入 issue、截图、shell history、版本库和云同步目录。
 

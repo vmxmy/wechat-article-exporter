@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
@@ -261,35 +260,37 @@ func TestToolErrorsAreRedactedAndPackageHasNoRemoteOAuthDependency(t *testing.T)
 	}
 }
 
-func TestGoSDKClientConformsToLocalJSONRPCServer(t *testing.T) {
+func TestLocalStdioClientConformsToInitializeListCallAndShutdown(t *testing.T) {
 	serverReader, clientWriter := io.Pipe()
 	clientReader, serverWriter := io.Pipe()
 	shared := &fakeApplication{storage: domain.StorageStatus{DatabaseAvailable: true, Articles: 3}}
 	server := NewServer(New(shared, Options{Version: "conformance"}))
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- server.Serve(context.Background(), serverReader, serverWriter, &bytes.Buffer{})
+		err := server.Serve(context.Background(), serverReader, serverWriter, &bytes.Buffer{})
+		_ = serverWriter.Close()
+		serverDone <- err
 	}()
 
-	client := sdk.NewClient(&sdk.Implementation{Name: "conformance-client", Version: "1"}, nil)
-	session, err := client.Connect(context.Background(), &sdk.IOTransport{Reader: clientReader, Writer: clientWriter}, nil)
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"conformance-client","version":"1"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"storage.status","arguments":{}}}`,
+	}, "\n") + "\n"
+	if _, err := io.WriteString(clientWriter, requests); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	responses, err := io.ReadAll(clientReader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	listed, err := session.ListTools(context.Background(), nil)
-	if err != nil || len(listed.Tools) != len(New(shared).Tools()) {
-		t.Fatalf("ListTools() = %#v, %v", listed, err)
-	}
-	result, err := session.CallTool(context.Background(), &sdk.CallToolParams{Name: "storage.status", Arguments: map[string]any{}})
-	if err != nil || result.IsError || len(result.Content) != 1 {
-		t.Fatalf("CallTool() = %#v, %v", result, err)
-	}
-	text, ok := result.Content[0].(*sdk.TextContent)
-	if !ok || !strings.Contains(text.Text, `"articles":3`) {
-		t.Fatalf("storage content = %#v", result.Content)
-	}
-	if err := session.Close(); err != nil {
-		t.Fatal(err)
+	lines := nonEmptyLines(string(responses))
+	if len(lines) != 3 || !strings.Contains(lines[0], `"protocolVersion":"2025-06-18"`) ||
+		!strings.Contains(lines[1], `"storage.status"`) || !strings.Contains(lines[2], `"articles":3`) {
+		t.Fatalf("conformance responses = %s", responses)
 	}
 	select {
 	case err := <-serverDone:

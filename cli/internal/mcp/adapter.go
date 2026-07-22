@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
@@ -69,7 +68,7 @@ type Adapter struct {
 }
 
 type ToolDefinition struct {
-	Tool        *sdk.Tool
+	Tool        *Tool
 	Mutating    bool
 	Destructive bool
 	Sensitive   bool
@@ -127,7 +126,7 @@ func (adapter *Adapter) RuntimeStatus(ctx context.Context) (domain.RuntimeStatus
 	return adapter.application.RuntimeStatus(ctx)
 }
 
-func (adapter *Adapter) Tools() []*sdk.Tool {
+func (adapter *Adapter) Tools() []*Tool {
 	names := make([]string, 0, len(adapter.tools))
 	for name := range adapter.tools {
 		if adapter.allowed(name, false) == nil {
@@ -135,7 +134,7 @@ func (adapter *Adapter) Tools() []*sdk.Tool {
 		}
 	}
 	sort.Strings(names)
-	tools := make([]*sdk.Tool, 0, len(names))
+	tools := make([]*Tool, 0, len(names))
 	for _, name := range names {
 		tools = append(tools, adapter.tools[name].Tool)
 	}
@@ -225,9 +224,9 @@ func (adapter *Adapter) buildTools() map[string]ToolDefinition {
 		openWorld := false
 		destructiveHint := destructive
 		tools[name] = ToolDefinition{
-			Tool: &sdk.Tool{
+			Tool: &Tool{
 				Name: name, Description: description, InputSchema: input, OutputSchema: output,
-				Annotations: &sdk.ToolAnnotations{
+				Annotations: &ToolAnnotations{
 					ReadOnlyHint: readOnly, DestructiveHint: &destructiveHint, OpenWorldHint: &openWorld,
 					IdempotentHint: readOnly,
 				},
@@ -352,9 +351,9 @@ func addJobAlias(name, description string, adapter *Adapter, tools map[string]To
 	openWorld := false
 	destructive := false
 	tools[name] = ToolDefinition{
-		Tool: &sdk.Tool{
+		Tool: &Tool{
 			Name: name, Description: description, InputSchema: downloadSchema(), OutputSchema: jobOutputSchema(),
-			Annotations: &sdk.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: &destructive, OpenWorldHint: &openWorld},
+			Annotations: &ToolAnnotations{ReadOnlyHint: false, DestructiveHint: &destructive, OpenWorldHint: &openWorld},
 		},
 		Mutating: true,
 		handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -392,10 +391,10 @@ func decodeJob(raw json.RawMessage, target any, call func() (domain.Job, error))
 	return jobResult{JobID: job.ID, State: job.State, Kind: job.Kind, Profile: job.Profile}, nil
 }
 
-func toolResult(value any, err error) *sdk.CallToolResult {
+func toolResult(value any, err error) *CallToolResult {
 	if err != nil {
 		redacted := safety.RedactError(err)
-		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: redacted.Error()}}, IsError: true,
+		return &CallToolResult{Content: []TextContent{{Type: "text", Text: redacted.Error()}}, IsError: true,
 			StructuredContent: map[string]any{"error": redacted.Error()}}
 	}
 	redacted := safety.Redact(value, "")
@@ -403,15 +402,15 @@ func toolResult(value any, err error) *sdk.CallToolResult {
 	if marshalErr != nil {
 		return toolResult(nil, marshalErr)
 	}
-	return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: string(encoded)}}, StructuredContent: redacted}
+	return &CallToolResult{Content: []TextContent{{Type: "text", Text: string(encoded)}}, StructuredContent: redacted}
 }
 
-func (adapter *Adapter) implementation() *sdk.Implementation {
-	return &sdk.Implementation{Name: adapter.name, Version: adapter.version, Title: "WeChat Article Local MCP"}
+func (adapter *Adapter) implementation() *Implementation {
+	return &Implementation{Name: adapter.name, Version: adapter.version, Title: "WeChat Article Local MCP"}
 }
 
-func (adapter *Adapter) capabilities() *sdk.ServerCapabilities {
-	return &sdk.ServerCapabilities{Tools: &sdk.ToolCapabilities{ListChanged: false}, Experimental: map[string]any{
+func (adapter *Adapter) capabilities() *ServerCapabilities {
+	return &ServerCapabilities{Tools: &ToolCapabilities{ListChanged: false}, Experimental: map[string]any{
 		"localOnly": true, "profile": adapter.profile, "remoteOAuth": false,
 	}}
 }

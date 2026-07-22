@@ -5,15 +5,9 @@ on:
     branches: [main, master]
     paths:
       - 'cli/**'
-      - 'package.json'
-      - 'yarn.lock'
-      - 'test/baseline/**'
-      - 'test/fixtures/**'
-      - 'test/parity/**'
       - 'RELEASE_NOTES.md'
       - 'docs/architecture/database-compatibility.md'
       - 'docs/architecture/sqlite-policy.md'
-      - 'docs/release/**'
       - 'samples/**'
       - '.github/workflows/release-cli.yml'
   workflow_dispatch:
@@ -48,7 +42,7 @@ jobs:
               echo "Stable release tags must use exact SemVer: wechat-article-vMAJOR.MINOR.PATCH" >&2
               exit 1
             fi
-            expected_heading="# wechat-article v${version} — local compatibility release"
+            expected_heading="# wechat-article v${version}"
             actual_heading="$(head -n 1 RELEASE_NOTES.md)"
             if [ "$actual_heading" != "$expected_heading" ]; then
               echo "RELEASE_NOTES.md heading mismatch" >&2
@@ -60,23 +54,6 @@ jobs:
             version="dev-${GITHUB_SHA::7}"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-
-  parity:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22'
-          cache: yarn
-
-      - name: Install parity validator dependencies
-        run: yarn install --frozen-lockfile
-
-      - name: Mandatory parity gate
-        run: yarn test:parity:gate
 
   static:
     runs-on: ubuntu-latest
@@ -211,7 +188,7 @@ jobs:
           ./internal/library
 
   build:
-    needs: [release-metadata, parity, static, test, fixture-corpus, database-compatibility]
+    needs: [release-metadata, static, test, fixture-corpus, database-compatibility]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -428,7 +405,6 @@ jobs:
           WECHAT_ARTICLE_DATA_ROOT="$smoke_root/data" \
           WECHAT_ARTICLE_CACHE_ROOT="$smoke_root/cache" \
           WECHAT_ARTICLE_STATE_ROOT="$smoke_root/state" \
-          WECHAT_ARTICLE_CLI_CONFIG="$smoke_root/legacy-cli.json" \
           XDG_CONFIG_HOME="$smoke_root/config" \
           XDG_DATA_HOME="$smoke_root/data" \
           XDG_CACHE_HOME="$smoke_root/cache" \
@@ -488,6 +464,6 @@ jobs:
           mapfile -d '' assets < <(find "$GITHUB_WORKSPACE/artifacts" -maxdepth 1 -type f -print0 | sort -z)
           test "${#assets[@]}" -eq 11
           gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
-            --title "$GITHUB_REF_NAME — local compatibility release" \
+            --title "$GITHUB_REF_NAME" \
             --notes-file "$GITHUB_WORKSPACE/source/RELEASE_NOTES.md" \
             --verify-tag
