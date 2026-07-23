@@ -216,6 +216,36 @@ test('sanitized settings and storage maintenance flows do not reveal secrets', a
   await expectOnlyLoopbackRequests(page)
 })
 
+test('saving Chinese display language updates the UI immediately and persists the profile preference', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/settings')
+
+  await page.getByLabel('Display language').selectOption('zh-CN')
+  await page.getByRole('button', { name: 'Save preferences' }).click()
+
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
+  await expect(page.getByRole('heading', { name: '设置与维护' })).toBeVisible()
+  await expect(page.getByText('偏好设置已保存。')).toBeVisible()
+  expect(fixture.preferencePatches).toHaveLength(1)
+  expect(fixture.preferencePatches[0]).toMatchObject({ display: { language: 'zh-CN' } })
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('profile display language takes precedence when the workspace first loads', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.addInitScript(() => window.localStorage.setItem('wechat-article.display.language', 'en'))
+  await page.route('**/api/v1/settings/preferences', (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ apiVersion: 'v1', data: { sync: { range: 'all', pageDelay: 1, jitter: 0, pageSize: 20, incremental: true, unsafePacingSaved: false }, download: { concurrency: 2, forceContent: false, metadataOverridesContent: false }, export: { namingTemplate: '{title}', maximumNameBytes: 180, collisionPolicy: 'suffix', excelIncludeContent: true, jsonIncludeContent: true, jsonIncludeComments: false, htmlIncludeComments: false }, display: { noColor: false, ascii: false, plain: false, hideDeleted: false, language: 'zh-CN' }, proxy: { directFirst: true, fallbackEnabled: false } } }) })
+  })
+  await page.goto('/settings')
+
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
+  await expect(page.getByRole('heading', { name: '设置与维护' })).toBeVisible()
+  await expect(page.getByLabel('显示语言')).toHaveValue('zh-CN')
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('settings removal requires localized exact confirmation for credentials and proxies', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/settings')

@@ -1,10 +1,26 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { getPreferences } from '../lib/api'
 import { en } from './messages.en'
 import { zhCN } from './messages.zh-CN'
 
 export type Locale = 'en' | 'zh-CN'
 
 export const messages = { en, 'zh-CN': zhCN } as const
+const localeStorageKey = 'wechat-article.display.language'
+const localeChangeEvent = 'wechat-article:locale-change'
+
+export function isLocale(value: unknown): value is Locale {
+  return value === 'en' || value === 'zh-CN'
+}
+
+export function persistLocale(locale: Locale) {
+  try {
+    window.localStorage.setItem(localeStorageKey, locale)
+  } catch {
+    // A privacy-restricted browser can still use the selected in-memory locale.
+  }
+  window.dispatchEvent(new CustomEvent<Locale>(localeChangeEvent, { detail: locale }))
+}
 
 export type MessageCatalog = {
   readonly product: { readonly name: string; readonly local: string; readonly privacy: string; readonly beta: string; readonly readOnly: string }
@@ -71,7 +87,7 @@ type SettingsMessages = {
   readonly title: string; readonly description: string; readonly loading: string; readonly unavailable: string; readonly retry: string; readonly actionFailed: string
   readonly credentials: { readonly title: string; readonly description: string; readonly empty: string; readonly import: string; readonly remove: string; readonly removeConfirmation: (id: string) => string; readonly removeConfirmationLabel: string; readonly removeConfirmationHint: string; readonly confirmRemove: string; readonly cancelRemove: string; readonly nickname: string; readonly cookie: string; readonly optional: string; readonly imported: string; readonly file: string; readonly fileHint: string; readonly fileImported: string; readonly columns: { readonly account: string; readonly kind: string; readonly status: string; readonly updated: string } }
   readonly proxies: { readonly title: string; readonly description: string; readonly empty: string; readonly add: string; readonly remove: string; readonly removeConfirmation: (id: string) => string; readonly removeConfirmationLabel: string; readonly removeConfirmationHint: string; readonly confirmRemove: string; readonly cancelRemove: string; readonly enable: string; readonly disable: string; readonly test: string; readonly name: string; readonly endpoint: string; readonly authorization: string; readonly trust: string; readonly publicOnly: string; readonly credentialTrusted: string; readonly priority: string; readonly classes: string; readonly disclosure: string; readonly disclosureRequired: string; readonly confirmation: string; readonly confirmationHint: string; readonly health: string; readonly probe: string; readonly enabled: string; readonly disabled: string; readonly columns: { readonly name: string; readonly endpoint: string; readonly trust: string; readonly priority: string; readonly health: string; readonly state: string; readonly actions: string } }
-  readonly preferences: { readonly title: string; readonly description: string; readonly save: string; readonly saved: string; readonly downloadConcurrency: string; readonly forceContent: string; readonly metadataOverrides: string; readonly directFirst: string; readonly fallbackEnabled: string; readonly language: string; readonly namingTemplate: string; readonly maximumNameBytes: string; readonly collisionPolicy: string }
+  readonly preferences: { readonly title: string; readonly description: string; readonly save: string; readonly saved: string; readonly downloadConcurrency: string; readonly forceContent: string; readonly metadataOverrides: string; readonly directFirst: string; readonly fallbackEnabled: string; readonly language: string; readonly languageEnglish: string; readonly languageChinese: string; readonly namingTemplate: string; readonly maximumNameBytes: string; readonly collisionPolicy: string }
   readonly backups: { readonly title: string; readonly description: string; readonly create: string; readonly created: string; readonly download: string; readonly verify: string; readonly backupId: string; readonly valid: string; readonly invalid: string; readonly restoreTitle: string; readonly restoreDescription: string; readonly archive: string; readonly policy: string; readonly refuse: string; readonly rename: string; readonly stage: string; readonly staging: string; readonly confirmation: string; readonly confirmationHint: string; readonly commit: string; readonly destructiveWarning: string; readonly terminalTitle: string; readonly terminalMessage: string }
   readonly integrity: { readonly title: string; readonly description: string; readonly checked: string; readonly issues: string; readonly noIssues: string; readonly columns: { readonly kind: string; readonly message: string; readonly repairable: string; readonly recommendation: string } }
   readonly gc: { readonly title: string; readonly description: string; readonly plan: string; readonly apply: string; readonly planned: string; readonly planExpired: string; readonly generated: string; readonly expires: string; readonly confirmation: string; readonly totals: string; readonly result: string; readonly categories: { readonly objects: string; readonly temporary: string; readonly debug: string; readonly logs: string } }
@@ -116,16 +132,35 @@ export function useMessages(locale: Locale): MessageCatalog {
 
 export function useLocale(): readonly [Locale, (locale: Locale) => void] {
   const [locale, setLocaleState] = useState<Locale>(readInitialLocale)
+  const localeGeneration = useRef(0)
   useEffect(() => {
     document.documentElement.lang = locale
   }, [locale])
-  const setLocale = useCallback((nextLocale: Locale) => {
-    try {
-      window.localStorage.setItem('wechat-article.display.language', nextLocale)
-    } catch {
-      // A privacy-restricted browser can still use the selected in-memory locale.
+  useEffect(() => {
+    const controller = new AbortController()
+    const requestGeneration = localeGeneration.current
+    void getPreferences(controller.signal).then((preferences) => {
+      if (requestGeneration === localeGeneration.current && isLocale(preferences.display.language)) {
+        persistLocale(preferences.display.language)
+      }
+    }).catch(() => {
+      // The local profile is unavailable; retain the persisted or browser locale.
+    })
+    return () => controller.abort()
+  }, [])
+  useEffect(() => {
+    const updateLocale = (event: Event) => {
+      const nextLocale = (event as CustomEvent<Locale>).detail
+      if (isLocale(nextLocale)) {
+        localeGeneration.current += 1
+        setLocaleState(nextLocale)
+      }
     }
-    setLocaleState(nextLocale)
+    window.addEventListener(localeChangeEvent, updateLocale)
+    return () => window.removeEventListener(localeChangeEvent, updateLocale)
+  }, [])
+  const setLocale = useCallback((nextLocale: Locale) => {
+    persistLocale(nextLocale)
   }, [])
 
   return [locale, setLocale]
@@ -134,11 +169,11 @@ export function useLocale(): readonly [Locale, (locale: Locale) => void] {
 function readInitialLocale(): Locale {
   let persisted: string | null = null
   try {
-    persisted = window.localStorage.getItem('wechat-article.display.language')
+    persisted = window.localStorage.getItem(localeStorageKey)
   } catch {
     // Fall through to the browser preference when persistence is unavailable.
   }
-  if (persisted === 'en' || persisted === 'zh-CN') {
+  if (isLocale(persisted)) {
     return persisted
   }
 
