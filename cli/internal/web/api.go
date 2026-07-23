@@ -50,6 +50,8 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		server.session(writer, request)
 	case "/api/v1/accounts":
 		server.accounts(writer, request)
+	case "/api/v1/accounts/search":
+		server.accountSearch(writer, request)
 	case "/api/v1/articles":
 		server.articles(writer, request)
 	case "/api/v1/albums":
@@ -73,6 +75,20 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		}
 		server.apiError(writer, http.StatusNotFound, "not_found", "workspace resource was not found")
 	}
+}
+
+func (server *Server) accountSearch(writer http.ResponseWriter, request *http.Request) {
+	query, err := parseAccountQuery(request)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	value, err := server.workspace.SearchAccounts(request.Context(), query)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writePage(writer, http.StatusOK, value)
 }
 
 func (server *Server) runtime(writer http.ResponseWriter, request *http.Request) {

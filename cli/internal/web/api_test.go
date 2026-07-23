@@ -109,6 +109,69 @@ func TestReadAPIErrorModelDoesNotLeakApplicationFailures(t *testing.T) {
 	}
 }
 
+func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
+	const jobID = "11111111-1111-1111-1111-111111111111"
+	app := &apiApplication{
+		loginFlow: applicationLoginFlow(),
+		poll:      wechat.PollResult{State: wechat.QRScanned, AccountCount: 1},
+		completed: wechat.Session{State: wechat.SessionAuthenticated, AccountID: "account-1", AccountName: "Fixture"},
+		saved:     []domain.SavedArticleQuery{},
+		job:       domain.Job{ID: jobID, Kind: "article_download", State: domain.JobQueued},
+		account:   domain.Account{ID: "account-1", FakeID: "fixture", Name: "Fixture"},
+	}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+	mutate := func(path string, body string) *http.Response {
+		request := requestWith(t, http.MethodPost, base+path, strings.NewReader(body), map[string]string{"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf})
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	for _, input := range []struct {
+		path, body string
+		status     int
+	}{
+		{"/api/v1/login/begin", `{"sessionId":"browser-session"}`, http.StatusOK},
+		{"/api/v1/login/poll", `{}`, http.StatusOK},
+		{"/api/v1/login/complete", `{}`, http.StatusOK},
+		{"/api/v1/accounts/account-1/sync", `{"incremental":true,"pageSize":20}`, http.StatusAccepted},
+		{"/api/v1/ingest/url", `{"url":"https://mp.weixin.qq.com/s/fixture"}`, http.StatusAccepted},
+		{"/api/v1/jobs/" + jobID + "/pause", `{"confirm":"pause-job:` + jobID + `"}`, http.StatusOK},
+		{"/api/v1/jobs/" + jobID + "/resume", `{}`, http.StatusOK},
+		{"/api/v1/jobs/" + jobID + "/retry", `{"confirm":"retry-job:` + jobID + `"}`, http.StatusOK},
+		{"/api/v1/jobs/" + jobID + "/cancel", `{"confirm":"cancel-job:` + jobID + `"}`, http.StatusOK},
+	} {
+		response := mutate(input.path, input.body)
+		if response.StatusCode != input.status {
+			t.Fatalf("POST %s status=%d body=%s", input.path, response.StatusCode, readResponse(t, response))
+		}
+		response.Body.Close()
+	}
+	if app.loginSessionID != "browser-session" || app.syncRequest.AccountID != "account-1" || len(app.downloadRequest.URLs) != 1 || app.downloadRequest.URLs[0] != "https://mp.weixin.qq.com/s/fixture" {
+		t.Fatalf("control inputs were not routed through application: login=%q sync=%#v download=%#v", app.loginSessionID, app.syncRequest, app.downloadRequest)
+	}
+	response := mutate("/api/v1/jobs/"+jobID+"/cancel", `{}`)
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("missing confirmation status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "invalid_argument")
+	response = mutate("/api/v1/session/logout", `{}`)
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("logout status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	response.Body.Close()
+	if !app.loggedOut {
+		t.Fatal("application logout was not invoked")
+	}
+}
+
+func applicationLoginFlow() wechat.LoginFlow {
+	return wechat.LoginFlow{SessionID: "login-flow", QRBytes: []byte("sanitized-fixture")}
+}
+
 func TestReadAPIAdaptsExistingBrowserClientDTO(t *testing.T) {
 	app := &apiApplication{
 		runtime:  domain.RuntimeStatus{Version: "fixture", Profile: "fixture-profile", Storage: domain.StorageStatus{Articles: 2}},
@@ -217,18 +280,64 @@ func assertAPIError(t *testing.T, response *http.Response, code string) {
 
 type apiApplication struct {
 	testApplication
-	runtime      domain.RuntimeStatus
-	session      wechat.Session
-	accounts     domain.Page[domain.Account]
-	articles     domain.Page[domain.Article]
-	albums       domain.Page[domain.Album]
-	jobs         domain.Page[domain.Job]
-	saved        []domain.SavedArticleQuery
-	job          domain.Job
-	accountsErr  error
-	accountQuery domain.AccountQuery
-	articleQuery domain.ArticleQuery
-	jobQuery     domain.JobQuery
+	runtime         domain.RuntimeStatus
+	session         wechat.Session
+	accounts        domain.Page[domain.Account]
+	articles        domain.Page[domain.Article]
+	albums          domain.Page[domain.Album]
+	jobs            domain.Page[domain.Job]
+	saved           []domain.SavedArticleQuery
+	job             domain.Job
+	accountsErr     error
+	accountQuery    domain.AccountQuery
+	articleQuery    domain.ArticleQuery
+	jobQuery        domain.JobQuery
+	loginFlow       wechat.LoginFlow
+	poll            wechat.PollResult
+	completed       wechat.Session
+	loginSessionID  string
+	account         domain.Account
+	syncRequest     domain.SynchronizeAccountRequest
+	downloadRequest domain.DownloadRequest
+	loggedOut       bool
+}
+
+func (app *apiApplication) BeginLogin(_ context.Context, id string) (wechat.LoginFlow, error) {
+	app.loginSessionID = id
+	return app.loginFlow, nil
+}
+func (app *apiApplication) PollLogin(context.Context) (wechat.PollResult, error) {
+	return app.poll, nil
+}
+func (app *apiApplication) CompleteLogin(context.Context) (wechat.Session, error) {
+	return app.completed, nil
+}
+func (app *apiApplication) Logout(context.Context) error { app.loggedOut = true; return nil }
+func (app *apiApplication) SaveAccount(context.Context, domain.Account) (domain.Account, error) {
+	return app.account, nil
+}
+func (app *apiApplication) UpdateAccount(context.Context, domain.Account) (domain.Account, error) {
+	return app.account, nil
+}
+func (app *apiApplication) DeleteAccounts(context.Context, []domain.AccountID) (domain.AccountDeleteReport, error) {
+	return domain.AccountDeleteReport{AccountsDeleted: 1}, nil
+}
+func (app *apiApplication) SynchronizeAccount(_ context.Context, request domain.SynchronizeAccountRequest) (domain.Job, error) {
+	app.syncRequest = request
+	return app.job, nil
+}
+func (app *apiApplication) StartDownload(_ context.Context, request domain.DownloadRequest) (domain.Job, error) {
+	app.downloadRequest = request
+	return app.job, nil
+}
+func (app *apiApplication) PauseJob(context.Context, domain.JobID) (domain.Job, error) {
+	return app.job, nil
+}
+func (app *apiApplication) ResumeJob(context.Context, domain.JobID) (domain.Job, error) {
+	return app.job, nil
+}
+func (app *apiApplication) RetryJob(context.Context, domain.JobID) (domain.Job, error) {
+	return app.job, nil
 }
 
 func (app *apiApplication) RuntimeStatus(context.Context) (domain.RuntimeStatus, error) {

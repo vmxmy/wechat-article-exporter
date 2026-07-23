@@ -43,7 +43,7 @@ type Options struct {
 // It never persists or logs either credential.
 type Server struct {
 	application     application.Application
-	workspace       application.WorkspaceReader
+	workspace       *application.Workspace
 	sessionTTL      time.Duration
 	shutdownTimeout time.Duration
 	now             func() time.Time
@@ -223,7 +223,16 @@ func (server *Server) handler() http.Handler {
 			server.error(writer, http.StatusMisdirectedRequest)
 			return
 		}
-		if strings.HasPrefix(request.URL.Path, "/api/") && request.URL.Path != "/api/v1/session/logout" && request.URL.Path != "/api/v1/status" {
+		if strings.HasPrefix(request.URL.Path, "/api/") && request.URL.Path != "/api/v1/status" {
+			if request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodPatch || request.Method == http.MethodDelete {
+				if !server.validMutationShape(request) {
+					server.error(writer, http.StatusUnsupportedMediaType)
+					return
+				}
+			}
+			if server.apiControl(writer, request) {
+				return
+			}
 			server.api(writer, request)
 			return
 		}
@@ -238,8 +247,6 @@ func (server *Server) handler() http.Handler {
 			server.root(writer, request)
 		case "/api/v1/status":
 			server.status(writer, request)
-		case "/api/v1/session/logout":
-			server.logout(writer, request)
 		default:
 			server.workspaceAsset(writer, request)
 		}
@@ -335,20 +342,6 @@ func (server *Server) status(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 	writeAPI(writer, http.StatusOK, map[string]any{"runtime": runtimeStatus, "session": sessionStatus, "csrfToken": current.csrf})
-}
-
-func (server *Server) logout(writer http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodPost {
-		server.error(writer, http.StatusMethodNotAllowed)
-		return
-	}
-	if _, ok := server.authorizeMutation(request); !ok {
-		server.error(writer, http.StatusForbidden)
-		return
-	}
-	server.deleteSession(request)
-	server.clearSessionCookies(writer)
-	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (server *Server) consumeBootstrap(value string) bool {
