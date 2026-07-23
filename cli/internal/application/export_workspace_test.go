@@ -220,6 +220,83 @@ func TestWorkspaceExportsRejectsUnavailableSymlinkAndReplacedConfiguredRoot(t *t
 	}
 }
 
+func TestWorkspaceExportDirectoryTokensFailClosedAfterReplacementOrSymlinkRace(t *testing.T) {
+	temporary := t.TempDir()
+	exports := &workspaceExportJobs{job: domain.Job{ID: "job-1", State: domain.JobQueued}}
+	service := NewWorkspaceExports(New(Options{Exports: exports, Starter: workspaceExportStarter{}}), nil)
+	service.home = func() (string, error) { return temporary, nil }
+
+	root, err := service.DefaultExportDirectory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := service.CreateExportDirectory(context.Background(), WorkspaceCreateExportDirectoryRequest{ParentToken: root.Token, Name: "issued-child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootPath := filepath.Join(temporary, "Downloads", workspaceDefaultExportDirectory)
+	childPath := filepath.Join(rootPath, "issued-child")
+
+	assertTokenRejectedBeforeExport := func(name string, token WorkspaceDirectoryHandle) {
+		t.Helper()
+		_, err := service.StartExport(context.Background(), WorkspaceStartExportRequest{DirectoryToken: token, Format: "markdown"})
+		var workspaceErr *WorkspaceError
+		if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInternal {
+			t.Fatalf("%s StartExport error = %#v", name, err)
+		}
+		if exports.request.OutputAuthorization != nil {
+			t.Fatalf("%s reached export application with %#v", name, exports.request)
+		}
+	}
+
+	if err := os.Rename(rootPath, rootPath+".replaced"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(rootPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	assertTokenRejectedBeforeExport("root replacement", root.Token)
+
+	service = NewWorkspaceExports(New(Options{Exports: exports, Starter: workspaceExportStarter{}}), nil)
+	service.home = func() (string, error) { return temporary, nil }
+	root, err = service.DefaultExportDirectory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err = service.CreateExportDirectory(context.Background(), WorkspaceCreateExportDirectoryRequest{ParentToken: root.Token, Name: "issued-child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootPath = filepath.Join(temporary, "Downloads", workspaceDefaultExportDirectory)
+	childPath = filepath.Join(rootPath, "issued-child")
+	if err := os.Rename(childPath, childPath+".replaced"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(childPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	assertTokenRejectedBeforeExport("child replacement", child.Token)
+
+	service = NewWorkspaceExports(New(Options{Exports: exports, Starter: workspaceExportStarter{}}), nil)
+	service.home = func() (string, error) { return temporary, nil }
+	root, err = service.DefaultExportDirectory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err = service.CreateExportDirectory(context.Background(), WorkspaceCreateExportDirectoryRequest{ParentToken: root.Token, Name: "symlink-child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childPath = filepath.Join(temporary, "Downloads", workspaceDefaultExportDirectory, "symlink-child")
+	if err := os.Rename(childPath, childPath+".replaced"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), childPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	assertTokenRejectedBeforeExport("child symlink replacement", child.Token)
+}
+
 func TestWorkspaceExportsReturnSafeManifestAndArtifactMetadata(t *testing.T) {
 	created := time.Date(2026, 7, 24, 9, 0, 0, 0, time.UTC)
 	completed := created.Add(time.Minute)
