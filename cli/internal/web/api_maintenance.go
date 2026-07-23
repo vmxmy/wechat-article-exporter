@@ -150,10 +150,15 @@ func (server *Server) credentialRemove(writer http.ResponseWriter, request *http
 		return
 	}
 	var input struct {
-		ID string `json:"id"`
+		ID           string `json:"id"`
+		Confirmation string `json:"confirm"`
 	}
 	if err := decodeControl(request, &input); err != nil || !validMaintenanceToken(input.ID) {
 		server.invalidMaintenanceInput(writer)
+		return
+	}
+	if input.Confirmation != "remove-credential:"+input.ID {
+		server.maintenanceConfirmationRequired(writer)
 		return
 	}
 	if err := server.maintenanceService(writer).RemoveCredential(request.Context(), input.ID); err != nil {
@@ -225,6 +230,17 @@ func (input proxyAddInput) request() application.ProxyAddRequest {
 
 func (server *Server) proxyRemove(writer http.ResponseWriter, request *http.Request, id string) {
 	if !server.maintenanceMutation(writer, request, http.MethodPost) {
+		return
+	}
+	var input struct {
+		Confirmation string `json:"confirm"`
+	}
+	if err := decodeControl(request, &input); err != nil {
+		server.invalidMaintenanceInput(writer)
+		return
+	}
+	if input.Confirmation != "remove-proxy:"+id {
+		server.maintenanceConfirmationRequired(writer)
 		return
 	}
 	value, err := server.maintenanceService(writer).RemoveProxy(request.Context(), id)
@@ -376,10 +392,13 @@ func (server *Server) maintenanceError(writer http.ResponseWriter, err error) {
 		return
 	}
 	if errors.Is(err, application.ErrMaintenanceConfirmationRequired) {
-		server.apiError(writer, http.StatusBadRequest, "confirmation_required", "maintenance confirmation is invalid or expired")
+		server.maintenanceConfirmationRequired(writer)
 		return
 	}
 	server.apiError(writer, http.StatusBadRequest, "invalid_argument", "maintenance request is invalid")
+}
+func (server *Server) maintenanceConfirmationRequired(writer http.ResponseWriter) {
+	server.apiError(writer, http.StatusBadRequest, "confirmation_required", "maintenance confirmation is invalid or expired")
 }
 
 func validMaintenanceToken(value string) bool {

@@ -179,6 +179,38 @@ test('sanitized settings and storage maintenance flows do not reveal secrets', a
   await expectOnlyLoopbackRequests(page)
 })
 
+test('settings removal requires localized exact confirmation for credentials and proxies', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/settings')
+
+  await page.getByRole('button', { name: 'Remove' }).first().click()
+  const credentialConfirmation = page.getByRole('textbox', { name: 'Exact confirmation to remove this credential' })
+  const removeCredential = page.getByRole('button', { name: 'Remove credential' })
+  await expect(removeCredential).toBeDisabled()
+  await credentialConfirmation.fill('remove-credential:wrong')
+  await expect(removeCredential).toBeDisabled()
+  await credentialConfirmation.fill('remove-credential:credential-fixture')
+  await expect(removeCredential).toBeEnabled()
+  const credentialRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/settings/credentials/remove'))
+  await removeCredential.click()
+  expect((await credentialRequest).postDataJSON()).toEqual({ id: 'credential-fixture', confirm: 'remove-credential:credential-fixture' })
+  await expect.poll(() => fixture.credentialRemovals).toEqual([{ id: 'credential-fixture', confirm: 'remove-credential:credential-fixture' }])
+
+  await page.getByRole('button', { name: 'Remove' }).last().click()
+  const proxyConfirmation = page.getByRole('textbox', { name: 'Exact confirmation to remove this proxy route' })
+  const removeProxy = page.getByRole('button', { name: 'Remove proxy' })
+  await expect(removeProxy).toBeDisabled()
+  await proxyConfirmation.fill('remove-proxy:proxy-fixture')
+  await expect(removeProxy).toBeEnabled()
+  const proxyRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/settings/proxies/proxy-fixture/remove'))
+  await removeProxy.click()
+  expect((await proxyRequest).postDataJSON()).toEqual({ confirm: 'remove-proxy:proxy-fixture' })
+  await expect.poll(() => fixture.proxyRemovals).toEqual([{ confirm: 'remove-proxy:proxy-fixture' }])
+  await expect(page.locator('body')).not.toContainText('real-cookie')
+  await expect(page.locator('body')).not.toContainText('/Users/')
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('sanitized diagnostic bundle creation posts no paths and downloads through an opaque handle', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/settings')

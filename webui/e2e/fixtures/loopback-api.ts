@@ -10,6 +10,8 @@ export interface LoopbackFixture {
   readonly accountManifestImports: readonly unknown[]
   readonly preferencePatches: readonly unknown[]
   readonly diagnosticBundleRequests: readonly unknown[]
+  readonly credentialRemovals: readonly unknown[]
+  readonly proxyRemovals: readonly unknown[]
 }
 
 export async function installLoopbackFixture(page: Page): Promise<LoopbackFixture> {
@@ -19,6 +21,8 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
   const accountManifestImports: unknown[] = []
   const preferencePatches: unknown[] = []
   const diagnosticBundleRequests: unknown[] = []
+  const credentialRemovals: unknown[] = []
+  const proxyRemovals: unknown[] = []
   let loginState = 'unauthenticated'
   let directory = { token: 'dir-sanitized', label: 'Sanitized exports' }
   let backupID = ''
@@ -47,6 +51,8 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       accountManifestImports,
       preferencePatches,
       diagnosticBundleRequests,
+      credentialRemovals,
+      proxyRemovals,
       onLoginState: (state) => { loginState = state },
       onDirectory: (next) => { directory = next },
       onBackupID: (id) => { backupID = id },
@@ -55,7 +61,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       ,onSavedQueries: (next) => { savedQueries = next }
     })
   })
-  return { requests, controls, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests }
+  return { requests, controls, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, proxyRemovals }
 }
 
 export async function expectOnlyLoopbackRequests(page: Page) {
@@ -79,6 +85,8 @@ interface State {
   readonly accountManifestImports: unknown[]
   readonly preferencePatches: unknown[]
   readonly diagnosticBundleRequests: unknown[]
+  readonly credentialRemovals: unknown[]
+  readonly proxyRemovals: unknown[]
   readonly onLoginState: (state: string) => void
   readonly onDirectory: (directory: { readonly token: string; readonly label: string }) => void
   readonly onBackupID: (id: string) => void
@@ -110,7 +118,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/accounts/manifest/upload') return json(route, { handle: 'account-manifest-upload-fixture', sizeBytes: 24, sha256: 'e'.repeat(64), expiresAt: '2026-07-24T09:45:00.000Z' })
   if (url.pathname === '/api/v1/accounts/manifest/import') { state.accountManifestImports.push(body); return json(route, { report: { added: 1, merged: 2, unchanged: 3 } }) }
   if (url.pathname === '/api/v1/articles') return page(route, [{ id: 'article-fixture-1', title: 'Sanitized article one', accountId: 'account-fixture', accountName: 'Fixture Account', author: 'Fixture Author', publishedAt: now, state: 'ready' }, { id: 'article-fixture-2', title: 'Sanitized article two', accountId: 'account-fixture', accountName: 'Fixture Account', author: 'Fixture Author', publishedAt: now, state: 'queued' }])
-  if (url.pathname === '/api/v1/albums') return page(route, [])
+  if (url.pathname === '/api/v1/albums') return page(route, [{ id: 'album-fixture-1', accountId: 'account-fixture', name: 'Sanitized album', articleCount: 2, paid: false, description: 'Sanitized album description' }])
   if (url.pathname === '/api/v1/saved-queries' && method === 'GET') return page(route, state.savedQueries)
   if (url.pathname === '/api/v1/saved-queries' && method === 'POST') {
     const name = String(body?.name || '').trim()
@@ -137,8 +145,18 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/exports/export-fixture-1/manifest') return json(route, { exportId: 'export-fixture-1', format: 'markdown', state: 'completed', provenanceState: 'complete', provenanceGeneration: 1, files: [{ articleId: 'article-fixture-1', path: 'sanitized-article.md', sizeBytes: 42, sha256: 'a'.repeat(64), status: 'written' }] })
   if (url.pathname === '/api/v1/exports/export-fixture-1/verify') return json(route, { exportId: 'export-fixture-1', valid: true, verifiedOutputs: 1, issues: [] })
 
-  if (url.pathname === '/api/v1/settings/credentials') return json(route, [{ id: 'credential-fixture', accountId: 'account-fixture', kind: 'cookie', status: 'valid', createdAt: now, updatedAt: now }])
-  if (url.pathname === '/api/v1/settings/proxies') return json(route, [])
+  if (url.pathname === '/api/v1/settings/credentials' && method === 'GET') return json(route, [{ id: 'credential-fixture', accountId: 'account-fixture', kind: 'cookie', status: 'valid', createdAt: now, updatedAt: now }])
+  if (url.pathname === '/api/v1/settings/credentials/remove') {
+    if (body?.id !== 'credential-fixture' || body?.confirm !== 'remove-credential:credential-fixture') return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Confirmation required' } }) })
+    state.credentialRemovals.push(body)
+    return route.fulfill({ status: 204, body: '' })
+  }
+  if (url.pathname === '/api/v1/settings/proxies' && method === 'GET') return json(route, [{ id: 'proxy-fixture', name: 'Sanitized proxy', endpoint: 'https://proxy.fixture/?token=%5BREDACTED%5D', authorizationConfigured: true, trust: 'public-only', classes: ['public_content'], priority: 0, enabled: true, health: { state: 'healthy' }, createdAt: now, updatedAt: now }])
+  if (url.pathname === '/api/v1/settings/proxies/proxy-fixture/remove') {
+    if (body?.confirm !== 'remove-proxy:proxy-fixture') return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Confirmation required' } }) })
+    state.proxyRemovals.push(body)
+    return json(route, { id: 'proxy-fixture', name: 'Sanitized proxy', endpoint: 'https://proxy.fixture/?token=%5BREDACTED%5D', authorizationConfigured: true, trust: 'public-only', classes: ['public_content'], priority: 0, enabled: true, health: { state: 'healthy' }, createdAt: now, updatedAt: now })
+  }
   if (url.pathname === '/api/v1/settings/preferences' && method === 'GET') return json(route, preferences())
   if (url.pathname === '/api/v1/settings/preferences' && method === 'PATCH') { state.preferencePatches.push(body); return json(route, body) }
   if (url.pathname === '/api/v1/maintenance/integrity') return json(route, { checkedAt: now, issues: [] })

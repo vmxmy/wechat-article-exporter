@@ -183,13 +183,30 @@ func TestMaintenanceAPICredentialRemovalAndProxyControlsUseAuthenticatedFacade(t
 	base := authorizeAPI(t, client, server.URL())
 	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
 
-	response := doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/credentials/remove", `{"id":"credential-1"}`, csrf))
+	response := doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/credentials/remove", `{"id":"credential-1","confirm":"wrong"}`, csrf))
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("credential removal with wrong confirmation status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "confirmation_required")
+	if credentials.removedID != "" {
+		t.Fatalf("credential removal with wrong confirmation reached facade: %q", credentials.removedID)
+	}
+
+	response = doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/credentials/remove", `{"id":"credential-1","confirm":"remove-credential:credential-1"}`, csrf))
 	if response.StatusCode != http.StatusNoContent {
 		t.Fatalf("credential removal status=%d body=%s", response.StatusCode, readResponse(t, response))
 	}
 	response.Body.Close()
 	if credentials.removedID != "credential-1" {
 		t.Fatalf("removed credential ID=%q", credentials.removedID)
+	}
+	response = doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/proxies/proxy-1/remove", `{"confirm":"remove-proxy:other-proxy"}`, csrf))
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("proxy removal with wrong confirmation status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "confirmation_required")
+	if proxies.removedID != "" {
+		t.Fatalf("proxy removal with wrong confirmation reached facade: %q", proxies.removedID)
 	}
 
 	response = doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/proxies/disclosure", `{"name":" trusted ","endpoint":"https://proxy.test/?token=not-for-output","authorization":"proxy-secret","trust":"credential-trusted","classes":["article_credential"],"priority":90}`, csrf))
@@ -203,14 +220,19 @@ func TestMaintenanceAPICredentialRemovalAndProxyControlsUseAuthenticatedFacade(t
 
 	for _, operation := range []struct {
 		path string
+		body string
 		want string
 	}{
-		{path: "/api/v1/settings/proxies/proxy-1/remove", want: "remove"},
+		{path: "/api/v1/settings/proxies/proxy-1/remove", body: `{"confirm":"remove-proxy:proxy-1"}`, want: "remove"},
 		{path: "/api/v1/settings/proxies/proxy-1/enable", want: "enable"},
 		{path: "/api/v1/settings/proxies/proxy-1/disable", want: "disable"},
 		{path: "/api/v1/settings/proxies/proxy-1/test", want: "test"},
 	} {
-		response = doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+operation.path, `{}`, csrf))
+		body := operation.body
+		if body == "" {
+			body = `{}`
+		}
+		response = doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+operation.path, body, csrf))
 		if response.StatusCode != http.StatusOK {
 			t.Fatalf("proxy %s status=%d body=%s", operation.want, response.StatusCode, readResponse(t, response))
 		}
@@ -232,6 +254,8 @@ func TestMaintenanceAPIRejectsMalformedCredentialAndProxyInputsWithSafeEnvelope(
 
 	for _, request := range []*http.Request{
 		maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/credentials/remove", `{"id":"/private/credential-secret"}`, csrf),
+		maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/credentials/remove", `{"id":"credential-1","confirm":"remove-credential:/private/credential-secret"}`, csrf),
+		maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/proxies/proxy-1/remove", `{"confirm":"remove-proxy:/private/proxy-secret"}`, csrf),
 		maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/proxies/disclosure", `{"name":"","endpoint":"https://proxy.test/?token=not-for-output","authorization":"proxy-secret"}`, csrf),
 		maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/proxies", `{"name":"","endpoint":"https://proxy.test/?token=not-for-output","authorization":"proxy-secret"}`, csrf),
 		requestWith(t, http.MethodPost, base+"/api/v1/settings/proxies/proxy-1/test", strings.NewReader(`{}`), map[string]string{"Origin": "http://evil.example", "Content-Type": "application/json", "X-CSRF-Token": csrf}),

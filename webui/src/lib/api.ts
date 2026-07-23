@@ -540,11 +540,11 @@ export async function uploadCredentialFile(credential: File): Promise<Credential
     method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, body: form
   })
 }
-export async function removeCredential(id: string): Promise<void> { await mutate(`settings/credentials/remove`, 'POST', { id }) }
+export async function removeCredential(id: string, confirmation: string): Promise<void> { await mutate(`settings/credentials/remove`, 'POST', { id, confirm: confirmation }) }
 export async function getProxies(signal?: AbortSignal): Promise<readonly ProxyRoute[]> { return request(`${apiBase}/settings/proxies`, { signal }) }
 export async function getProxyDisclosure(input: ProxyInput): Promise<ProxyDisclosure> { return mutate('settings/proxies/disclosure', 'POST', input) }
 export async function addProxy(input: ProxyInput): Promise<ProxyRoute> { return mutate('settings/proxies', 'POST', input) }
-export async function removeProxy(id: string): Promise<ProxyRoute> { return mutate(`settings/proxies/${encodeURIComponent(id)}/remove`, 'POST', {}) }
+export async function removeProxy(id: string, confirmation: string): Promise<ProxyRoute> { return mutate(`settings/proxies/${encodeURIComponent(id)}/remove`, 'POST', { confirm: confirmation }) }
 export async function setProxyEnabled(id: string, enabled: boolean): Promise<ProxyRoute> { return mutate(`settings/proxies/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`, 'POST', {}) }
 export async function testProxy(id: string): Promise<ProxyProbeResult> { return mutate(`settings/proxies/${encodeURIComponent(id)}/test`, 'POST', {}) }
 export async function getPreferences(signal?: AbortSignal): Promise<Preferences> { return request(`${apiBase}/settings/preferences`, { signal }) }
