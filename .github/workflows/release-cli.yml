@@ -139,7 +139,10 @@ jobs:
       - name: Strict OpenSpec validation
         env:
           OPENSPEC_TELEMETRY: '0'
-        run: openspec validate replace-web-with-local-go-cli --strict
+        run: |
+          set -euo pipefail
+          openspec validate replace-web-with-local-go-cli --strict
+          openspec validate local-browser-workspace --strict
 
       - name: Clean-room receipt validator tests
         working-directory: cli
