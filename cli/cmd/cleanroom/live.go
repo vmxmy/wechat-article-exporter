@@ -487,8 +487,19 @@ func assembleSetCommand(arguments []string) error {
 		return errors.New("assemble-set requires output, release identity, valid checksum digest, and exactly five receipt paths")
 	}
 	base := filepath.Dir(output)
+	outputPath, err := filepath.Abs(output)
+	if err != nil {
+		return err
+	}
 	set := ReceiptSet{SchemaVersion: receiptSetSchemaVersion, Release: ReceiptSetRelease{Repository: repository, Tag: tag, Commit: commit, Version: version, ChecksumManifestSHA256: checksums}, Summary: ReceiptSetSummary{RequiredTargets: len(requiredTargetTuples), PassedTargets: len(requiredTargetTuples), GateStatus: "pass"}}
 	for _, path := range receipts {
+		inputPath, absoluteErr := filepath.Abs(path)
+		if absoluteErr != nil {
+			return absoluteErr
+		}
+		if inputPath == outputPath {
+			return errors.New("aggregate output must not overwrite a platform receipt")
+		}
 		body, err := readBoundedRegularFile(path, maximumReceiptBytes)
 		if err != nil {
 			return err
@@ -504,10 +515,10 @@ func assembleSetCommand(arguments []string) error {
 		set.Receipts = append(set.Receipts, ReceiptSetReference{Target: receipt.Platform.GOOS + "/" + receipt.Platform.GOARCH, ReceiptPath: filepath.ToSlash(relative), ReceiptSHA256: sha256Bytes(body), ArchiveSHA256: receipt.Artifact.ArchiveSHA256})
 	}
 	sort.Slice(set.Receipts, func(i, j int) bool { return set.Receipts[i].Target < set.Receipts[j].Target })
-	if err := writeReceiptSet(output, set); err != nil {
+	if err := validateReceiptSet(set, base); err != nil {
 		return err
 	}
-	if err := validateReceiptSet(set, base); err != nil {
+	if err := writeReceiptSet(output, set); err != nil {
 		return err
 	}
 	fmt.Printf("controlled live receipt set written: %s\n", output)

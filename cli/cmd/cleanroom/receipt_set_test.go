@@ -113,6 +113,36 @@ func TestValidateReceiptSetRejectsInternalSymlinkReference(t *testing.T) {
 	}
 }
 
+func TestAssembleSetDoesNotOverwriteReceiptBeforeValidation(t *testing.T) {
+	set, root := completeTestReceiptSet(t)
+	first := filepath.Join(root, set.Receipts[0].ReceiptPath)
+	before, err := os.ReadFile(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arguments := []string{
+		"--output", first,
+		"--repository", set.Release.Repository,
+		"--tag", set.Release.Tag,
+		"--commit", set.Release.Commit,
+		"--version", set.Release.Version,
+		"--checksum-manifest-sha256", set.Release.ChecksumManifestSHA256,
+	}
+	for _, reference := range set.Receipts {
+		arguments = append(arguments, "--receipt", filepath.Join(root, reference.ReceiptPath))
+	}
+	if err := assembleSetCommand(arguments); err == nil || !strings.Contains(err.Error(), "must not overwrite") {
+		t.Fatalf("assembleSetCommand = %v", err)
+	}
+	after, err := os.ReadFile(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("assemble-set overwrote a platform receipt before validation")
+	}
+}
+
 func completeTestReceiptSet(t *testing.T) (ReceiptSet, string) {
 	t.Helper()
 	root := t.TempDir()

@@ -23,7 +23,7 @@ It is intentionally not an ordinary public-hosted CI job. Before dispatch, the o
 
 The network observer is launched as the parent of every non-PTY candidate command and must make its final `--verify` invocation fail unless the whole candidate/browser tree was tracked for the run. It must cover the native PTY process through its runner-level capture service as well. The two observer programs must emit their short success attestations only after examining protected capture state; a shell wrapper that merely prints these strings is not valid evidence. Raw captures, QR images, secrets, account identifiers, article bodies, portable roots, databases, and exports must stay on the controlled runner and must not be uploaded. If any prerequisite is absent, the workflow must fail or emit a diagnostic non-passing receipt; it must never publish a live receipt.
 
-The runner's `cleanroom live` command is additionally guarded by `WECHAT_ARTICLE_CONTROLLED_LIVE_RUNNER=1`, rejects loopback fixture-origin variables, requires an archive/SBOM/checksum provenance match, requires a versioned legacy-Web archive, and validates `mode=live` with `--require-live` before upload. It receives only sanitized receipt fields; the account fakeid, selected article ID, QR image, passphrase, command output, and network captures are never serialized.
+The runner's `cleanroom live` command rejects loopback fixture-origin variables, requires an archive/SBOM/checksum provenance match, requires a versioned legacy-Web archive, and validates `mode=live` with `--require-live` before upload. It receives only sanitized receipt fields; the account fakeid, selected article ID, QR image, passphrase, command output, and network captures are never serialized.
 
 ## Fixture receipt
 
