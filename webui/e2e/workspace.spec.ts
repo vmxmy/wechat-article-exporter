@@ -282,12 +282,35 @@ test('sanitized export flow authorizes a directory, downloads an artifact, opens
     textarea.dispatchEvent(new Event('change', { bubbles: true }))
   })
   await expect(articleIDs).toHaveValue('article-fixture-1')
+  await page.getByRole('combobox', { name: 'Format' }).selectOption('html')
+  await expect(page.getByRole('group', { name: 'HTML content options' })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'HTML content options' }).getByRole('checkbox', { name: 'Include locally stored comments' })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'HTML content options' })).not.toContainText('Include article content where supported')
+  const includeComments = page.getByRole('checkbox', { name: 'Include locally stored comments' })
+  await includeComments.evaluate((element) => (element as HTMLInputElement).click())
+  await expect(includeComments).toBeChecked()
+  await page.getByRole('combobox', { name: 'Resource handling' }).selectOption('strict')
+  const batchArchive = page.getByRole('textbox', { name: 'HTML batch archive file name' })
+  await batchArchive.evaluate((element) => {
+    const input = element as HTMLInputElement
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    if (!setValue) throw new Error('input value setter is unavailable')
+    setValue.call(input, 'articles.zip')
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: 'articles.zip', inputType: 'insertText' }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await expect(batchArchive).toHaveValue('articles.zip')
   await expect(page.getByRole('button', { name: 'Queue export' })).toBeEnabled()
   const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
   await page.getByRole('button', { name: 'Queue export' }).click()
   await jobHandoff
   expect(fixture.exports).toHaveLength(1)
-  expect(fixture.exports[0]).toContain('dir-sanitized')
+  expect(JSON.parse(fixture.exports[0])).toMatchObject({
+    directoryToken: 'dir-sanitized', format: 'html',
+    options: { formatOptions: { comments: true, htmlResourcePolicy: 'strict', htmlBatchArchive: 'articles.zip' } }
+  })
+  expect(JSON.parse(fixture.exports[0]).options.formatOptions).not.toHaveProperty('content')
+  expect(JSON.parse(fixture.exports[0]).options.formatOptions).not.toHaveProperty('metadata')
   await page.goto('/exports')
   const exportRecord = page.getByRole('checkbox', { name: 'Select export export-fixture-1' })
   await exportRecord.evaluate((element) => (element as HTMLInputElement).click())

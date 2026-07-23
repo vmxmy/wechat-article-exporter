@@ -103,6 +103,7 @@ export const en = {
     subdirectory: 'Subdirectory inside the authorized directory',
     subdirectoryHint: 'Optional. Use a relative name only; it stays inside the authorized directory.',
     options: 'Export options',
+    formatOptions: (format: string) => `${format} content options`,
     namingTemplate: 'Naming template',
     maximumNameBytes: 'Maximum file-name bytes',
     collision: 'On name collision',

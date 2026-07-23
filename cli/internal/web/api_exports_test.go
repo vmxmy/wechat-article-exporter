@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -88,7 +89,7 @@ func TestExportAPIUsesOpaqueCapabilitiesAndFacadeOnly(t *testing.T) {
 	}
 	response.Body.Close()
 
-	response = mutate("/api/v1/exports/start", `{"directoryToken":"dir_child","subdirectory":"batch","selection":{"kind":"explicit_ids","articleIds":["article-1"]},"format":"markdown","confirm":"start-export:dir_child"}`)
+	response = mutate("/api/v1/exports/start", `{"directoryToken":"dir_child","subdirectory":"batch","selection":{"kind":"explicit_ids","articleIds":["article-1"]},"format":"markdown","options":{"formatOptions":{"metadata":false,"comments":true}},"confirm":"start-export:dir_child"}`)
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("start status=%d body=%s", response.StatusCode, readResponse(t, response))
 	}
@@ -104,6 +105,9 @@ func TestExportAPIUsesOpaqueCapabilitiesAndFacadeOnly(t *testing.T) {
 	response.Body.Close()
 	if start.Data.JobID != "11111111-1111-1111-1111-111111111111" || service.start.DirectoryToken != "dir_child" || service.start.Subdirectory != "batch" {
 		t.Fatalf("start response=%#v request=%#v", start, service.start)
+	}
+	if !reflect.DeepEqual(service.start.Options.FormatOptions, map[string]any{"metadata": false, "comments": true}) {
+		t.Fatalf("start format options = %#v", service.start.Options.FormatOptions)
 	}
 
 	for _, path := range []string{"/api/v1/exports", "/api/v1/exports/export-1", "/api/v1/exports/export-1/manifest"} {

@@ -81,6 +81,7 @@ func TestWorkspaceExportsIssuesOpaqueDirectoriesAndAuthorizesOnlyChildren(t *tes
 	queued, err := service.StartExport(context.Background(), WorkspaceStartExportRequest{
 		DirectoryToken: child.Token, Subdirectory: "ready", Format: "markdown",
 		Selection: domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs, ArticleIDs: []domain.ArticleID{"article-1"}},
+		Options:   domain.ExportOptions{FormatOptions: map[string]any{"metadata": false, "comments": true}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -94,6 +95,9 @@ func TestWorkspaceExportsIssuesOpaqueDirectoriesAndAuthorizesOnlyChildren(t *tes
 	if queued.ID != "job-1" || queued.Directory != string(child.Token) || filepath.IsAbs(queued.Directory) {
 		t.Fatalf("queued export = %#v", queued)
 	}
+	if !reflect.DeepEqual(exports.request.Options.FormatOptions, map[string]any{"metadata": false, "comments": true}) {
+		t.Fatalf("format options = %#v", exports.request.Options.FormatOptions)
+	}
 
 	for _, subdirectory := range []string{"../escape", "/tmp/escape", `C:\\escape`} {
 		_, err := service.StartExport(context.Background(), WorkspaceStartExportRequest{DirectoryToken: child.Token, Subdirectory: subdirectory, Format: "markdown"})
@@ -101,6 +105,42 @@ func TestWorkspaceExportsIssuesOpaqueDirectoriesAndAuthorizesOnlyChildren(t *tes
 		if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInvalidArgument {
 			t.Fatalf("StartExport(%q) error = %#v", subdirectory, err)
 		}
+	}
+}
+
+func TestWorkspaceExportOptionsAllowOnlySupportedFormatControls(t *testing.T) {
+	tests := []struct {
+		name    string
+		format  string
+		options map[string]any
+		want    map[string]any
+		valid   bool
+	}{
+		{name: "markdown metadata and comments", format: "markdown", options: map[string]any{"metadata": false, "comments": true}, want: map[string]any{"metadata": false, "comments": true}, valid: true},
+		{name: "json content metadata and comments", format: "json", options: map[string]any{"content": false, "metadata": false, "comments": true}, want: map[string]any{"content": false, "metadata": false, "comments": true}, valid: true},
+		{name: "html resource policy and archive", format: "HTML", options: map[string]any{"comments": true, "htmlResourcePolicy": "strict", "htmlBatchArchive": "articles.zip"}, want: map[string]any{"comments": true, "htmlResourcePolicy": "strict", "htmlBatchArchive": "articles.zip"}, valid: true},
+		{name: "generic CLI option remains valid", format: "markdown", options: map[string]any{"content": true}, want: map[string]any{"content": true}, valid: true},
+		{name: "html option on json", format: "json", options: map[string]any{"htmlResourcePolicy": "strict"}},
+		{name: "invalid html resource policy", format: "html", options: map[string]any{"htmlResourcePolicy": "unsafe"}},
+		{name: "unsafe archive name", format: "html", options: map[string]any{"htmlBatchArchive": "../articles.zip"}},
+		{name: "unknown option", format: "pdf", options: map[string]any{"path": "/private"}},
+		{name: "invalid option value type", format: "xlsx", options: map[string]any{"content": "yes"}},
+		{name: "unknown format", format: "epub", options: map[string]any{}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			format, options, err := workspaceExportOptions(test.format, domain.ExportOptions{FormatOptions: test.options})
+			if test.valid {
+				if err != nil || format == "" || !reflect.DeepEqual(options.FormatOptions, test.want) {
+					t.Fatalf("workspaceExportOptions() = %q, %#v, %v", format, options, err)
+				}
+				return
+			}
+			var workspaceErr *WorkspaceError
+			if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInvalidArgument {
+				t.Fatalf("workspaceExportOptions() error = %#v", err)
+			}
+		})
 	}
 }
 

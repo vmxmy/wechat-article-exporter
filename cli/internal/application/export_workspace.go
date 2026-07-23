@@ -23,6 +23,14 @@ const workspaceDefaultExportDirectory = "wechat-article-exports"
 
 const workspaceConfiguredExportDirectoryLabel = "configured export directory"
 
+const (
+	workspaceExportOptionContent            = "content"
+	workspaceExportOptionMetadata           = "metadata"
+	workspaceExportOptionComments           = "comments"
+	workspaceExportOptionHTMLResourcePolicy = "htmlResourcePolicy"
+	workspaceExportOptionHTMLBatchArchive   = "htmlBatchArchive"
+)
+
 // WorkspaceExportService is the filesystem-safe export boundary for local
 // presentation adapters. Directory handles are opaque server-issued
 // capabilities: callers provide neither host paths nor execution-time output
@@ -305,6 +313,10 @@ func (service *WorkspaceExports) StartExport(ctx context.Context, request Worksp
 	if service == nil || service.application == nil {
 		return WorkspaceExportJob{}, workspaceError(fmt.Errorf("start export: %w", ErrUnavailable))
 	}
+	format, options, err := workspaceExportOptions(request.Format, request.Options)
+	if err != nil {
+		return WorkspaceExportJob{}, err
+	}
 	directory, err := service.directory(request.DirectoryToken)
 	if err != nil {
 		return WorkspaceExportJob{}, err
@@ -321,14 +333,79 @@ func (service *WorkspaceExports) StartExport(ctx context.Context, request Worksp
 		return WorkspaceExportJob{}, workspaceError(err)
 	}
 	job, err := service.application.StartExport(ctx, domain.ExportRequest{
-		Selection: request.Selection, Format: strings.TrimSpace(request.Format), Options: request.Options,
+		Selection: request.Selection, Format: format, Options: options,
 		OutputRoot: outputRoot.Root, OutputAuthorization: outputRoot,
 	})
 	if err != nil {
 		return WorkspaceExportJob{}, workspaceError(err)
 	}
-	return WorkspaceExportJob{ID: job.ID, State: job.State, Format: strings.TrimSpace(request.Format), QueuedAt: job.CreatedAt,
+	return WorkspaceExportJob{ID: job.ID, State: job.State, Format: format, QueuedAt: job.CreatedAt,
 		Directory: string(request.DirectoryToken)}, nil
+}
+
+// workspaceExportOptions narrows the untyped domain option map at the local
+// browser boundary. It preserves the existing application/CLI option contract
+// while preventing browser callers from smuggling future, internal, or
+// cross-format settings into durable jobs.
+func workspaceExportOptions(format string, options domain.ExportOptions) (string, domain.ExportOptions, error) {
+	format = strings.ToLower(strings.TrimSpace(format))
+	if !workspaceExportFormat(format) {
+		return "", domain.ExportOptions{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "export format is unsupported"}
+	}
+	if options.FormatOptions == nil {
+		return format, options, nil
+	}
+	allowed := map[string]struct{}{
+		workspaceExportOptionContent:  {},
+		workspaceExportOptionMetadata: {},
+		workspaceExportOptionComments: {},
+	}
+	if format == "html" {
+		allowed[workspaceExportOptionHTMLResourcePolicy] = struct{}{}
+		allowed[workspaceExportOptionHTMLBatchArchive] = struct{}{}
+	}
+	normalized := make(map[string]any, len(options.FormatOptions))
+	for key, value := range options.FormatOptions {
+		if _, ok := allowed[key]; !ok {
+			return "", domain.ExportOptions{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "export option is unsupported for this format"}
+		}
+		if !workspaceExportOptionValueValid(key, value) {
+			return "", domain.ExportOptions{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "export option value is invalid"}
+		}
+		normalized[key] = value
+	}
+	options.FormatOptions = normalized
+	return format, options, nil
+}
+
+func workspaceExportFormat(format string) bool {
+	switch format {
+	case "html", "markdown", "text", "json", "xlsx", "docx", "pdf":
+		return true
+	default:
+		return false
+	}
+}
+
+func workspaceExportOptionValueValid(key string, value any) bool {
+	switch key {
+	case workspaceExportOptionContent, workspaceExportOptionMetadata, workspaceExportOptionComments:
+		_, ok := value.(bool)
+		return ok
+	case workspaceExportOptionHTMLResourcePolicy:
+		policy, ok := value.(string)
+		return ok && (policy == "best-effort" || policy == "strict")
+	case workspaceExportOptionHTMLBatchArchive:
+		name, ok := value.(string)
+		return ok && workspaceExportArchiveName(name)
+	default:
+		return false
+	}
+}
+
+func workspaceExportArchiveName(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && filepath.Base(value) == value && !strings.ContainsAny(value, `/\\`) && strings.EqualFold(filepath.Ext(value), ".zip")
 }
 
 func (service *WorkspaceExports) ExportRecords(ctx context.Context, request WorkspacePageRequest) (WorkspacePage[WorkspaceExportRecord], error) {

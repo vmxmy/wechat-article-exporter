@@ -5,7 +5,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { useEffect, useMemo, useState } from 'react'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
-import { consumeExportHandoff, getExportArtifactDownloadURL, openExportOutput, parseArticleQuery, type ExportFormat, type ExportManifest, type ExportRecord, type ExportSelection, type ExportVerification } from '../../lib/api'
+import { consumeExportHandoff, getExportArtifactDownloadURL, openExportOutput, parseArticleQuery, type ExportFormat, type ExportManifest, type ExportOptions, type ExportRecord, type ExportSelection, type ExportVerification } from '../../lib/api'
 import { handoffCreatedJob } from '../../lib/jobHandoff'
 import { useExportManifest, useExportPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 
@@ -53,6 +53,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   const ids = parseArticleIDs(articleIDs)
   const confirmation = directory ? `start-export:${directory.token}` : '—'
   const isHTML = format === 'html'
+  const formatOptionLabels = formatOptionsFor(format)
 
   useEffect(() => {
     if (selection?.kind === 'explicit_ids') setArticleIDs(selection.articleIds.join('\n'))
@@ -108,13 +109,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
         namingTemplate: namingTemplate.trim() || undefined,
         maximumNameBytes: Number.isInteger(maximum) ? maximum : undefined,
         collisionPolicy,
-        formatOptions: {
-          content: includeContent,
-          metadata: includeMetadata,
-          comments: includeComments,
-          htmlResourcePolicy,
-          ...(isHTML && htmlBatchArchive.trim() ? { htmlBatchArchive: htmlBatchArchive.trim() } : {})
-        }
+        formatOptions: exportFormatOptions(format, { includeContent, includeMetadata, includeComments, htmlResourcePolicy, htmlBatchArchive })
       }
     }, {
       onSuccess: (result) => {
@@ -205,7 +200,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
             <label>{copy.collision}<select value={collisionPolicy} onChange={(event) => setCollisionPolicy(event.target.value as typeof collisionPolicy)}><option value="fail">{copy.collisionFail}</option><option value="skip">{copy.collisionSkip}</option><option value="replace">{copy.collisionReplace}</option><option value="suffix">{copy.collisionSuffix}</option></select></label>
           </div>
           <p className="field-hint">{copy.subdirectoryHint}</p>
-          <fieldset className="export-options"><legend>{copy.options}</legend><CheckboxInput label={copy.includeContent} value={includeContent} onChange={() => setIncludeContent((value) => !value)} /><CheckboxInput label={copy.includeMetadata} value={includeMetadata} onChange={() => setIncludeMetadata((value) => !value)} /><CheckboxInput label={copy.includeComments} value={includeComments} onChange={() => setIncludeComments((value) => !value)} /></fieldset>
+          {formatOptionLabels.length ? <fieldset className="export-options"><legend>{copy.formatOptions(format.toUpperCase())}</legend>{formatOptionLabels.includes('content') ? <CheckboxInput label={copy.includeContent} value={includeContent} onChange={() => setIncludeContent((value) => !value)} /> : null}{formatOptionLabels.includes('metadata') ? <CheckboxInput label={copy.includeMetadata} value={includeMetadata} onChange={() => setIncludeMetadata((value) => !value)} /> : null}{formatOptionLabels.includes('comments') ? <CheckboxInput label={copy.includeComments} value={includeComments} onChange={() => setIncludeComments((value) => !value)} /> : null}</fieldset> : null}
           {isHTML ? <fieldset className="export-options"><legend>{copy.htmlOptions}</legend><label>{copy.resourcePolicy}<select value={htmlResourcePolicy} onChange={(event) => setHTMLResourcePolicy(event.target.value as typeof htmlResourcePolicy)}><option value="best-effort">{copy.resourceBestEffort}</option><option value="strict">{copy.resourceStrict}</option></select></label><TextInput label={copy.batchArchive} value={htmlBatchArchive} onChange={setHTMLBatchArchive} /><p className="field-hint">{copy.batchArchiveHint}</p></fieldset> : null}
           <div className="confirmation-proof"><span>{copy.confirmation}</span><code>{confirmation}</code><p>{copy.confirmationHint}</p></div>
           <div className="export-actions"><Button label={copy.start} variant="primary" isLoading={mutations.startExport.isPending} isDisabled={!directory || !selection || (selection.kind === 'explicit_ids' && ids.length === 0)} onClick={queueExport} /></div>
@@ -250,6 +245,31 @@ function Verification({ messages, verification }: { readonly messages: MessageCa
 }
 
 function parseArticleIDs(value: string) { return [...new Set(value.split(/[\n,]/).map((id) => id.trim()).filter(Boolean))] }
+
+type ExportToggle = 'content' | 'metadata' | 'comments'
+
+function formatOptionsFor(format: ExportFormat): readonly ExportToggle[] {
+  switch (format) {
+    case 'html': return ['comments']
+    case 'markdown':
+    case 'text': return ['metadata', 'comments']
+    case 'json': return ['content', 'metadata', 'comments']
+    case 'xlsx': return ['content']
+    case 'docx':
+    case 'pdf': return ['comments']
+  }
+}
+
+function exportFormatOptions(format: ExportFormat, values: { readonly includeContent: boolean; readonly includeMetadata: boolean; readonly includeComments: boolean; readonly htmlResourcePolicy: 'best-effort' | 'strict'; readonly htmlBatchArchive: string }): ExportOptions['formatOptions'] {
+  const options: Record<string, boolean | string> = {}
+  const toggleValues: Record<ExportToggle, boolean> = { content: values.includeContent, metadata: values.includeMetadata, comments: values.includeComments }
+  for (const option of formatOptionsFor(format)) options[option] = toggleValues[option]
+  if (format === 'html') {
+    options.htmlResourcePolicy = values.htmlResourcePolicy
+    if (values.htmlBatchArchive.trim()) options.htmlBatchArchive = values.htmlBatchArchive.trim()
+  }
+  return options
+}
 function formatDate(value: string, locale: Locale) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(date) }
 function formatBytes(value: number) {
   if (value < 1_024) return `${value} B`

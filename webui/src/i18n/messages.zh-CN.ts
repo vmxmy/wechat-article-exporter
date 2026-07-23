@@ -103,6 +103,7 @@ export const zhCN = {
     subdirectory: '已授权目录内的子目录',
     subdirectoryHint: '可选。只能使用相对名称，并且始终位于已授权目录内。',
     options: '导出选项',
+    formatOptions: (format: string) => `${format} 内容选项`,
     namingTemplate: '命名模板',
     maximumNameBytes: '文件名最大字节数',
     collision: '文件名冲突时',
