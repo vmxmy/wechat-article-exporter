@@ -15,6 +15,30 @@ func TestEmbeddedAssetsAreCompleteAndLocal(t *testing.T) {
 	}
 }
 
+func TestFingerprintedAsset(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		asset string
+		want  bool
+	}{
+		{name: "URL-safe Vite hash", asset: "assets/index-Dlmg_X-D.js", want: true},
+		{name: "eight-character hash", asset: "assets/index-abcd_123.js", want: true},
+		{name: "short hash", asset: "assets/index-abc_123.js", want: false},
+		{name: "unsafe hash character", asset: "assets/index-abcd.123.js", want: false},
+		{name: "nested asset", asset: "assets/chunks/index-Dlmg_X-D.js", want: false},
+		{name: "parent-like filename", asset: "assets/..index-Dlmg_X-D.js", want: false},
+		{name: "backslash path", asset: "assets\\index-Dlmg_X-D.js", want: false},
+		{name: "unsafe extension", asset: "assets/index-Dlmg_X-D.j-s", want: false},
+		{name: "outside asset directory", asset: "index-Dlmg_X-D.js", want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := fingerprintedAsset(test.asset); got != test.want {
+				t.Errorf("fingerprintedAsset(%q) = %t; want %t", test.asset, got, test.want)
+			}
+		})
+	}
+}
+
 func TestAssetHandlerServesAssetsAndSPAFallback(t *testing.T) {
 	handler := AssetHandler()
 	manifest := mustEmbeddedManifest(t)

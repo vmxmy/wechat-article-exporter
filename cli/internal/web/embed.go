@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -23,6 +24,8 @@ const (
 	assetManifestPath = assetRoot + "/.vite/manifest.json"
 	assetIndexPath    = assetRoot + "/index.html"
 )
+
+var fingerprintedAssetPattern = regexp.MustCompile(`^assets/[^/\\]+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$`)
 
 // AssetHandler serves the embedded workspace document and its fingerprinted
 // resources. Authentication and common security headers stay with Server;
@@ -193,16 +196,5 @@ func validateManifestAsset(entryName, asset string) error {
 }
 
 func fingerprintedAsset(asset string) bool {
-	base := path.Base(asset)
-	dash := strings.LastIndex(base, "-")
-	dot := strings.LastIndex(base, ".")
-	if dash < 1 || dot <= dash+1 {
-		return false
-	}
-	for _, character := range base[dash+1 : dot] {
-		if !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') && !(character >= '0' && character <= '9') && character != '_' {
-			return false
-		}
-	}
-	return dot-dash-1 >= 8
+	return !strings.Contains(asset, "..") && fingerprintedAssetPattern.MatchString(asset)
 }
