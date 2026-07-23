@@ -101,7 +101,7 @@ func TestExportAPIUsesOpaqueCapabilitiesAndFacadeOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if start.Data.JobID == "" || service.start.DirectoryToken != "dir_child" || service.start.Subdirectory != "batch" {
+	if start.Data.JobID != "11111111-1111-1111-1111-111111111111" || service.start.DirectoryToken != "dir_child" || service.start.Subdirectory != "batch" {
 		t.Fatalf("start response=%#v request=%#v", start, service.start)
 	}
 

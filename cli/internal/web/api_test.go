@@ -195,25 +195,30 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 	for _, input := range []struct {
 		path, body string
 		status     int
+		job        bool
 	}{
-		{"/api/v1/login/begin", `{"sessionId":"browser-session"}`, http.StatusOK},
-		{"/api/v1/login/poll", `{}`, http.StatusOK},
-		{"/api/v1/login/complete", `{}`, http.StatusOK},
-		{"/api/v1/accounts/account-1/sync", `{"incremental":true,"pageSize":20}`, http.StatusAccepted},
-		{"/api/v1/ingest/url", `{"url":"https://mp.weixin.qq.com/s/fixture"}`, http.StatusAccepted},
-		{"/api/v1/articles/download", `{"articleIds":["article-1"]}`, http.StatusAccepted},
-		{"/api/v1/articles/metadata", `{"articleIds":["article-1"]}`, http.StatusAccepted},
-		{"/api/v1/articles/comments", `{"articleIds":["article-1"]}`, http.StatusAccepted},
-		{"/api/v1/articles/resources", `{"articleIds":["article-1"],"force":true}`, http.StatusAccepted},
-		{"/api/v1/albums/album-1/traverse", `{"accountId":"account-1","download":true}`, http.StatusAccepted},
-		{"/api/v1/jobs/" + jobID + "/pause", `{"confirm":"pause-job:` + jobID + `"}`, http.StatusOK},
-		{"/api/v1/jobs/" + jobID + "/resume", `{}`, http.StatusOK},
-		{"/api/v1/jobs/" + jobID + "/retry", `{"confirm":"retry-job:` + jobID + `"}`, http.StatusOK},
-		{"/api/v1/jobs/" + jobID + "/cancel", `{"confirm":"cancel-job:` + jobID + `"}`, http.StatusOK},
+		{"/api/v1/login/begin", `{"sessionId":"browser-session"}`, http.StatusOK, false},
+		{"/api/v1/login/poll", `{}`, http.StatusOK, false},
+		{"/api/v1/login/complete", `{}`, http.StatusOK, false},
+		{"/api/v1/accounts/account-1/sync", `{"incremental":true,"pageSize":20}`, http.StatusAccepted, true},
+		{"/api/v1/ingest/url", `{"url":"https://mp.weixin.qq.com/s/fixture"}`, http.StatusAccepted, true},
+		{"/api/v1/articles/download", `{"articleIds":["article-1"]}`, http.StatusAccepted, true},
+		{"/api/v1/articles/metadata", `{"articleIds":["article-1"]}`, http.StatusAccepted, true},
+		{"/api/v1/articles/comments", `{"articleIds":["article-1"]}`, http.StatusAccepted, true},
+		{"/api/v1/articles/resources", `{"articleIds":["article-1"],"force":true}`, http.StatusAccepted, true},
+		{"/api/v1/albums/album-1/traverse", `{"accountId":"account-1","download":true}`, http.StatusAccepted, true},
+		{"/api/v1/jobs/" + jobID + "/pause", `{"confirm":"pause-job:` + jobID + `"}`, http.StatusOK, true},
+		{"/api/v1/jobs/" + jobID + "/resume", `{}`, http.StatusOK, true},
+		{"/api/v1/jobs/" + jobID + "/retry", `{"confirm":"retry-job:` + jobID + `"}`, http.StatusOK, true},
+		{"/api/v1/jobs/" + jobID + "/cancel", `{"confirm":"cancel-job:` + jobID + `"}`, http.StatusOK, true},
 	} {
 		response := mutate(input.path, input.body)
 		if response.StatusCode != input.status {
 			t.Fatalf("POST %s status=%d body=%s", input.path, response.StatusCode, readResponse(t, response))
+		}
+		if input.job {
+			assertStableJobResponse(t, response, input.path, jobID)
+			continue
 		}
 		response.Body.Close()
 	}
@@ -235,6 +240,23 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 	response.Body.Close()
 	if !app.loggedOut {
 		t.Fatal("application logout was not invoked")
+	}
+}
+
+func assertStableJobResponse(t *testing.T, response *http.Response, path, wantID string) {
+	t.Helper()
+	var envelope struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		response.Body.Close()
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if envelope.Data.ID != wantID {
+		t.Fatalf("POST %s persistent job response ID=%q, want %q", path, envelope.Data.ID, wantID)
 	}
 }
 
@@ -621,6 +643,9 @@ func (app *apiApplication) ResumeJob(context.Context, domain.JobID) (domain.Job,
 	return app.job, nil
 }
 func (app *apiApplication) RetryJob(context.Context, domain.JobID) (domain.Job, error) {
+	return app.job, nil
+}
+func (app *apiApplication) CancelJob(context.Context, domain.JobID) (domain.Job, error) {
 	return app.job, nil
 }
 
