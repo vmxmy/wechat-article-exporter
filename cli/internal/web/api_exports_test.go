@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +118,30 @@ func TestExportAPIUsesOpaqueCapabilitiesAndFacadeOnly(t *testing.T) {
 		t.Fatalf("verify status=%d body=%s", response.StatusCode, readResponse(t, response))
 	}
 	response.Body.Close()
+}
+
+func TestExportAPINeverReturnsConfiguredExportRootPath(t *testing.T) {
+	configured := filepath.Join(t.TempDir(), "private-configured-export-root")
+	service := application.NewWorkspaceExports(nil, nil, application.WorkspaceExportsOptions{
+		ConfiguredRoot: func(context.Context) (string, error) { return configured, nil },
+	})
+	server, client := startExportAPIServer(t, service)
+	base := authorizeAPI(t, client, server.URL())
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+	request := requestWith(t, http.MethodPost, base+"/api/v1/export-directories/authorize", strings.NewReader(`{"confirm":"authorize-default-export-directory"}`), map[string]string{
+		"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf,
+	})
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("authorize status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	body := readResponse(t, response)
+	if strings.Contains(body, configured) || strings.Contains(body, filepath.Base(configured)) || !strings.Contains(body, `"token":"dir_`) {
+		t.Fatalf("configured root leaked or token missing from API response: %s", body)
+	}
 }
 
 func TestExportAPIStreamsOpaqueArtifactsAndProtectsDesktopOpening(t *testing.T) {

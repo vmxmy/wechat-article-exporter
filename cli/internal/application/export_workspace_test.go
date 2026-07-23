@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,6 +125,98 @@ func TestWorkspaceExportsRejectsUnknownTokensAndSymlinkDirectories(t *testing.T)
 	_, err = service.DefaultExportDirectory(context.Background())
 	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInternal {
 		t.Fatalf("symlink default directory error = %#v", err)
+	}
+}
+
+func TestWorkspaceExportsUsesConfiguredRootOrDownloadsFallback(t *testing.T) {
+	temporary := t.TempDir()
+	configured := filepath.Join(temporary, "configured")
+	service := NewWorkspaceExports(nil, nil, WorkspaceExportsOptions{ConfiguredRoot: func(context.Context) (string, error) {
+		return configured, nil
+	}})
+	service.home = func() (string, error) { return temporary, nil }
+
+	directory, err := service.DefaultExportDirectory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directory.Label != workspaceConfiguredExportDirectoryLabel || !directory.IsDefault || strings.Contains(string(directory.Token), configured) {
+		t.Fatalf("configured directory = %#v", directory)
+	}
+	if _, err := os.Stat(configured); err != nil {
+		t.Fatalf("configured directory was not created: %v", err)
+	}
+
+	fallback := NewWorkspaceExports(nil, nil, WorkspaceExportsOptions{ConfiguredRoot: func(context.Context) (string, error) {
+		return "", nil
+	}})
+	fallback.home = func() (string, error) { return temporary, nil }
+	directory, err = fallback.DefaultExportDirectory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directory.Label != workspaceDefaultExportDirectory || !directory.IsDefault {
+		t.Fatalf("fallback directory = %#v", directory)
+	}
+	if _, err := os.Stat(filepath.Join(temporary, "Downloads", workspaceDefaultExportDirectory)); err != nil {
+		t.Fatalf("Downloads fallback was not created: %v", err)
+	}
+}
+
+func TestWorkspaceExportsRejectsUnavailableSymlinkAndReplacedConfiguredRoot(t *testing.T) {
+	temporary := t.TempDir()
+	configured := filepath.Join(temporary, "configured")
+	exports := &workspaceExportJobs{job: domain.Job{ID: "job-1", State: domain.JobQueued}}
+	service := NewWorkspaceExports(New(Options{Exports: exports, Starter: workspaceExportStarter{}}), nil, WorkspaceExportsOptions{ConfiguredRoot: func(context.Context) (string, error) {
+		return configured, nil
+	}})
+	if err := os.MkdirAll(filepath.Dir(configured), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), configured); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	_, err := service.DefaultExportDirectory(context.Background())
+	var workspaceErr *WorkspaceError
+	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInternal {
+		t.Fatalf("symlink configured directory error = %#v", err)
+	}
+	if err := os.Remove(configured); err != nil {
+		t.Fatal(err)
+	}
+	linkedParent := filepath.Join(temporary, "linked-parent")
+	if err := os.Symlink(t.TempDir(), linkedParent); err != nil {
+		t.Skipf("ancestor symlinks unavailable: %v", err)
+	}
+	service.configuredRoot = func(context.Context) (string, error) { return filepath.Join(linkedParent, "configured"), nil }
+	_, err = service.DefaultExportDirectory(context.Background())
+	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInternal {
+		t.Fatalf("symlink ancestor configured directory error = %#v", err)
+	}
+	if err := os.Remove(linkedParent); err != nil {
+		t.Fatal(err)
+	}
+
+	service.configuredRoot = func(context.Context) (string, error) { return "", errors.New("configuration unavailable") }
+	_, err = service.DefaultExportDirectory(context.Background())
+	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInternal {
+		t.Fatalf("unavailable configured directory error = %#v", err)
+	}
+
+	service.configuredRoot = func(context.Context) (string, error) { return configured, nil }
+	directory, err := service.DefaultExportDirectory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(configured); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(configured, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.StartExport(context.Background(), WorkspaceStartExportRequest{DirectoryToken: directory.Token, Format: "markdown"})
+	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInternal {
+		t.Fatalf("replaced configured directory error = %#v", err)
 	}
 }
 

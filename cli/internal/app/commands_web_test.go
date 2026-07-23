@@ -5,13 +5,40 @@ import (
 	"errors"
 	"net/http"
 	"net/http/cookiejar"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
 	localweb "github.com/wechat-article/wechat-article-exporter/cli/internal/web"
 )
+
+func TestWebConfiguredExportRootUsesActiveProfilePreference(t *testing.T) {
+	applicationAdapter, _, _ := newTestApp(t)
+	configured := filepath.Join(t.TempDir(), "configured-exports")
+	store := profiles.NewConfigStore(applicationAdapter.active.Profile.Paths.Config)
+	configuration, _, err := store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration.Preferences.Export.Root = configured
+	if err := store.Write(configuration); err != nil {
+		t.Fatal(err)
+	}
+
+	service := application.NewWorkspaceExports(applicationAdapter.core, applicationAdapter.active.Library, application.WorkspaceExportsOptions{
+		ConfiguredRoot: webConfiguredExportRoot(applicationAdapter.active.Profile.Paths.Config),
+	})
+	directory, err := service.DefaultExportDirectory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directory.Token == "" || directory.Label != "configured export directory" || !directory.IsDefault || strings.Contains(string(directory.Token), configured) {
+		t.Fatalf("configured export directory = %#v", directory)
+	}
+}
 
 func TestWebCommandPrintsOnlyLocalURLAndHonorsNoOpen(t *testing.T) {
 	applicationAdapter, _, stderr := newTestApp(t)

@@ -28,7 +28,7 @@
 
 ## 4. File, export, and confirmation safety
 
-- [ ] 4.1 Define service-validated export root and descendant directory-handle protocol using configured/default Downloads roots and existing output authorization.
+- [x] 4.1 Define service-validated export root and descendant directory-handle protocol using configured/default Downloads roots and existing output authorization. The browser now receives an opaque token for the active profile's configured root when present, otherwise the local Downloads fallback; application-level Lstat/OpenRoot/no-symlink/identity checks authorize the selected directory and reject replacement before queuing work.
 - [ ] 4.2 Implement streaming download responses for safe generated artifacts and bounded upload staging for account manifests, credentials, backups, and restore archives. Safe generated export artifacts and backup ZIPs stream only through one-shot opaque capabilities; account manifests use bounded private staging, Credentials accept one bounded JSON file directly into the parser, and restore archives have bounded private staging. This combined item remains open because backup upload staging and the remaining complete file-boundary coverage are not implemented.
 - [x] 4.3 Integrate uploaded restore archives with the existing staged transactional restore pipeline and cleanup guarantees.
 - [ ] 4.4 Preserve existing exact scoped confirmation behavior for deletion, job cancellation, restore, GC, credential removal, and proxy trust operations.

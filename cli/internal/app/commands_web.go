@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
 	localweb "github.com/wechat-article/wechat-article-exporter/cli/internal/web"
 )
 
@@ -27,7 +29,9 @@ func (a *App) webCommand() *cobra.Command {
 			if a.active == nil || a.active.Library == nil {
 				return errors.New("active export workspace is unavailable")
 			}
-			exports := application.NewWorkspaceExports(a.core, a.active.Library)
+			exports := application.NewWorkspaceExports(a.core, a.active.Library, application.WorkspaceExportsOptions{
+				ConfiguredRoot: webConfiguredExportRoot(a.active.Profile.Paths.Config),
+			})
 			preview := newWorkspaceExtensions(a).(application.WorkspaceArticlePreviewRenderer)
 			maintenance, storageMaintenance := newWebMaintenance(a)
 			credentialUploads := newWebCredentialUpload(maintenance)
@@ -74,6 +78,19 @@ func (a *App) webCommand() *cobra.Command {
 	}
 	command.Flags().BoolVar(&noOpen, "no-open", false, "do not open the local browser automatically")
 	return command
+}
+
+// webConfiguredExportRoot binds the config path while the web server is
+// created, so later profile restore/reopen work cannot race on App.active.
+// The browser receives only an opaque directory token, never this host path.
+func webConfiguredExportRoot(configPath string) application.WorkspaceExportRootProvider {
+	return func(context.Context) (string, error) {
+		configuration, _, err := profiles.NewConfigStore(configPath).Read()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(configuration.Preferences.Export.Root), nil
+	}
 }
 
 func ignoreContextCancellation(err error) error {
