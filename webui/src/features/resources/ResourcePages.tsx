@@ -2,11 +2,12 @@ import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Button } from '@astryxdesign/core/Button'
 import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog'
 import { TextInput } from '@astryxdesign/core/TextInput'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { consumeArticleQueryHandoff, parseArticleQuery, saveExportHandoff, type AccountRecord, type AlbumRecord, type AlbumTraversalOrder, type JobDetail, type JobRecord, type SavedQueryRecord } from '../../lib/api'
 import { getAccountManifestDownloadURL } from '../../lib/api'
+import { loadJobHandoff } from '../../lib/jobHandoff'
 import { useAccountPage, useAccountSearch, useAlbumPage, useJobDetail, useJobPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 import { ResourceTable } from './ResourceTable'
 import { UnavailableActionPanel } from '../actions/UnavailableActionPanel'
@@ -51,9 +52,9 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
     <>
       <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.accounts} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
       <UnavailableActionPanel messages={messages} title={actions.title} description={actions.description}>
-        <div className="account-action-form"><TextInput label={actions.search} value={search} onChange={setSearch} /><Button label={actions.discover} variant="secondary" isLoading={discovery.isFetching} onClick={() => void discovery.refetch()} /></div>
-        {discovery.data?.data.length ? <p>{discovery.data.data.map((account) => `${account.name} (${account.id})`).join(' · ')}</p> : null}
-        <div className="account-action-form"><TextInput label={actions.fakeid} value={fakeid} onChange={setFakeid} /><TextInput label={actions.name} value={name} onChange={setName} /><TextInput label={actions.alias} value={alias} onChange={setAlias} /><Button label={actions.add} variant="primary" isLoading={mutations.saveAccount.isPending} isDisabled={!accountInput.fakeid || !accountInput.name} onClick={() => mutations.saveAccount.mutate(accountInput, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.edit} variant="secondary" isLoading={mutations.updateAccount.isPending} isDisabled={!one || !accountInput.fakeid || !accountInput.name} onClick={() => one && mutations.updateAccount.mutate({ id: one, input: accountInput }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.sync} variant="secondary" isLoading={mutations.syncAccount.isPending} isDisabled={!one} onClick={() => one && mutations.syncAccount.mutate(one, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.remove} variant="secondary" isLoading={mutations.deleteAccounts.isPending} isDisabled={selected.length === 0} onClick={() => { setDeleteConfirmation(''); setDeleteConfirmationOpen(true) }} /></div>
+        <form className="account-action-form" onSubmit={(event) => { event.preventDefault(); void discovery.refetch() }}><TextInput label={actions.search} value={search} onChange={setSearch} isRequired /><Button label={actions.discover} type="submit" variant="secondary" isLoading={discovery.isFetching} isDisabled={!search.trim()} /></form>
+        {discovery.data ? <section className="discovery-results" aria-labelledby="discovery-results-title" aria-live="polite"><h3 id="discovery-results-title">{actions.discoveryResults}</h3>{discovery.data.data.length === 0 ? <p>{actions.discoveryEmpty}</p> : <ul>{discovery.data.data.map((account) => <li key={account.id}><div><strong>{account.name}</strong>{account.alias ? <span>{account.alias}</span> : null}</div><Button label={actions.useCandidate} variant="secondary" size="sm" onClick={() => selectDiscoveryCandidate(account)} /></li>)}</ul>}</section> : null}
+        <form className="account-action-form" onSubmit={(event) => { event.preventDefault(); if (accountInput.fakeid && accountInput.name) saveAccount() }}><TextInput label={actions.fakeid} value={fakeid} onChange={setFakeid} isRequired /><TextInput label={actions.name} value={name} onChange={setName} isRequired /><TextInput label={actions.alias} value={alias} onChange={setAlias} isOptional /><Button label={actions.add} type="submit" variant="primary" isLoading={mutations.saveAccount.isPending} isDisabled={!accountInput.fakeid || !accountInput.name} /><Button label={actions.edit} variant="secondary" isLoading={mutations.updateAccount.isPending} isDisabled={!one || !accountInput.fakeid || !accountInput.name} onClick={() => one && mutations.updateAccount.mutate({ id: one, input: accountInput }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.sync} variant="secondary" isLoading={mutations.syncAccount.isPending} isDisabled={!one} onClick={() => one && mutations.syncAccount.mutate(one, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.remove} variant="secondary" isLoading={mutations.deleteAccounts.isPending} isDisabled={selected.length === 0} onClick={() => { setDeleteConfirmation(''); setDeleteConfirmationOpen(true) }} /></form>
         <div className="account-action-form"><a className="artifact-download" href={getAccountManifestDownloadURL()}>{actions.downloadManifest}</a><label>{actions.importManifest}<input type="file" accept="application/json,.json" disabled={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending} onChange={(event) => { const manifest = event.currentTarget.files?.[0]; event.currentTarget.value = ''; importManifest(manifest) }} /></label><p className="field-hint">{actions.manifestHint}</p></div>
         {!one && selected.length > 0 ? <p>{actions.selectOne}</p> : null}{notice ? <p role="alert">{notice}</p> : null}
       </UnavailableActionPanel>
@@ -108,8 +109,9 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
 }
 
 export function JobsPage({ messages, locale }: { readonly messages: MessageCatalog; readonly locale: Locale }) {
+  const [handoffJobID] = useState(readJobHandoff)
   const [pageIndex, setPageIndex] = useState(0)
-  const [selected, setSelected] = useState<readonly string[]>([])
+  const [selected, setSelected] = useState<readonly string[]>(() => handoffJobID ? [handoffJobID] : [])
   const [notice, setNotice] = useState<string>()
   const [confirmationAction, setConfirmationAction] = useState<JobConfirmationAction>()
   const [confirmationProof, setConfirmationProof] = useState('')
@@ -125,6 +127,15 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   ], [locale, messages])
   const actions = messages.resources.jobs.actions
   const one = selected.length === 1 ? selected[0] : undefined
+
+  useEffect(() => {
+    const location = new URL(window.location.href)
+    if (!handoffJobID) return
+    location.searchParams.delete('job')
+    window.history.replaceState(window.history.state, '', `${location.pathname}${location.search}${location.hash}`)
+    try { window.sessionStorage.removeItem('wechat-article.job-handoff.v1') } catch { /* Browser storage can be unavailable. */ }
+  }, [handoffJobID])
+
   const changePage = (nextPageIndex: number) => {
     setSelected([])
     setPageIndex(nextPageIndex)
@@ -144,23 +155,27 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
         {notice ? <p role="alert">{notice}</p> : null}
       </UnavailableActionPanel>
       <TypedConfirmationDialog isOpen={Boolean(confirmationAction)} onOpenChange={(isOpen) => { if (!isOpen) { setConfirmationAction(undefined); setConfirmationProof('') } }} title={confirmation?.title ?? ''} description={confirmation?.description ?? ''} expected={confirmation?.confirmation ?? ''} inputLabel={actions.confirmationLabel} inputHint={actions.confirmationHint} actionLabel={confirmation?.actionLabel ?? ''} cancelLabel={actions.cancelConfirmation} confirmation={confirmationProof} onConfirmationChange={setConfirmationProof} isActionLoading={mutations.controlJob.isPending} onAction={() => { if (one && confirmationAction) mutations.controlJob.mutate({ id: one, action: confirmationAction, confirmation: confirmationProof }, { onSuccess: () => { setNotice(undefined); setConfirmationAction(undefined); setConfirmationProof('') }, onError: () => setNotice(actions.actionFailed) }) }} />
-      {one ? <JobDetailPanel detail={detail} messages={messages} locale={locale} /> : null}
+      {one ? <JobDetailPanel detail={detail} messages={messages} locale={locale} shouldFocus={one === handoffJobID} /> : null}
     </>
   )
 }
 
-function JobDetailPanel({ detail, messages, locale }: { readonly detail: ReturnType<typeof useJobDetail>; readonly messages: MessageCatalog; readonly locale: Locale }) {
+function JobDetailPanel({ detail, messages, locale, shouldFocus }: { readonly detail: ReturnType<typeof useJobDetail>; readonly messages: MessageCatalog; readonly locale: Locale; readonly shouldFocus: boolean }) {
   const copy = messages.resources.jobs.detail
-  if (detail.isLoading) return <section className="job-detail" aria-live="polite"><h2>{copy.title}</h2><p role="status">{copy.loading}</p></section>
-  if (detail.isError) return <section className="job-detail" aria-live="polite"><h2>{copy.title}</h2><div className="error-state" role="alert"><p>{copy.unavailable}</p><Button label={copy.refresh} variant="secondary" onClick={() => void detail.refetch()} /></div></section>
+  const title = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (shouldFocus && (detail.isSuccess || detail.isError)) title.current?.focus()
+  }, [detail.isError, detail.isSuccess, shouldFocus])
+  if (detail.isLoading) return <section className="job-detail" aria-live="polite"><h2 ref={title} tabIndex={-1}>{copy.title}</h2><p role="status">{copy.loading}</p></section>
+  if (detail.isError) return <section className="job-detail" aria-live="polite"><h2 ref={title} tabIndex={-1}>{copy.title}</h2><div className="error-state" role="alert"><p>{copy.unavailable}</p><Button label={copy.refresh} variant="secondary" onClick={() => void detail.refetch()} /></div></section>
   if (!detail.data) return null
-  return <JobDetailContents detail={detail.data} messages={messages} locale={locale} refreshing={detail.isFetching} onRefresh={() => void detail.refetch()} />
+  return <JobDetailContents title={title} detail={detail.data} messages={messages} locale={locale} refreshing={detail.isFetching} onRefresh={() => void detail.refetch()} />
 }
 
-function JobDetailContents({ detail, messages, locale, refreshing, onRefresh }: { readonly detail: JobDetail; readonly messages: MessageCatalog; readonly locale: Locale; readonly refreshing: boolean; readonly onRefresh: () => void }) {
+function JobDetailContents({ title, detail, messages, locale, refreshing, onRefresh }: { readonly title: React.RefObject<HTMLHeadingElement | null>; readonly detail: JobDetail; readonly messages: MessageCatalog; readonly locale: Locale; readonly refreshing: boolean; readonly onRefresh: () => void }) {
   const copy = messages.resources.jobs.detail
   return <section className="job-detail" aria-labelledby="job-detail-title" aria-busy={refreshing}>
-    <header className="job-detail-header"><div><h2 id="job-detail-title">{copy.title}</h2><p>{copy.description}</p></div><Button label={copy.refresh} variant="secondary" isLoading={refreshing} onClick={onRefresh} /></header>
+    <header className="job-detail-header"><div><h2 ref={title} id="job-detail-title" tabIndex={-1}>{copy.title}</h2><p>{copy.description}</p></div><Button label={copy.refresh} variant="secondary" isLoading={refreshing} onClick={onRefresh} /></header>
     <p className="detail-refreshed" role="status">{refreshing ? copy.refreshing : `${copy.refreshed}: ${formatDate(detail.refreshedAt, locale)}`}</p>
     <div className="job-detail-grid">
       <section><h3>{copy.lease}</h3><dl className="facts-list"><div><dt>{copy.lease}</dt><dd>{detail.lease.active ? copy.leaseActive : copy.leaseInactive}</dd></div><div><dt>{copy.expires}</dt><dd>{formatDate(detail.lease.expiresAt, locale)}</dd></div></dl></section>
