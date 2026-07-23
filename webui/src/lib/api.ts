@@ -124,6 +124,84 @@ export interface SavedQueryRecord {
   readonly updatedAt: string
 }
 
+export type ExportFormat = 'html' | 'markdown' | 'text' | 'json' | 'xlsx' | 'docx' | 'pdf'
+
+export interface ExportDirectory {
+  readonly token: string
+  readonly label: string
+  readonly isDefault?: boolean
+  readonly createdAt?: string
+  readonly description?: string
+}
+
+export interface ExportSelection {
+  readonly kind: 'explicit_ids'
+  readonly articleIds: readonly string[]
+}
+
+export interface ExportOptions {
+  readonly namingTemplate?: string
+  readonly maximumNameBytes?: number
+  readonly collisionPolicy?: 'fail' | 'skip' | 'replace' | 'suffix'
+  readonly formatOptions?: Readonly<Record<string, boolean | string>>
+}
+
+export interface StartExportInput {
+  readonly directoryToken: string
+  readonly subdirectory?: string
+  readonly selection: ExportSelection
+  readonly format: ExportFormat
+  readonly options?: ExportOptions
+}
+
+export interface ExportStartResult { readonly jobId: string }
+
+export interface ExportRecord {
+  readonly id: string
+  readonly jobId: string
+  readonly format: string
+  readonly state: string
+  readonly createdAt: string
+  readonly completedAt?: string
+  readonly provenanceState?: string
+  readonly provenanceGeneration: number
+  readonly outputDirectory: string
+}
+
+export interface ExportFile {
+  readonly articleId?: string
+  readonly path: string
+  readonly sizeBytes: number
+  readonly sha256: string
+  readonly mediaType?: string
+  readonly status: string
+}
+
+export interface ExportManifest {
+  readonly exportId: string
+  readonly format: string
+  readonly state: string
+  readonly provenanceState?: string
+  readonly provenanceGeneration: number
+  readonly files: readonly ExportFile[]
+}
+
+export interface ExportVerificationIssue {
+  readonly path?: string
+  readonly message?: string
+  readonly expected?: string
+  readonly actual?: string
+  readonly [key: string]: unknown
+}
+
+export interface ExportVerification {
+  readonly exportId: string
+  readonly valid: boolean
+  readonly verifiedOutputs: number
+  readonly issues: readonly ExportVerificationIssue[]
+  readonly affectedArticleIds?: readonly string[]
+}
+
 export interface WorkspaceSnapshot {
   readonly runtime: RuntimeStatus
   readonly session: SessionStatus
@@ -195,6 +273,38 @@ export async function getJobPage(params: PageParams, signal?: AbortSignal): Prom
 
 export async function getSavedQueryPage(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<SavedQueryRecord>> {
   return getPage<SavedQueryRecord>('saved-queries', params, signal)
+}
+
+export async function authorizeDefaultExportDirectory(): Promise<ExportDirectory> {
+  return mutate<ExportDirectory>('export-directories/authorize', 'POST', { confirm: 'authorize-default-export-directory' })
+}
+
+export async function createExportDirectory(parentToken: string, name: string): Promise<ExportDirectory> {
+  const trimmedName = name.trim()
+  return mutate<ExportDirectory>('export-directories', 'POST', {
+    parentToken,
+    name: trimmedName,
+    confirm: `create-export-directory:${parentToken}:${trimmedName}`
+  })
+}
+
+export async function startExport(input: StartExportInput): Promise<ExportStartResult> {
+  return mutate<ExportStartResult>('exports/start', 'POST', {
+    ...input,
+    confirm: `start-export:${input.directoryToken}`
+  })
+}
+
+export async function getExportPage(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<ExportRecord>> {
+  return getPage<ExportRecord>('exports', params, signal)
+}
+
+export async function getExportManifest(id: string, signal?: AbortSignal): Promise<ExportManifest> {
+  return request<ExportManifest>(`${apiBase}/exports/${encodeURIComponent(id)}/manifest`, { signal })
+}
+
+export async function verifyExport(id: string): Promise<ExportVerification> {
+  return mutate<ExportVerification>(`exports/${encodeURIComponent(id)}/verify`, 'POST', { confirm: `verify-export:${id}` })
 }
 
 async function getPage<T>(resource: string, params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<T>> {

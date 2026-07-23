@@ -91,11 +91,37 @@
   .force-control { color: var(--color-text-secondary); font-size: var(--text-body-small-size); }
   .login-flow { align-self: start; }
   .qr-code { display: block; width: min(100%, 16rem); margin-block: var(--spacing-4); image-rendering: pixelated; }
+  .export-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--spacing-5); }
+  .export-layout .workspace-panel { display: grid; align-content: start; gap: var(--spacing-3); }
+  .export-layout .workspace-panel > p, .export-layout .workspace-panel h2 { margin-block-end: 0; }
+  .export-actions, .export-inline-form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--spacing-3); }
+  .export-inline-form .astryx-text-input { min-width: 14rem; flex: 1 1 14rem; }
+  .export-directory-summary { display: grid; gap: var(--spacing-2); padding: var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-inner); background: var(--color-background-muted); }
+  .export-directory-summary p, .export-directory-summary label { margin: 0; }
+  .export-directory-summary label, .confirmation-proof { display: grid; gap: var(--spacing-1); font-size: var(--text-body-small-size); }
+  .export-directory-summary code, .confirmation-proof code { overflow-wrap: anywhere; }
+  .export-textarea-label, .export-field-grid label, .export-options label { display: grid; gap: var(--spacing-1); font-weight: 600; }
+  .export-textarea-label textarea, .export-field-grid select, .export-options select { min-width: 0; padding: var(--spacing-2); border: 1px solid var(--color-border-emphasized); border-radius: var(--radius-control); color: var(--color-text-primary); background: var(--color-background-surface); }
+  .export-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--spacing-3); }
+  .export-options { display: grid; gap: var(--spacing-2); margin: 0; padding: var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-inner); }
+  .export-options legend { padding-inline: var(--spacing-1); font-weight: 700; }
+  .field-hint, .confirmation-proof p, .export-notice span { margin: 0; color: var(--color-text-secondary); font-size: var(--text-body-small-size); }
+  .confirmation-proof { padding: var(--spacing-3); border-inline-start: 3px solid var(--color-accent); background: var(--color-background-muted); }
+  .confirmation-proof p, .export-notice { margin-block-end: 0; }
+  .export-notice { padding: var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-inner); }
+  .export-records { margin-block-start: var(--spacing-7); }
+  .export-records > header { margin-block-end: var(--spacing-4); }
+  .export-records h2, .export-records p { margin-block-end: var(--spacing-2); }
+  .export-detail { display: grid; gap: var(--spacing-3); margin-block-start: var(--spacing-6); }
+  .export-detail h2, .export-detail p { margin-block-end: 0; }
+  .manifest-detail, .verification-result { display: grid; gap: var(--spacing-3); }
+  .verification-result { padding: var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-inner); }
+  .verification-result h3, .verification-result h4, .verification-result ul { margin: 0; }
 
   @media (max-width: 720px) {
     .workspace-header, .table-toolbar, .page-heading, .error-state { align-items: stretch; flex-direction: column; }
     .header-actions { align-self: flex-start; }
-    .overview-grid { grid-template-columns: 1fr; }
+    .overview-grid, .export-layout, .export-field-grid { grid-template-columns: 1fr; }
     .pagination { justify-content: space-between; }
     .action-button-group, .import-form { align-items: stretch; flex-direction: column; }
   }

@@ -8,7 +8,7 @@ export const messages = { en, 'zh-CN': zhCN } as const
 
 export type MessageCatalog = {
   readonly product: { readonly name: string; readonly local: string; readonly privacy: string; readonly beta: string; readonly readOnly: string }
-  readonly navigation: Record<'workspace' | 'library' | 'operations' | 'overview' | 'login' | 'import' | 'accounts' | 'articles' | 'albums' | 'savedQueries' | 'jobs' | 'settings', string>
+  readonly navigation: Record<'workspace' | 'library' | 'operations' | 'overview' | 'login' | 'import' | 'accounts' | 'articles' | 'albums' | 'savedQueries' | 'jobs' | 'exports' | 'settings', string>
   readonly a11y: { readonly skip: string }
   readonly localeSwitch: string
   readonly connection: { readonly connected: string; readonly unavailable: string; readonly checking: string }
@@ -32,6 +32,7 @@ export type MessageCatalog = {
   readonly unavailableActions: { readonly confirmationTitle: string; readonly confirmationDescription: string; readonly apiUnavailable: string }
   readonly login: { readonly title: string; readonly description: string; readonly sessionTitle: string; readonly account: string; readonly state: string; readonly checking: string; readonly unavailable: string; readonly qrTitle: string; readonly qrDescription: string; readonly start: string; readonly poll: string; readonly complete: string; readonly states: Readonly<Record<string, string>> }
   readonly import: { readonly title: string; readonly description: string; readonly url: string; readonly placeholder: string; readonly submit: string; readonly force: string; readonly queued: (id: string) => string; readonly failed: string; readonly note: string }
+  readonly exports: ExportMessages
   readonly articles: {
     readonly title: string
     readonly description: string
@@ -58,6 +59,10 @@ export type MessageCatalog = {
     readonly jobs: JobResourceMessages
     readonly savedQueries: SavedQueryResourceMessages
   }
+}
+
+type ExportMessages = {
+  readonly title: string; readonly description: string; readonly setupTitle: string; readonly setupDescription: string; readonly authorize: string; readonly authorized: (label: string) => string; readonly directoryToken: string; readonly createDirectory: string; readonly childName: string; readonly childPlaceholder: string; readonly create: string; readonly selectionTitle: string; readonly articleIds: string; readonly articleIdsHint: string; readonly format: string; readonly subdirectory: string; readonly subdirectoryHint: string; readonly options: string; readonly namingTemplate: string; readonly maximumNameBytes: string; readonly collision: string; readonly collisionFail: string; readonly collisionSkip: string; readonly collisionReplace: string; readonly collisionSuffix: string; readonly includeContent: string; readonly includeMetadata: string; readonly includeComments: string; readonly htmlOptions: string; readonly resourcePolicy: string; readonly resourceBestEffort: string; readonly resourceStrict: string; readonly batchArchive: string; readonly batchArchiveHint: string; readonly confirmation: string; readonly confirmationHint: string; readonly start: string; readonly queued: (jobId: string) => string; readonly queuedHint: string; readonly invalidSelection: string; readonly invalidDirectory: string; readonly actionFailed: string; readonly recordsTitle: string; readonly recordsDescription: string; readonly loading: string; readonly unavailable: string; readonly empty: string; readonly retry: string; readonly previous: string; readonly next: string; readonly page: (current: number, total: number) => string; readonly pagination: string; readonly selected: string; readonly selectAll: string; readonly selectRow: (id: string) => string; readonly visibleColumns: string; readonly columns: { readonly id: string; readonly format: string; readonly state: string; readonly created: string; readonly provenance: string }; readonly detailTitle: string; readonly detailDescription: string; readonly selectOne: string; readonly loadManifest: string; readonly verify: string; readonly verifyConfirmation: (id: string) => string; readonly manifestLoading: string; readonly manifestUnavailable: string; readonly manifestSummary: (count: number) => string; readonly files: string; readonly noFiles: string; readonly fileColumns: { readonly path: string; readonly size: string; readonly status: string; readonly checksum: string }; readonly verificationTitle: string; readonly verificationValid: (count: number) => string; readonly verificationInvalid: (count: number) => string; readonly verificationIssues: string; readonly artifactTitle: string; readonly artifactUnavailable: string; readonly artifactAction: string; readonly openAction: string
 }
 
 type ResourceMessages = {

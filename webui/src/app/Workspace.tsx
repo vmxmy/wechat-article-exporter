@@ -5,6 +5,7 @@ import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { useEffect, useState } from 'react'
 import { ArticleTable } from '../features/articles/ArticleTable'
 import { ImportPage } from '../features/import/ImportPage'
+import { ExportPage } from '../features/exports/ExportPage'
 import { LoginPage } from '../features/login/LoginPage'
 import { AccountsPage, AlbumsPage, JobsPage, SavedQueriesPage } from '../features/resources/ResourcePages'
 import { type Locale, type MessageCatalog, useMessages } from '../i18n'
@@ -23,6 +24,7 @@ const navigation = [
   { group: 'library', href: '/albums', key: 'albums' },
   { group: 'library', href: '/saved-queries', key: 'savedQueries' },
   { group: 'operations', href: '/jobs', key: 'jobs' },
+  { group: 'operations', href: '/exports', key: 'exports' },
   { group: 'operations', href: '/import', key: 'import' }
 ] as const
 
@@ -96,6 +98,7 @@ function renderPage(path: string, locale: Locale, messages: MessageCatalog) {
   if (path === '/albums') return <AlbumsPage messages={messages} />
   if (path === '/saved-queries') return <SavedQueriesPage locale={locale} messages={messages} />
   if (path === '/jobs') return <JobsPage locale={locale} messages={messages} />
+  if (path === '/exports') return <ExportPage locale={locale} messages={messages} />
   return <Overview messages={messages} />
 }
 

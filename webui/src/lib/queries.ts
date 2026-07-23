@@ -3,13 +3,15 @@ import {
   getAccountPage,
   getAlbumPage,
   getArticlePage,
+  getExportManifest,
+  getExportPage,
   getJobPage,
   getRuntimeStatus,
   getSavedQueryPage,
   getSessionStatus,
   getStorageStatus,
   getWorkspaceSnapshot,
-  beginLogin, completeLogin, controlJob, deleteAccounts, ingestURL, pollLogin, saveAccount, searchAccounts, syncAccount, updateAccount,
+  authorizeDefaultExportDirectory, beginLogin, completeLogin, controlJob, createExportDirectory, deleteAccounts, ingestURL, pollLogin, saveAccount, searchAccounts, startExport, syncAccount, updateAccount, verifyExport,
   type AccountInput,
   type ArticlePageParams,
   type PageParams
@@ -24,6 +26,8 @@ export const queryKeys = {
   articles: (params: ArticlePageParams) => ['articles', params] as const,
   albums: (params: PageParams) => ['albums', params] as const,
   jobs: (params: PageParams) => ['jobs', params] as const,
+  exports: (params: PageParams) => ['exports', params] as const,
+  exportManifest: (id: string) => ['exports', id, 'manifest'] as const,
   savedQueries: (params: PageParams) => ['saved-queries', params] as const
 }
 
@@ -61,6 +65,14 @@ export function useJobPage(params: PageParams) {
   return usePageQuery(queryKeys.jobs(params), ({ signal }) => getJobPage(params, signal), snapshotPolling)
 }
 
+export function useExportPage(params: PageParams) {
+  return usePageQuery(queryKeys.exports(params), ({ signal }) => getExportPage(params, signal), snapshotPolling)
+}
+
+export function useExportManifest(id: string | undefined) {
+  return useQuery({ queryKey: queryKeys.exportManifest(id ?? ''), queryFn: ({ signal }) => getExportManifest(id ?? '', signal), enabled: Boolean(id) })
+}
+
 export function useSavedQueryPage(params: PageParams) {
   return usePageQuery(queryKeys.savedQueries(params), ({ signal }) => getSavedQueryPage(params, signal))
 }
@@ -77,7 +89,11 @@ export function useWorkspaceMutations() {
     deleteAccounts: useMutation({ mutationFn: (ids: readonly string[]) => deleteAccounts(ids), onSuccess: refresh }),
     syncAccount: useMutation({ mutationFn: syncAccount, onSuccess: refresh }),
     ingestURL: useMutation({ mutationFn: ({ url, force }: { url: string; force: boolean }) => ingestURL(url, force), onSuccess: refresh }),
-    controlJob: useMutation({ mutationFn: ({ id, action }: { id: string; action: 'cancel' | 'pause' | 'resume' | 'retry' }) => controlJob(id, action), onSuccess: refresh })
+    controlJob: useMutation({ mutationFn: ({ id, action }: { id: string; action: 'cancel' | 'pause' | 'resume' | 'retry' }) => controlJob(id, action), onSuccess: refresh }),
+    authorizeDefaultExportDirectory: useMutation({ mutationFn: authorizeDefaultExportDirectory }),
+    createExportDirectory: useMutation({ mutationFn: ({ parentToken, name }: { parentToken: string; name: string }) => createExportDirectory(parentToken, name) }),
+    startExport: useMutation({ mutationFn: startExport, onSuccess: refresh }),
+    verifyExport: useMutation({ mutationFn: verifyExport, onSuccess: refresh })
   }
 }
 
