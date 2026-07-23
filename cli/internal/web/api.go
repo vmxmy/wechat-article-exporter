@@ -49,7 +49,6 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 	if server.diagnosticBundleRead(writer, request) {
 		return
 	}
-
 	switch request.URL.Path {
 	case "/api/v1/runtime":
 		server.runtime(writer, request)
@@ -57,6 +56,8 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		server.session(writer, request)
 	case "/api/v1/accounts":
 		server.accounts(writer, request)
+	case "/api/v1/accounts/manifest":
+		server.accountManifestRead(writer, request)
 	case "/api/v1/accounts/search":
 		server.accountSearch(writer, request)
 	case "/api/v1/articles":

@@ -35,9 +35,13 @@ func (a *App) webCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			accountManifests, err := newWebAccountManifests(a)
+			if err != nil {
+				return err
+			}
 			server, err := localweb.New(localweb.Options{
 				Application: a.core, Exports: exports, Preview: preview,
-				Maintenance: maintenance, StorageMaintenance: storageMaintenance, DiagnosticBundles: diagnosticBundles, Restore: restore,
+				Maintenance: maintenance, StorageMaintenance: storageMaintenance, DiagnosticBundles: diagnosticBundles, Restore: restore, AccountManifests: accountManifests,
 			})
 			if err != nil {
 				return err

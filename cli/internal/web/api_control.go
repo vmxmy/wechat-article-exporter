@@ -26,6 +26,9 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 	if server.restoreControl(writer, request) {
 		return true
 	}
+	if server.accountManifestControl(writer, request) {
+		return true
+	}
 	switch request.URL.Path {
 	case "/api/v1/saved-queries":
 		switch request.Method {
