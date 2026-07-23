@@ -5,8 +5,8 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { useEffect, useMemo, useState } from 'react'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
-import { getExportArtifactDownloadURL, openExportOutput, type ExportFormat, type ExportManifest, type ExportRecord, type ExportVerification } from '../../lib/api'
-import { useExportManifest, useExportPage, useWorkspaceMutations } from '../../lib/queries'
+import { consumeExportHandoff, getExportArtifactDownloadURL, openExportOutput, parseArticleQuery, type ExportFormat, type ExportManifest, type ExportRecord, type ExportSelection, type ExportVerification } from '../../lib/api'
+import { useExportManifest, useExportPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 
 const pageSize = 25
 const formats: readonly ExportFormat[] = ['markdown', 'html', 'text', 'json', 'xlsx', 'docx', 'pdf']
@@ -20,7 +20,14 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   const copy = messages.exports
   const [directory, setDirectory] = useState<{ readonly token: string; readonly label: string }>()
   const [childName, setChildName] = useState('')
-  const [articleIDs, setArticleIDs] = useState('')
+  const initialHandoff = consumeExportHandoff()
+  const [articleIDs, setArticleIDs] = useState(() => initialHandoff?.selection.kind === 'explicit_ids' ? initialHandoff.selection.articleIds.join('\n') : '')
+  const [selection, setSelection] = useState<ExportSelection | undefined>(initialHandoff?.selection)
+  const [selectionLabel, setSelectionLabel] = useState(initialHandoff?.label ?? '')
+  const [accountID, setAccountID] = useState('')
+  const [albumID, setAlbumID] = useState('')
+  const [savedQueryID, setSavedQueryID] = useState('')
+  const [matchingQueryText, setMatchingQueryText] = useState('{}')
   const [format, setFormat] = useState<ExportFormat>('markdown')
   const [subdirectory, setSubdirectory] = useState('')
   const [namingTemplate, setNamingTemplate] = useState('{published}-{title}')
@@ -38,12 +45,17 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   const [openConfirmation, setOpenConfirmation] = useState('')
   const mutations = useWorkspaceMutations()
   const records = useExportPage({ page: pageIndex + 1, pageSize })
+  const savedQueries = useSavedQueryPage({ page: 1, pageSize: 100 })
   const selectedIDs = Object.entries(rowSelection).filter(([, selected]) => selected).map(([id]) => id)
   const selectedID = selectedIDs.length === 1 ? selectedIDs[0] : undefined
   const manifest = useExportManifest(selectedID)
   const ids = parseArticleIDs(articleIDs)
   const confirmation = directory ? `start-export:${directory.token}` : '—'
   const isHTML = format === 'html'
+
+  useEffect(() => {
+    if (selection?.kind === 'explicit_ids') setArticleIDs(selection.articleIds.join('\n'))
+  }, [selection])
 
   useEffect(() => {
     setRowSelection((current) => Object.fromEntries(Object.entries(current).filter(([id]) => records.data?.data.some((record) => record.id === id))))
@@ -83,12 +95,13 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
 
   function queueExport() {
     if (!directory) return setNotice(copy.invalidDirectory)
-    if (ids.length === 0) return setNotice(copy.invalidSelection)
+    const resolvedSelection = selection?.kind === 'explicit_ids' ? { kind: 'explicit_ids' as const, articleIds: ids } : selection
+    if (!resolvedSelection || (resolvedSelection.kind === 'explicit_ids' && resolvedSelection.articleIds.length === 0)) return setNotice(copy.invalidSelection)
     const maximum = Number(maximumNameBytes)
     mutations.startExport.mutate({
       directoryToken: directory.token,
       subdirectory: subdirectory.trim() || undefined,
-      selection: { kind: 'explicit_ids', articleIds: ids },
+      selection: resolvedSelection,
       format,
       options: {
         namingTemplate: namingTemplate.trim() || undefined,
@@ -106,6 +119,40 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
       onSuccess: (result) => setNotice(copy.queued(result.jobId)),
       onError: () => setNotice(copy.actionFailed)
     })
+  }
+
+  function selectExplicitIDs(value: string) {
+    setArticleIDs(value)
+    const next = parseArticleIDs(value)
+    setSelection(next.length ? { kind: 'explicit_ids', articleIds: next } : undefined)
+    setSelectionLabel(next.length ? copy.selection.explicit(next.length) : '')
+  }
+
+  function selectAccount() {
+    const value = accountID.trim()
+    setSelection(value ? { kind: 'account', accountId: value } : undefined)
+    setSelectionLabel(value ? copy.selection.accountLabel(value) : '')
+  }
+
+  function selectAlbum() {
+    const value = albumID.trim()
+    setSelection(value ? { kind: 'album', albumId: value } : undefined)
+    setSelectionLabel(value ? copy.selection.albumLabel(value) : '')
+  }
+
+  function selectSavedQuery(value: string) {
+    setSavedQueryID(value)
+    setSelection(value ? { kind: 'saved_query', savedQueryId: value } : undefined)
+    setSelectionLabel(value ? copy.selection.savedQueryLabel(value) : '')
+  }
+
+  function selectMatchingQuery() {
+    try {
+      const query = parseArticleQuery(JSON.parse(matchingQueryText))
+      setSelection({ kind: 'all_matching', query })
+      setSelectionLabel(copy.selection.matchingLabel)
+      setNotice(undefined)
+    } catch { setNotice(copy.invalidSelection) }
   }
 
   function runVerification() {
@@ -139,7 +186,13 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
 
         <section className="workspace-panel" aria-labelledby="export-selection-title">
           <h2 id="export-selection-title">{copy.selectionTitle}</h2>
-          <label className="export-textarea-label">{copy.articleIds}<textarea value={articleIDs} onChange={(event) => setArticleIDs(event.target.value)} aria-describedby="article-ids-help" rows={5} /></label><p id="article-ids-help" className="field-hint">{copy.articleIdsHint}</p>
+          <fieldset className="export-options"><legend>{copy.selection.title}</legend>
+            <label className="export-textarea-label">{copy.articleIds}<textarea value={articleIDs} onChange={(event) => selectExplicitIDs(event.target.value)} aria-describedby="article-ids-help" rows={4} /></label><p id="article-ids-help" className="field-hint">{copy.articleIdsHint}</p>
+            <div className="export-field-grid"><TextInput label={copy.selection.accountId} value={accountID} onChange={setAccountID} /><Button label={copy.selection.account} variant="secondary" isDisabled={!accountID.trim()} onClick={selectAccount} /><TextInput label={copy.selection.albumId} value={albumID} onChange={setAlbumID} /><Button label={copy.selection.album} variant="secondary" isDisabled={!albumID.trim()} onClick={selectAlbum} /></div>
+            <label>{copy.selection.savedQuery}<select value={savedQueryID} onChange={(event) => selectSavedQuery(event.target.value)}><option value="">{copy.selection.savedQueryPlaceholder}</option>{savedQueries.data?.data.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
+            <label className="export-textarea-label">{copy.selection.matchingQuery}<textarea value={matchingQueryText} onChange={(event) => setMatchingQueryText(event.target.value)} rows={4} /></label><Button label={copy.selection.matching} variant="secondary" onClick={selectMatchingQuery} />
+            {selection ? <p className="field-hint" role="status">{copy.selection.active(selectionLabel)}</p> : null}
+          </fieldset>
           <div className="export-field-grid">
             <label>{copy.format}<select value={format} onChange={(event) => setFormat(event.target.value as ExportFormat)}>{formats.map((item) => <option key={item} value={item}>{item.toUpperCase()}</option>)}</select></label>
             <TextInput label={copy.subdirectory} value={subdirectory} onChange={setSubdirectory} />
@@ -151,7 +204,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
           <fieldset className="export-options"><legend>{copy.options}</legend><CheckboxInput label={copy.includeContent} value={includeContent} onChange={() => setIncludeContent((value) => !value)} /><CheckboxInput label={copy.includeMetadata} value={includeMetadata} onChange={() => setIncludeMetadata((value) => !value)} /><CheckboxInput label={copy.includeComments} value={includeComments} onChange={() => setIncludeComments((value) => !value)} /></fieldset>
           {isHTML ? <fieldset className="export-options"><legend>{copy.htmlOptions}</legend><label>{copy.resourcePolicy}<select value={htmlResourcePolicy} onChange={(event) => setHTMLResourcePolicy(event.target.value as typeof htmlResourcePolicy)}><option value="best-effort">{copy.resourceBestEffort}</option><option value="strict">{copy.resourceStrict}</option></select></label><TextInput label={copy.batchArchive} value={htmlBatchArchive} onChange={setHTMLBatchArchive} /><p className="field-hint">{copy.batchArchiveHint}</p></fieldset> : null}
           <div className="confirmation-proof"><span>{copy.confirmation}</span><code>{confirmation}</code><p>{copy.confirmationHint}</p></div>
-          <div className="export-actions"><Button label={copy.start} variant="primary" isLoading={mutations.startExport.isPending} isDisabled={!directory || ids.length === 0} onClick={queueExport} /></div>
+          <div className="export-actions"><Button label={copy.start} variant="primary" isLoading={mutations.startExport.isPending} isDisabled={!directory || !selection || (selection.kind === 'explicit_ids' && ids.length === 0)} onClick={queueExport} /></div>
           {notice ? <p className="export-notice" role="status" aria-live="polite">{notice}{notice.startsWith('Export queued') || notice.startsWith('导出已加入') ? <><br /><span>{copy.queuedHint}</span></> : null}</p> : null}
         </section>
       </div>

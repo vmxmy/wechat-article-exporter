@@ -38,6 +38,7 @@ type Options struct {
 	Preview            application.WorkspaceArticlePreviewRenderer
 	Exports            application.WorkspaceExportService
 	Maintenance        *application.MaintenanceService
+	CredentialUploads  *application.CredentialUploadService
 	StorageMaintenance *application.MaintenanceStorageService
 	DiagnosticBundles  *application.DiagnosticBundleService
 	Restore            *application.RestoreService
@@ -54,6 +55,7 @@ type Server struct {
 	workspace          *application.Workspace
 	exports            application.WorkspaceExportService
 	maintenance        *application.MaintenanceService
+	credentialUploads  *application.CredentialUploadService
 	storageMaintenance *application.MaintenanceStorageService
 	diagnosticBundles  *application.DiagnosticBundleService
 	restore            *application.RestoreService
@@ -104,7 +106,7 @@ func New(options Options) (*Server, error) {
 		return nil, fmt.Errorf("generate local browser bootstrap credential: %w", err)
 	}
 	return &Server{
-		application: options.Application, exports: options.Exports, maintenance: options.Maintenance, storageMaintenance: options.StorageMaintenance, diagnosticBundles: options.DiagnosticBundles, restore: options.Restore, accountManifests: options.AccountManifests, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
+		application: options.Application, exports: options.Exports, maintenance: options.Maintenance, credentialUploads: options.CredentialUploads, storageMaintenance: options.StorageMaintenance, diagnosticBundles: options.DiagnosticBundles, restore: options.Restore, accountManifests: options.AccountManifests, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
 		workspace: application.NewWorkspaceWithPreview(options.Application, options.Preview), now: options.Now, bootstrapToken: bootstrap,
 		sessions: make(map[string]session), serveCompleted: make(chan struct{}),
 	}, nil
@@ -226,6 +228,9 @@ func (server *Server) cleanupRestore() error {
 		if server.accountManifests != nil {
 			server.cleanupErr = errors.Join(server.cleanupErr, server.accountManifests.Close(ctx))
 		}
+		if server.storageMaintenance != nil {
+			server.cleanupErr = errors.Join(server.cleanupErr, server.storageMaintenance.Close(ctx))
+		}
 	})
 	return server.cleanupErr
 }
@@ -266,7 +271,7 @@ func (server *Server) handler() http.Handler {
 		}
 		if strings.HasPrefix(request.URL.Path, "/api/") && request.URL.Path != "/api/v1/status" {
 			if request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodPatch || request.Method == http.MethodDelete {
-				if request.URL.Path != "/api/v1/maintenance/restore/upload" && request.URL.Path != "/api/v1/accounts/manifest/upload" && !server.validMutationShape(request) {
+				if request.URL.Path != "/api/v1/maintenance/restore/upload" && request.URL.Path != "/api/v1/accounts/manifest/upload" && request.URL.Path != "/api/v1/settings/credentials/upload" && !server.validMutationShape(request) {
 					server.error(writer, http.StatusUnsupportedMediaType)
 					return
 				}

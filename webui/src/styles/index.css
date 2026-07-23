@@ -61,6 +61,10 @@
   .workspace-panel p { margin-block-end: 0; color: var(--color-text-secondary); }
   .table-toolbar { margin-block-end: var(--spacing-3); }
   .table-toolbar .astryx-text-input { min-width: min(100%, 22rem); }
+  .article-filters { display: grid; gap: var(--spacing-3); margin-block-end: var(--spacing-4); }
+  .article-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--spacing-3); }
+  .article-filter-grid label, .export-options > label { display: grid; gap: var(--spacing-1); font-weight: 600; }
+  .article-filter-grid select { min-width: 0; padding: var(--spacing-2); border: 1px solid var(--color-border-emphasized); border-radius: var(--radius-control); color: var(--color-text-primary); background: var(--color-background-surface); }
   .selection-count { color: var(--color-text-secondary); font-size: var(--text-body-small-size); }
   .column-controls { flex-wrap: wrap; padding: var(--spacing-3) 0 var(--spacing-4); }
   .data-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-container); background: var(--color-background-surface); }
@@ -146,7 +150,7 @@
   @media (max-width: 720px) {
     .workspace-header, .table-toolbar, .page-heading, .error-state { align-items: stretch; flex-direction: column; }
     .header-actions { align-self: flex-start; }
-    .overview-grid, .export-layout, .export-field-grid, .settings-grid, .proxy-form { grid-template-columns: 1fr; }
+    .overview-grid, .article-filter-grid, .export-layout, .export-field-grid, .settings-grid, .proxy-form { grid-template-columns: 1fr; }
     .pagination { justify-content: space-between; }
     .action-button-group, .import-form { align-items: stretch; flex-direction: column; }
     .job-detail-grid { grid-template-columns: 1fr; }

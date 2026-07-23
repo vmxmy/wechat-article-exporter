@@ -1,9 +1,11 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,9 @@ type fakeBackupMaintenance struct {
 	verification BackupVerification
 	verifiedID   string
 	err          error
+	archive      io.ReadCloser
+	openedID     string
+	closed       bool
 }
 
 func (fake *fakeBackupMaintenance) CreateBackup(context.Context) (BackupReceipt, error) {
@@ -23,6 +28,11 @@ func (fake *fakeBackupMaintenance) VerifyBackup(_ context.Context, id string) (B
 	fake.verifiedID = id
 	return fake.verification, fake.err
 }
+func (fake *fakeBackupMaintenance) OpenBackup(_ context.Context, id string) (io.ReadCloser, error) {
+	fake.openedID = id
+	return fake.archive, fake.err
+}
+func (fake *fakeBackupMaintenance) Close(context.Context) error { fake.closed = true; return fake.err }
 
 type fakeIntegrityMaintenance struct{ report IntegrityReport }
 
@@ -77,6 +87,28 @@ func TestMaintenanceStorageBackupVerificationUsesOpaqueHandleAndRedactsOutput(t 
 		if strings.Contains(string(encoded), forbidden) {
 			t.Fatalf("storage response leaked %q: %s", forbidden, encoded)
 		}
+	}
+}
+
+func TestMaintenanceStorageBackupArtifactUsesOpaqueHandleAndClosesBackend(t *testing.T) {
+	backups := &fakeBackupMaintenance{archive: io.NopCloser(bytes.NewReader([]byte("backup archive")))}
+	service := NewMaintenanceStorage(MaintenanceStorageOptions{Backups: backups})
+	archive, err := service.OpenBackup(context.Background(), " backup-7 ")
+	if err != nil || backups.openedID != "backup-7" {
+		t.Fatalf("OpenBackup() = %v, %v; opened=%q", archive, err, backups.openedID)
+	}
+	contents, err := io.ReadAll(archive)
+	if err != nil || string(contents) != "backup archive" {
+		t.Fatalf("archive = %q, %v", contents, err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.OpenBackup(context.Background(), "/private/archive.zip"); err == nil || backups.openedID != "backup-7" {
+		t.Fatalf("OpenBackup() accepted path-bearing ID: %v, opened=%q", err, backups.openedID)
+	}
+	if err := service.Close(context.Background()); err != nil || !backups.closed {
+		t.Fatalf("Close() = %v, closed=%v", err, backups.closed)
 	}
 }
 

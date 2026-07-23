@@ -1,10 +1,11 @@
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Button } from '@astryxdesign/core/Button'
+import { FileInput } from '@astryxdesign/core/FileInput'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
-import type { AccountRecord, AlbumRecord, JobDetail, JobRecord, SavedQueryRecord } from '../../lib/api'
+import { consumeArticleQueryHandoff, getAccountManifestDownloadURL, parseArticleQuery, type AccountRecord, type AlbumRecord, type JobDetail, type JobRecord, type SavedQueryRecord } from '../../lib/api'
 import { useAccountPage, useAccountSearch, useAlbumPage, useJobDetail, useJobPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 import { ResourceTable } from './ResourceTable'
 import { UnavailableActionPanel } from '../actions/UnavailableActionPanel'
@@ -32,6 +33,17 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   const actions = messages.resources.accounts.actions
   const one = selected.length === 1 ? selected[0] : undefined
   const accountInput = { fakeid: fakeid.trim(), name: name.trim(), alias: alias.trim() || undefined }
+  const importManifest = (value: File | readonly File[] | null) => {
+    const manifest = Array.isArray(value) ? value[0] : value
+    if (!manifest) return
+    mutations.uploadAccountManifest.mutate(manifest, {
+      onSuccess: (upload) => mutations.importAccountManifest.mutate(upload.handle, {
+        onSuccess: ({ report }) => setNotice(actions.manifestImported(report.added, report.merged, report.unchanged)),
+        onError: () => setNotice(actions.manifestFailed)
+      }),
+      onError: () => setNotice(actions.manifestFailed)
+    })
+  }
   return (
     <>
       <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.accounts} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
@@ -39,6 +51,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
         <div className="account-action-form"><TextInput label={actions.search} value={search} onChange={setSearch} /><Button label={actions.discover} variant="secondary" isLoading={discovery.isFetching} onClick={() => void discovery.refetch()} /></div>
         {discovery.data?.data.length ? <p>{discovery.data.data.map((account) => `${account.name} (${account.id})`).join(' · ')}</p> : null}
         <div className="account-action-form"><TextInput label={actions.fakeid} value={fakeid} onChange={setFakeid} /><TextInput label={actions.name} value={name} onChange={setName} /><TextInput label={actions.alias} value={alias} onChange={setAlias} /><Button label={actions.add} variant="primary" isLoading={mutations.saveAccount.isPending} isDisabled={!accountInput.fakeid || !accountInput.name} onClick={() => mutations.saveAccount.mutate(accountInput, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.edit} variant="secondary" isLoading={mutations.updateAccount.isPending} isDisabled={!one || !accountInput.fakeid || !accountInput.name} onClick={() => one && mutations.updateAccount.mutate({ id: one, input: accountInput }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.sync} variant="secondary" isLoading={mutations.syncAccount.isPending} isDisabled={!one} onClick={() => one && mutations.syncAccount.mutate(one, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.remove} variant="secondary" isLoading={mutations.deleteAccounts.isPending} isDisabled={selected.length === 0} onClick={() => { if (window.confirm(actions.deleteConfirm)) mutations.deleteAccounts.mutate(selected, { onSuccess: () => { setSelected([]); setNotice(undefined) }, onError: () => setNotice(actions.actionFailed) }) }} /></div>
+        <div className="account-action-form"><a className="artifact-download" href={getAccountManifestDownloadURL()}>{actions.downloadManifest}</a><FileInput label={actions.importManifest} description={actions.manifestHint} value={null} onChange={importManifest} accept="application/json,.json" isLoading={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending} isDisabled={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending} /></div>
         {!one && selected.length > 0 ? <p>{actions.selectOne}</p> : null}{notice ? <p role="alert">{notice}</p> : null}
       </UnavailableActionPanel>
     </>
@@ -135,7 +148,7 @@ export function SavedQueriesPage({ messages, locale }: { readonly messages: Mess
   const [pageIndex, setPageIndex] = useState(0)
   const [selected, setSelected] = useState<readonly string[]>([])
   const [name, setName] = useState('')
-  const [queryText, setQueryText] = useState('{\n  "keyword": ""\n}')
+  const [queryText, setQueryText] = useState(() => JSON.stringify(consumeArticleQueryHandoff() ?? { keyword: '' }, null, 2))
   const [notice, setNotice] = useState<string>()
   const query = useSavedQueryPage({ page: pageIndex + 1, pageSize })
   const mutations = useWorkspaceMutations()
@@ -150,8 +163,7 @@ export function SavedQueriesPage({ messages, locale }: { readonly messages: Mess
     const trimmedName = name.trim()
     if (!trimmedName) throw new Error('name')
     const parsed: unknown = JSON.parse(queryText)
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error('query')
-    return { name: trimmedName, query: parsed as Readonly<Record<string, unknown>> }
+    return { name: trimmedName, query: parseArticleQuery(parsed) }
   }
   const save = () => {
     try {

@@ -5,7 +5,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type SortingState, type VisibilityState } from '@tanstack/react-table'
 import { useEffect, useMemo, useState } from 'react'
 import type { Locale, MessageCatalog } from '../../i18n'
-import { getArticlePreview, type ArticleRecord } from '../../lib/api'
+import { getArticlePreview, parseArticleQuery, saveArticleQueryHandoff, saveExportHandoff, type ArticleQuery, type ArticleRecord, type ArticleSort } from '../../lib/api'
 import { useArticlePage } from '../../lib/queries'
 import { useWorkspaceMutations } from '../../lib/queries'
 
@@ -19,25 +19,38 @@ const pageSize = 25
 export function ArticleTable({ locale, messages }: ArticleTableProps) {
   const [pageIndex, setPageIndex] = useState(0)
   const [search, setSearch] = useState('')
-  const [query, setQuery] = useState('')
+  const [filters, setFilters] = useState<ArticleQuery>({})
+  const [query, setQuery] = useState<ArticleQuery>({})
   const [sorting, setSorting] = useState<SortingState>([{ id: 'publishedAt', desc: true }])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({})
   const [notice, setNotice] = useState<string>()
   const sort = sorting[0] ?? { id: 'publishedAt', desc: true }
   useEffect(() => {
-    const timeout = window.setTimeout(() => setQuery(search), 250)
+    const timeout = window.setTimeout(() => setQuery((current) => ({ ...current, keyword: search.trim() || undefined })), 250)
     return () => window.clearTimeout(timeout)
   }, [search])
   useEffect(() => setRowSelection({}), [pageIndex, query, sort.id, sort.desc])
+  const activeSort: ArticleSort = { field: sort.id, direction: sort.desc ? 'desc' : 'asc' }
   const articlePage = useArticlePage({
     page: pageIndex + 1,
     pageSize,
-    search: query,
-    sort: sort.id,
-    direction: sort.desc ? 'desc' : 'asc'
+    ...query,
+    sorts: [activeSort]
   })
   const mutations = useWorkspaceMutations()
+  const updateFilter = (field: keyof ArticleQuery, value: string) => {
+    setFilters((current) => ({ ...current, [field]: value.trim() || undefined }))
+  }
+  const applyFilters = () => {
+    try {
+      const next = parseArticleQuery({ ...filters, keyword: search.trim() || undefined })
+      setPageIndex(0)
+      setQuery(next)
+      setNotice(undefined)
+    } catch { setNotice(messages.articles.filters.invalid) }
+  }
+  const resetFilters = () => { setFilters({}); setSearch(''); setPageIndex(0); setQuery({}) }
 
   const columns = useMemo<ColumnDef<ArticleRecord>[]>(() => [
     {
@@ -107,6 +120,20 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
       onError: () => setNotice(messages.articles.actions.failed)
     })
   }
+  const handoffExport = (selection: 'selected' | 'matching') => {
+    const value = selection === 'selected'
+      ? selectedIDs.length ? { selection: { kind: 'explicit_ids' as const, articleIds: selectedIDs }, label: messages.exports.selection.explicit(selectedIDs.length) } : undefined
+      : { selection: { kind: 'all_matching' as const, query: { ...query, sorts: [activeSort] } }, label: messages.exports.selection.matchingLabel }
+    if (!value) return
+    saveExportHandoff(value)
+    window.history.pushState({}, '', '/exports')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }
+  const saveCurrentQuery = () => {
+    saveArticleQueryHandoff({ ...query, sorts: [activeSort] })
+    window.history.pushState({}, '', '/saved-queries')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }
   const preview = () => {
     if (!selectedArticle) return
     if (selectedArticle.hasContent === false) return setNotice(messages.articles.actions.previewUnavailable)
@@ -148,6 +175,24 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
         />
         <span className="selection-count" aria-live="polite">{selectedCount} {messages.articles.selected}</span>
       </div>
+      <section className="workspace-panel article-filters" aria-label={messages.articles.filters.advanced}>
+        <h2>{messages.articles.filters.title}</h2>
+        <p className="field-hint">{messages.articles.filters.advancedHint}</p>
+        <div className="article-filter-grid">
+          <TextInput label={messages.articles.filters.accountId} value={filters.accountId ?? ''} onChange={(value) => updateFilter('accountId', value)} />
+          <TextInput label={messages.articles.filters.albumId} value={filters.albumId ?? ''} onChange={(value) => updateFilter('albumId', value)} />
+          <TextInput label={messages.articles.filters.author} value={filters.author ?? ''} onChange={(value) => updateFilter('author', value)} />
+          <TextInput label={messages.articles.filters.state} value={filters.state ?? ''} onChange={(value) => updateFilter('state', value)} />
+          <TextInput label={messages.articles.filters.messageTypes} value={(filters.messageTypes ?? []).join(', ')} onChange={(value) => setFilters((current) => ({ ...current, messageTypes: parseMessageTypes(value) }))} />
+          <TextInput label={messages.articles.filters.publishedFrom} value={filters.publishedFrom ?? ''} onChange={(value) => updateFilter('publishedFrom', value)} />
+          <TextInput label={messages.articles.filters.publishedTo} value={filters.publishedTo ?? ''} onChange={(value) => updateFilter('publishedTo', value)} />
+          <label>{messages.articles.filters.hasContent}<select value={optionalBoolean(filters.hasContent)} onChange={(event) => setFilters((current) => ({ ...current, hasContent: parseOptionalBoolean(event.target.value) }))}><option value="">{messages.articles.filters.any}</option><option value="true">{messages.articles.filters.yes}</option><option value="false">{messages.articles.filters.no}</option></select></label>
+          <label>{messages.articles.filters.hasComments}<select value={optionalBoolean(filters.hasComments)} onChange={(event) => setFilters((current) => ({ ...current, hasComments: parseOptionalBoolean(event.target.value) }))}><option value="">{messages.articles.filters.any}</option><option value="true">{messages.articles.filters.yes}</option><option value="false">{messages.articles.filters.no}</option></select></label>
+          {booleanFilters.map(({ field, label }) => <label key={field}>{messages.articles.filters[label]}<select value={optionalBoolean(filters[field])} onChange={(event) => setFilters((current) => ({ ...current, [field]: parseOptionalBoolean(event.target.value) }))}><option value="">{messages.articles.filters.any}</option><option value="true">{messages.articles.filters.yes}</option><option value="false">{messages.articles.filters.no}</option></select></label>)}
+          {numberFilters.map(({ field, label }) => <TextInput key={field} label={messages.articles.filters[label]} value={numberText(filters[field])} onChange={(value) => setFilters((current) => ({ ...current, [field]: parseOptionalNumber(value) }))} />)}
+        </div>
+        <div className="export-actions"><Button label={messages.articles.filters.apply} variant="secondary" onClick={applyFilters} /><Button label={messages.articles.filters.reset} variant="secondary" onClick={resetFilters} /></div>
+      </section>
       <div className="column-controls" aria-label={messages.articles.visibleColumns}>
         {table.getAllLeafColumns().filter((column) => column.id !== 'select').map((column) => (
           <CheckboxInput
@@ -215,12 +260,32 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
           <Button label={messages.articles.actions.metadata} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('metadata')} />
           <Button label={messages.articles.actions.comments} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('comments')} />
           <Button label={messages.articles.actions.resources} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('resources')} />
+          <Button label={messages.articles.actions.exportSelected} variant="primary" isDisabled={selectedIDs.length === 0} onClick={() => handoffExport('selected')} />
+          <Button label={messages.articles.actions.exportMatching} variant="secondary" onClick={() => handoffExport('matching')} />
+          <Button label={messages.articles.actions.saveQuery} variant="secondary" onClick={saveCurrentQuery} />
         </div>
         {notice ? <p role="status">{notice}</p> : null}
       </section>
     </section>
   )
 }
+
+function optionalBoolean(value: boolean | undefined) { return value === undefined ? '' : String(value) }
+function parseOptionalBoolean(value: string) { return value === '' ? undefined : value === 'true' }
+function numberText(value: number | undefined) { return value === undefined ? '' : String(value) }
+function parseOptionalNumber(value: string) { const parsed = Number(value); return value.trim() && Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined }
+function parseMessageTypes(value: string) { return value.trim() ? value.split(',').map((item) => Number(item.trim())).filter((item) => Number.isInteger(item) && item >= 0) : undefined }
+
+const booleanFilters: ReadonlyArray<{ readonly field: 'deleted' | 'original' | 'paid'; readonly label: 'deleted' | 'original' | 'paid' }> = [
+  { field: 'deleted', label: 'deleted' }, { field: 'original', label: 'original' }, { field: 'paid', label: 'paid' }
+]
+
+const numberFilters: ReadonlyArray<{ readonly field: 'readMin' | 'readMax' | 'oldLikeMin' | 'oldLikeMax' | 'shareMin' | 'shareMax' | 'likeMin' | 'likeMax' | 'commentMin' | 'commentMax' | 'weCoinMin' | 'weCoinMax' | 'mediaSecondsMin' | 'mediaSecondsMax'; readonly label: 'readMin' | 'readMax' | 'oldLikeMin' | 'oldLikeMax' | 'shareMin' | 'shareMax' | 'likeMin' | 'likeMax' | 'commentMin' | 'commentMax' | 'weCoinMin' | 'weCoinMax' | 'mediaSecondsMin' | 'mediaSecondsMax' }> = [
+  { field: 'readMin', label: 'readMin' }, { field: 'readMax', label: 'readMax' }, { field: 'oldLikeMin', label: 'oldLikeMin' }, { field: 'oldLikeMax', label: 'oldLikeMax' },
+  { field: 'shareMin', label: 'shareMin' }, { field: 'shareMax', label: 'shareMax' }, { field: 'likeMin', label: 'likeMin' }, { field: 'likeMax', label: 'likeMax' },
+  { field: 'commentMin', label: 'commentMin' }, { field: 'commentMax', label: 'commentMax' }, { field: 'weCoinMin', label: 'weCoinMin' }, { field: 'weCoinMax', label: 'weCoinMax' },
+  { field: 'mediaSecondsMin', label: 'mediaSecondsMin' }, { field: 'mediaSecondsMax', label: 'mediaSecondsMax' }
+]
 
 function ArticleStatus({ status, locale }: { readonly status: string; readonly locale: Locale }) {
   const statusInfo = getStatusInfo(status, locale)

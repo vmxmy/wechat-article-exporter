@@ -49,6 +49,9 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 	if server.diagnosticBundleRead(writer, request) {
 		return
 	}
+	if server.backupArtifactRead(writer, request) {
+		return
+	}
 	switch request.URL.Path {
 	case "/api/v1/runtime":
 		server.runtime(writer, request)

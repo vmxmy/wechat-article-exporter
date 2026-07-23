@@ -1,9 +1,11 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -32,6 +34,36 @@ func TestMaintenanceAPIFailsClosedWithoutExplicitServices(t *testing.T) {
 		t.Fatalf("POST backup status=%d body=%s", response.StatusCode, readResponse(t, response))
 	}
 	assertAPIError(t, response, "unavailable")
+}
+
+func TestBackupArtifactAPIStreamsSingleUseOpaqueHandle(t *testing.T) {
+	storage := &webStorageMaintenance{receipt: application.BackupReceipt{ID: "backup-1"}, archive: []byte("backup archive")}
+	server, client := startMaintenanceServer(t, application.NewMaintenance(application.MaintenanceOptions{}), application.NewMaintenanceStorage(application.MaintenanceStorageOptions{Backups: storage}))
+	base := authorizeAPI(t, client, server.URL())
+
+	response := get(t, client, base+"/api/v1/maintenance/backups/backup-1")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("download status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	if response.Header.Get("Content-Type") != "application/zip" || response.Header.Get("Content-Disposition") != `attachment; filename="wechat-article-backup.zip"` || response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("Pragma") != "no-cache" || response.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("download headers=%v", response.Header)
+	}
+	if body := readResponse(t, response); body != "backup archive" || strings.Contains(body, "/private") {
+		t.Fatalf("download body=%q", body)
+	}
+	if storage.openedID != "backup-1" {
+		t.Fatalf("opened backup=%q", storage.openedID)
+	}
+	response = get(t, client, base+"/api/v1/maintenance/backups/backup-1")
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("replay status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "not_found")
+	response = get(t, client, base+"/api/v1/maintenance/backups/%2Fprivate%2Farchive.zip")
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("path-bearing handle status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "invalid_argument")
 }
 
 func TestMaintenanceAPIUsesFacadesAndNeverEchoesSecretsOrPaths(t *testing.T) {

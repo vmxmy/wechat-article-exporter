@@ -88,6 +88,12 @@ export const zhCN = {
     childPlaceholder: '例如：七月',
     create: '创建目录',
     selectionTitle: '2. 选择文章与格式',
+    selection: {
+      title: '导出范围', accountId: '账号 ID', albumId: '专辑 ID', account: '导出账号全部文章', album: '导出专辑全部文章',
+      savedQuery: '已保存查询', savedQueryPlaceholder: '选择已保存查询', matchingQuery: '匹配文章查询（JSON）', matching: '导出匹配查询',
+      active: (label: string) => `当前范围：${label}`, explicit: (count: number) => `${count} 个明确文章 ID`,
+      accountLabel: (id: string) => `账号 ${id}`, albumLabel: (id: string) => `专辑 ${id}`, savedQueryLabel: (name: string) => `已保存查询 ${name}`, matchingLabel: '当前匹配筛选条件'
+    },
     articleIds: '文章 ID',
     articleIdsHint: '每行输入一个稳定文章 ID，或用逗号分隔。',
     format: '格式',
@@ -163,10 +169,10 @@ export const zhCN = {
     title: '设置与维护',
     description: '管理浏览器安全的本地设置，并执行明确的维护检查。此处绝不显示密钥值或本机路径。',
     loading: '正在加载本地设置…', unavailable: '一项本地维护能力暂不可用。', retry: '重试', actionFailed: '无法完成本地维护操作。',
-    credentials: { title: '凭据', description: '仅列出元数据。输入的凭据字段只写入，导入后会从浏览器中清除。', empty: '没有可用的凭据元数据。', import: '导入凭据', remove: '移除', nickname: '昵称', cookie: 'Cookie（仅写入）', optional: '可选', imported: '已导入凭据。密钥值未保留在浏览器中。', columns: { account: '账号', kind: '类型', status: '状态', updated: '更新时间' } },
+    credentials: { title: '凭据', description: '仅列出元数据。输入的凭据字段只写入，导入后会从浏览器中清除。', empty: '没有可用的凭据元数据。', import: '导入凭据', remove: '移除', nickname: '昵称', cookie: 'Cookie（仅写入）', optional: '可选', imported: '已导入凭据。密钥值未保留在浏览器中。', file: '凭据 JSON 文件', fileHint: '所选文件仅在本机流式导入，随后会从表单中清除。不会保留文件名或内容。', fileImported: '凭据文件已导入。浏览器未保留密钥值或文件详情。', columns: { account: '账号', kind: '类型', status: '状态', updated: '更新时间' } },
     proxies: { title: '代理', description: '代理授权仅写入。credential-trusted 路由必须先披露，并在创建前输入精确确认值。', empty: '尚未配置代理路由。', add: '添加代理', remove: '移除', enable: '启用', disable: '停用', test: '测试', name: '名称', endpoint: '端点', authorization: '授权信息（仅写入）', trust: '信任等级', publicOnly: '仅公开', credentialTrusted: '凭据可信', priority: '优先级', classes: '请求类别', disclosure: '凭据披露', disclosureRequired: '此路由可能接收：', confirmation: '精确确认值', confirmationHint: '请原样复制此值；它仅适用于当前拟创建的凭据可信路由。', health: '健康状态', probe: '测试结果', enabled: '已启用', disabled: '已停用', columns: { name: '名称', endpoint: '端点', trust: '信任', priority: '优先级', health: '健康', state: '状态', actions: '操作' } },
     preferences: { title: '偏好设置', description: '只能编辑安全的设置。导出目标和其他本机路径会被刻意隐藏。', save: '保存偏好设置', saved: '偏好设置已保存。', downloadConcurrency: '下载并发数', forceContent: '强制下载正文', metadataOverrides: '元数据覆盖正文', directFirst: '优先尝试直连', fallbackEnabled: '允许代理回退', language: '显示语言', namingTemplate: '导出命名模板', maximumNameBytes: '文件名最大字节数', collisionPolicy: '冲突策略' },
-    backups: { title: '备份', description: '创建本地备份，并使用不透明的备份 ID 验证。', create: '创建备份', created: '备份已创建。', verify: '验证备份', backupId: '备份 ID', valid: '备份验证通过。', invalid: '备份验证报告了失败项。', restoreTitle: '恢复', restoreDescription: '选择一个本地备份归档，设定名称冲突处理方式，然后暂存以获得一次性恢复确认。', archive: '备份归档', policy: '冲突策略', refuse: '拒绝冲突', rename: '重命名冲突项', stage: '暂存归档以恢复', staging: '正在暂存归档…', confirmation: '精确的一次性恢复确认字符串', confirmationHint: '请原样复制显示的值。提交后将替换本地工作区并关闭此浏览器会话。', commit: '恢复并关闭工作区', destructiveWarning: '破坏性操作：恢复会替换当前本地工作区。此浏览器会话中无法撤销。', terminalTitle: '恢复已完成', terminalMessage: '本地工作区已关闭。请重新运行 wechat-article web 以打开它。' },
+    backups: { title: '备份', description: '创建本地备份、下载一次性归档，或使用不透明的备份 ID 验证。', create: '创建备份', created: '备份已创建。', download: '下载备份归档', verify: '验证备份', backupId: '备份 ID', valid: '备份验证通过。', invalid: '备份验证报告了失败项。', restoreTitle: '恢复', restoreDescription: '选择一个本地备份归档，设定名称冲突处理方式，然后暂存以获得一次性恢复确认。', archive: '备份归档', policy: '冲突策略', refuse: '拒绝冲突', rename: '重命名冲突项', stage: '暂存归档以恢复', staging: '正在暂存归档…', confirmation: '精确的一次性恢复确认字符串', confirmationHint: '请原样复制显示的值。提交后将替换本地工作区并关闭此浏览器会话。', commit: '恢复并关闭工作区', destructiveWarning: '破坏性操作：恢复会替换当前本地工作区。此浏览器会话中无法撤销。', terminalTitle: '恢复已完成', terminalMessage: '本地工作区已关闭。请重新运行 wechat-article web 以打开它。' },
     integrity: { title: '完整性', description: '读取本地存储的安全完整性报告。', checked: '检查时间', issues: '个问题', noIssues: '未报告完整性问题。', columns: { kind: '类型', message: '信息', repairable: '可修复', recommendation: '建议' } },
     gc: { title: '垃圾回收', description: '请先生成计划。应用时必须输入该计划返回的一次性精确确认值。', plan: '生成 GC 计划', apply: '一次性应用此计划', planned: 'GC 计划已生成。', planExpired: '此计划可能已过期。重试前请生成新计划。', generated: '生成时间', expires: '过期时间', confirmation: '一次性精确确认值', totals: '计划回收量', result: 'GC 已完成。', categories: { objects: '未引用对象', temporary: '临时文件', debug: '过期调试捕获', logs: '已完成任务日志' } },
     diagnostics: { title: '诊断', description: '仅显示安全摘要；详细路径、密钥和原始后端错误均被排除。', collected: '收集时间', empty: '未报告诊断检查。', createBundle: '创建诊断包', creatingBundle: '正在创建诊断包…', bundleReady: '诊断包已可下载。', bundleDescription: '下载链接使用一次性、会过期的不透明句柄。浏览器不会显示或发送本机路径。', downloadBundle: '下载诊断包', bundleExpires: '下载过期时间', bundleChecksum: 'SHA-256', columns: { check: '检查项', status: '状态', summary: '摘要' } },
@@ -195,6 +201,11 @@ export const zhCN = {
       published: '发布时间',
       status: '状态'
     },
+    filters: {
+      title: '高级筛选', advanced: '高级筛选', advancedHint: '筛选条件与本地文章 API 使用同一套查询字段。翻页或导出匹配结果前请先应用更改。', invalid: '请检查查询值：日期必须使用 RFC3339，且最小值不能超过最大值。',
+      apply: '应用筛选', reset: '重置筛选', accountId: '账号 ID', albumId: '专辑 ID', author: '作者', state: '状态', messageTypes: '消息类型（逗号分隔）', hasContent: '已下载正文', hasComments: '已下载评论', deleted: '已删除', original: '原创文章', paid: '付费文章', any: '不限', yes: '是', no: '否',
+      publishedFrom: '发布时间起点（RFC3339）', publishedTo: '发布时间终点（RFC3339）', readMin: '最少阅读数', readMax: '最多阅读数', oldLikeMin: '最少旧版点赞数', oldLikeMax: '最多旧版点赞数', shareMin: '最少分享数', shareMax: '最多分享数', likeMin: '最少点赞数', likeMax: '最多点赞数', commentMin: '最少评论数', commentMax: '最多评论数', weCoinMin: '最少微信豆', weCoinMax: '最多微信豆', mediaSecondsMin: '最短媒体时长（秒）', mediaSecondsMax: '最长媒体时长（秒）'
+    },
     actions: {
       title: '已选文章操作',
       description: '每项操作都会创建持久化本地任务；预览保持为安全的本地交接。',
@@ -206,7 +217,9 @@ export const zhCN = {
       comments: '下载评论',
       resources: '补齐资源',
       failed: '无法为所选文章创建任务。',
-      saveQuery: '保存当前查询'
+      saveQuery: '保存当前查询',
+      exportSelected: '导出所选文章',
+      exportMatching: '导出当前匹配结果'
     }
   },
   resources: {
@@ -215,7 +228,7 @@ export const zhCN = {
       description: '已保存的本地账号按受限服务端分页展示。此只读 Beta 暂不提供账号修改和同步控制。',
       loading: '正在加载本地账号页…', unavailable: '本地 accounts API 尚不可用。', empty: '没有与查询匹配的已保存账号。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '账号分页', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见账号列',
       columns: { name: '账号', alias: '别名', articles: '文章数', synced: '最近同步', state: '同步状态' },
-      actions: { title: '账号操作', description: '发现账号、保存本地账号记录，或为一个已选账号启动同步。', search: '搜索发现', fakeid: '账号 fakeid', name: '账号名称', alias: '别名', discover: '发现账号', add: '保存账号', edit: '更新所选账号', remove: '删除所选账号', sync: '同步所选账号', selectOne: '请先仅选择一个账号。', deleteConfirm: '删除所选本地账号记录？此操作无法撤销。', actionFailed: '无法完成账号操作。' }
+      actions: { title: '账号操作', description: '发现账号、保存本地账号记录，或为一个已选账号启动同步。', search: '搜索发现', fakeid: '账号 fakeid', name: '账号名称', alias: '别名', discover: '发现账号', add: '保存账号', edit: '更新所选账号', remove: '删除所选账号', sync: '同步所选账号', downloadManifest: '下载账号清单', importManifest: '导入账号清单', manifestHint: '所选 JSON 清单仅在本机上传，随后立即从控件中清除。本页面不会保留文件名或内容。', manifestImported: (added: number, merged: number, unchanged: number) => `账号清单已导入：新增 ${added} 个，合并 ${merged} 个，未变更 ${unchanged} 个。`, manifestFailed: '无法导入账号清单。', selectOne: '请先仅选择一个账号。', deleteConfirm: '删除所选本地账号记录？此操作无法撤销。', actionFailed: '无法完成账号操作。' }
     },
     albums: {
       title: '专辑',

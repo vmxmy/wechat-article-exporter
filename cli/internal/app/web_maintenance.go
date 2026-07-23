@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -399,6 +400,60 @@ func (adapter *webMaintenanceStorageAdapter) VerifyBackup(ctx context.Context, i
 	return application.BackupVerification{BackupID: id, Valid: verification.Valid, SHA256: verification.ArchiveSHA, Failures: append([]string(nil), verification.Failures...)}, nil
 }
 
+// OpenBackup consumes a short-lived opaque handle before opening the archive.
+// It is deliberately stream-only: neither the application facade nor the
+// browser server can observe the local archive pathname.
+func (adapter *webMaintenanceStorageAdapter) OpenBackup(_ context.Context, id string) (io.ReadCloser, error) {
+	adapter.mu.Lock()
+	adapter.discardExpiredBackupsLocked()
+	handle, found := adapter.backups[id]
+	if found {
+		delete(adapter.backups, id)
+	}
+	adapter.mu.Unlock()
+	if !found {
+		return nil, errors.New("backup handle was not created by this workspace")
+	}
+	archive, err := os.Open(handle.path)
+	if err != nil {
+		_ = os.Remove(handle.path)
+		return nil, err
+	}
+	return &removeOnCloseReadCloser{ReadCloser: archive, path: handle.path}, nil
+}
+
+// Close removes all backup archives that have not been downloaded. The
+// browser server calls this while it shuts down, so a closed workspace cannot
+// leave short-lived browser artifacts behind.
+func (adapter *webMaintenanceStorageAdapter) Close(context.Context) error {
+	if adapter == nil {
+		return nil
+	}
+	adapter.mu.Lock()
+	handles := adapter.backups
+	adapter.backups = make(map[string]webBackupHandle)
+	adapter.mu.Unlock()
+	var result error
+	for _, handle := range handles {
+		result = errors.Join(result, os.Remove(handle.path))
+	}
+	return result
+}
+
+type removeOnCloseReadCloser struct {
+	io.ReadCloser
+	path string
+	once sync.Once
+	err  error
+}
+
+func (reader *removeOnCloseReadCloser) Close() error {
+	reader.once.Do(func() {
+		reader.err = errors.Join(reader.ReadCloser.Close(), os.Remove(reader.path))
+	})
+	return reader.err
+}
+
 func (adapter *webMaintenanceStorageAdapter) CheckIntegrity(ctx context.Context) (application.IntegrityReport, error) {
 	active, err := adapter.active()
 	if err != nil {
@@ -545,6 +600,7 @@ func (adapter *webMaintenanceStorageAdapter) discardExpiredBackupsLocked() {
 	for id, handle := range adapter.backups {
 		if !handle.expiresAt.After(now) {
 			delete(adapter.backups, id)
+			_ = os.Remove(handle.path)
 		}
 	}
 }
@@ -558,6 +614,7 @@ func (adapter *webMaintenanceStorageAdapter) discardOldestBackupLocked() {
 		}
 	}
 	if oldestID != "" {
+		_ = os.Remove(adapter.backups[oldestID].path)
 		delete(adapter.backups, oldestID)
 	}
 }

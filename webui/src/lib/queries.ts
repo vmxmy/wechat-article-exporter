@@ -13,7 +13,7 @@ import {
   getStorageStatus,
   getWorkspaceSnapshot,
   authorizeDefaultExportDirectory, beginLogin, completeLogin, controlJob, createExportDirectory, deleteAccounts, ingestURL, openExportOutput, pollLogin, saveAccount, searchAccounts, startExport, syncAccount, updateAccount, verifyExport,
-  addProxy, applyGarbageCollection, commitRestore, createBackup, createDiagnosticBundle, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importCredential, patchPreferences, planGarbageCollection, prepareRestore, removeCredential, removeProxy, setProxyEnabled, testProxy, uploadRestoreArchive, verifyBackup,
+  addProxy, applyGarbageCollection, commitRestore, createBackup, createDiagnosticBundle, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importAccountManifest, importCredential, patchPreferences, planGarbageCollection, prepareRestore, removeCredential, removeProxy, setProxyEnabled, testProxy, uploadAccountManifest, uploadCredentialFile, uploadRestoreArchive, verifyBackup,
   deleteSavedQuery, downloadArticles, saveSavedQuery, traverseAlbum,
   type AccountInput,
   type ArticleDownloadKind,
@@ -109,6 +109,8 @@ export function useWorkspaceMutations() {
     saveAccount: useMutation({ mutationFn: (input: AccountInput) => saveAccount(input), onSuccess: refresh }),
     updateAccount: useMutation({ mutationFn: ({ id, input }: { id: string; input: AccountInput }) => updateAccount(id, input), onSuccess: refresh }),
     deleteAccounts: useMutation({ mutationFn: (ids: readonly string[]) => deleteAccounts(ids), onSuccess: refresh }),
+    uploadAccountManifest: useMutation({ mutationFn: uploadAccountManifest }),
+    importAccountManifest: useMutation({ mutationFn: importAccountManifest, onSuccess: refresh }),
     syncAccount: useMutation({ mutationFn: syncAccount, onSuccess: refresh }),
     ingestURL: useMutation({ mutationFn: ({ url, force }: { url: string; force: boolean }) => ingestURL(url, force), onSuccess: refresh }),
     downloadArticles: useMutation({ mutationFn: ({ articleIds, kind, force }: { articleIds: readonly string[]; kind: ArticleDownloadKind; force?: boolean }) => downloadArticles(articleIds, kind, force), onSuccess: refresh }),
@@ -122,6 +124,7 @@ export function useWorkspaceMutations() {
     verifyExport: useMutation({ mutationFn: verifyExport, onSuccess: refresh }),
     openExportOutput: useMutation({ mutationFn: ({ id, confirmation }: { id: string; confirmation: string }) => openExportOutput(id, confirmation) })
     ,importCredential: useMutation({ mutationFn: importCredential, onSuccess: refresh })
+    ,uploadCredentialFile: useMutation({ mutationFn: uploadCredentialFile, onSuccess: refresh })
     ,removeCredential: useMutation({ mutationFn: removeCredential, onSuccess: refresh })
     ,addProxy: useMutation({ mutationFn: addProxy, onSuccess: refresh })
     ,removeProxy: useMutation({ mutationFn: removeProxy, onSuccess: refresh })

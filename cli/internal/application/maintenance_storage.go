@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"sync"
@@ -77,6 +78,16 @@ type BackupVerification struct {
 type BackupMaintenance interface {
 	CreateBackup(context.Context) (BackupReceipt, error)
 	VerifyBackup(context.Context, string) (BackupVerification, error)
+	// OpenBackup consumes the opaque backup handle and returns its archive. The
+	// implementation owns the archive location and enforces its short lifetime.
+	OpenBackup(context.Context, string) (io.ReadCloser, error)
+}
+
+// backupMaintenanceCleanup is intentionally private to the application
+// boundary. Local browser servers use it to remove unconsumed archive files on
+// shutdown without exposing runtime paths to presentation adapters.
+type backupMaintenanceCleanup interface {
+	Close(context.Context) error
 }
 
 func (service *MaintenanceStorageService) CreateBackup(ctx context.Context) (BackupReceipt, error) {
@@ -113,6 +124,44 @@ func (service *MaintenanceStorageService) VerifyBackup(ctx context.Context, back
 	}
 	verification.BackupID = backupID
 	return sanitizeBackupVerification(verification), nil
+}
+
+// OpenBackup opens a one-shot archive through its opaque backup handle. The
+// browser adapter receives only a stream; archive paths cannot cross this
+// boundary. Implementations must consume the handle before returning the
+// stream, so a retry cannot retrieve the same archive twice.
+func (service *MaintenanceStorageService) OpenBackup(ctx context.Context, backupID string) (io.ReadCloser, error) {
+	if service.backups == nil {
+		return nil, unavailableStorageMaintenance("open backup archive")
+	}
+	backupID = strings.TrimSpace(backupID)
+	if backupID == "" || !isOpaqueMaintenanceToken(backupID) {
+		return nil, errors.New("backup handle is invalid")
+	}
+	archive, err := service.backups.OpenBackup(ctx, backupID)
+	if err != nil {
+		return nil, storageMaintenanceFailure("open backup archive", err)
+	}
+	if archive == nil {
+		return nil, errors.New("open backup archive returned no archive")
+	}
+	return archive, nil
+}
+
+// Close discards any unconsumed backup archive artifacts held by the local
+// maintenance implementation. It is a lifecycle hook, not a browser API.
+func (service *MaintenanceStorageService) Close(ctx context.Context) error {
+	if service == nil || service.backups == nil {
+		return nil
+	}
+	cleanup, ok := service.backups.(backupMaintenanceCleanup)
+	if !ok {
+		return nil
+	}
+	if err := cleanup.Close(ctx); err != nil {
+		return storageMaintenanceFailure("close backup archives", err)
+	}
+	return nil
 }
 
 type IntegrityIssue struct {

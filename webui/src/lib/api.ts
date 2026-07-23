@@ -152,16 +152,52 @@ export interface StorageStatus {
   readonly objectBytes: number
 }
 
+export interface ArticleSort {
+  readonly field: string
+  readonly direction: 'asc' | 'desc'
+}
+
+export interface ArticleQuery {
+  readonly accountId?: string
+  readonly albumId?: string
+  readonly keyword?: string
+  readonly author?: string
+  readonly state?: string
+  readonly publishedFrom?: string
+  readonly publishedTo?: string
+  readonly deleted?: boolean
+  readonly hasContent?: boolean
+  readonly hasComments?: boolean
+  readonly original?: boolean
+  readonly paid?: boolean
+  readonly messageTypes?: readonly number[]
+  readonly readMin?: number
+  readonly readMax?: number
+  readonly oldLikeMin?: number
+  readonly oldLikeMax?: number
+  readonly shareMin?: number
+  readonly shareMax?: number
+  readonly likeMin?: number
+  readonly likeMax?: number
+  readonly commentMin?: number
+  readonly commentMax?: number
+  readonly weCoinMin?: number
+  readonly weCoinMax?: number
+  readonly mediaSecondsMin?: number
+  readonly mediaSecondsMax?: number
+  readonly sorts?: readonly ArticleSort[]
+}
+
 export interface SavedQueryRecord {
   readonly name: string
-  readonly query: Readonly<Record<string, unknown>>
+  readonly query: ArticleQuery
   readonly createdAt: string
   readonly updatedAt: string
 }
 
 export interface SavedQueryInput {
   readonly name: string
-  readonly query: Readonly<Record<string, unknown>>
+  readonly query: ArticleQuery
 }
 
 export type ExportFormat = 'html' | 'markdown' | 'text' | 'json' | 'xlsx' | 'docx' | 'pdf'
@@ -174,7 +210,14 @@ export interface ExportDirectory {
   readonly description?: string
 }
 
-export interface ExportSelection {
+export type ExportSelection =
+  | { readonly kind: 'explicit_ids'; readonly articleIds: readonly string[] }
+  | { readonly kind: 'account'; readonly accountId: string }
+  | { readonly kind: 'album'; readonly albumId: string }
+  | { readonly kind: 'saved_query'; readonly savedQueryId: string; readonly query?: ArticleQuery }
+  | { readonly kind: 'all_matching'; readonly query: ArticleQuery }
+
+export interface ExplicitIDExportSelection {
   readonly kind: 'explicit_ids'
   readonly articleIds: readonly string[]
 }
@@ -254,6 +297,8 @@ export interface WorkspaceSnapshot {
 export interface LoginFlow { readonly sessionId: string; readonly qrCode?: string; readonly expiresAt?: string }
 export interface LoginPollResult { readonly state: string; readonly accountCount: number }
 export interface AccountInput { readonly fakeid: string; readonly name: string; readonly alias?: string; readonly description?: string }
+export interface AccountManifestImportReport { readonly added: number; readonly merged: number; readonly unchanged: number }
+export interface AccountManifestImportResult { readonly report: AccountManifestImportReport }
 
 // Maintenance responses intentionally mirror the browser-safe DTO boundary.
 // Secret values are accepted by write-only inputs only and never modelled here.
@@ -344,11 +389,15 @@ export interface DiagnosticCheck { readonly name: string; readonly status: strin
 export interface DiagnosticsReport { readonly collectedAt: string; readonly checks: readonly DiagnosticCheck[] }
 export interface DiagnosticBundleReceipt { readonly handle: string; readonly createdAt: string; readonly expiresAt: string; readonly sha256: string; readonly sizeBytes: number }
 
-export interface ArticlePageParams extends PageParams {
-  readonly search: string
-  readonly sort: string
-  readonly direction: 'asc' | 'desc'
+export interface ArticlePageParams extends PageParams, ArticleQuery {}
+
+export interface ExportHandoff {
+  readonly selection: ExportSelection
+  readonly label: string
 }
+
+const exportHandoffStorageKey = 'wechat-article.export-handoff.v1'
+const articleQueryHandoffStorageKey = 'wechat-article.article-query-handoff.v1'
 
 export async function getRuntimeStatus(signal?: AbortSignal): Promise<RuntimeStatus> {
   return request<RuntimeStatus>(`${apiBase}/runtime`, { signal })
@@ -378,6 +427,18 @@ export async function searchAccounts(params: PageParams, signal?: AbortSignal): 
 export async function saveAccount(input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>('accounts', 'POST', input) }
 export async function updateAccount(id: string, input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>(`accounts/${encodeURIComponent(id)}`, 'PATCH', input) }
 export async function deleteAccounts(ids: readonly string[]): Promise<void> { await mutate('accounts', 'DELETE', { ids, confirm: `delete-accounts:${ids.join(',')}` }) }
+export function getAccountManifestDownloadURL(): string { return `${apiBase}/accounts/manifest` }
+export async function uploadAccountManifest(manifest: File): Promise<RestoreUploadReceipt> {
+  const csrfToken = await getCSRFToken()
+  const form = new FormData()
+  form.append('manifest', manifest)
+  return request<RestoreUploadReceipt>(`${apiBase}/accounts/manifest/upload`, {
+    method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, body: form
+  })
+}
+export async function importAccountManifest(uploadHandle: string): Promise<AccountManifestImportResult> {
+  return mutate<AccountManifestImportResult>('accounts/manifest/import', 'POST', { uploadHandle })
+}
 export async function syncAccount(id: string): Promise<JobRecord> { return mutate<JobRecord>(`accounts/${encodeURIComponent(id)}/sync`, 'POST', { incremental: true }) }
 export async function ingestURL(url: string, force = false): Promise<JobRecord> { return mutate<JobRecord>('ingest/url', 'POST', { url, force }) }
 export async function downloadArticles(articleIds: readonly string[], kind: ArticleDownloadKind, force = false): Promise<JobRecord> {
@@ -409,7 +470,7 @@ export async function getAccountPage(params: PageParams, signal?: AbortSignal): 
 }
 
 export async function getArticlePage(params: ArticlePageParams, signal?: AbortSignal): Promise<PaginatedResponse<ArticleRecord>> {
-  return getPage<ArticleRecord>('articles', params, signal)
+  return getArticleQueryPage(params, signal)
 }
 
 export async function getAlbumPage(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<AlbumRecord>> {
@@ -470,6 +531,14 @@ export async function openExportOutput(id: string, confirmation: string): Promis
 
 export async function getCredentials(signal?: AbortSignal): Promise<readonly CredentialMetadata[]> { return request(`${apiBase}/settings/credentials`, { signal }) }
 export async function importCredential(input: CredentialImportInput): Promise<CredentialMetadata> { return mutate('settings/credentials/import', 'POST', input) }
+export async function uploadCredentialFile(credential: File): Promise<CredentialMetadata> {
+  const csrfToken = await getCSRFToken()
+  const form = new FormData()
+  form.append('credential', credential)
+  return request<CredentialMetadata>(`${apiBase}/settings/credentials/upload`, {
+    method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, body: form
+  })
+}
 export async function removeCredential(id: string): Promise<void> { await mutate(`settings/credentials/remove`, 'POST', { id }) }
 export async function getProxies(signal?: AbortSignal): Promise<readonly ProxyRoute[]> { return request(`${apiBase}/settings/proxies`, { signal }) }
 export async function getProxyDisclosure(input: ProxyInput): Promise<ProxyDisclosure> { return mutate('settings/proxies/disclosure', 'POST', input) }
@@ -481,6 +550,7 @@ export async function getPreferences(signal?: AbortSignal): Promise<Preferences>
 export async function patchPreferences(patch: PreferencesPatch): Promise<Preferences> { return mutate('settings/preferences', 'PATCH', patch) }
 export async function createBackup(): Promise<BackupReceipt> { return mutate('maintenance/backups', 'POST', {}) }
 export async function verifyBackup(backupId: string): Promise<BackupVerification> { return mutate('maintenance/backups/verify', 'POST', { backupId }) }
+export function getBackupArtifactDownloadURL(backupId: string): string { return `${apiBase}/maintenance/backups/${encodeURIComponent(backupId)}` }
 export async function uploadRestoreArchive(archive: File): Promise<RestoreUploadReceipt> {
   const csrfToken = await getCSRFToken()
   const form = new FormData()
@@ -509,6 +579,112 @@ async function getPage<T>(resource: string, params: PageParams, signal?: AbortSi
   if (params.sort && params.direction) searchParams.set('sort', `${params.sort}:${params.direction}`)
   const response = await request<PaginatedResponse<T> | WorkspacePageResponse<T>>(`${apiBase}/${resource}?${searchParams.toString()}`, { signal })
   return normalizePage(response)
+}
+
+async function getArticleQueryPage(params: ArticlePageParams, signal?: AbortSignal): Promise<PaginatedResponse<ArticleRecord>> {
+  const searchParams = new URLSearchParams({ offset: String((params.page - 1) * params.pageSize), limit: String(params.pageSize) })
+  appendArticleQuery(searchParams, params)
+  const response = await request<PaginatedResponse<ArticleRecord> | WorkspacePageResponse<ArticleRecord>>(`${apiBase}/articles?${searchParams.toString()}`, { signal })
+  return normalizePage(response)
+}
+
+export function appendArticleQuery(searchParams: URLSearchParams, query: ArticleQuery): void {
+  const stringFields: ReadonlyArray<keyof Pick<ArticleQuery, 'accountId' | 'albumId' | 'keyword' | 'author' | 'state' | 'publishedFrom' | 'publishedTo'>> = ['accountId', 'albumId', 'keyword', 'author', 'state', 'publishedFrom', 'publishedTo']
+  for (const field of stringFields) {
+    const value = query[field]
+    if (value?.trim()) searchParams.set(field, value.trim())
+  }
+  const booleanFields: ReadonlyArray<keyof Pick<ArticleQuery, 'deleted' | 'hasContent' | 'hasComments' | 'original' | 'paid'>> = ['deleted', 'hasContent', 'hasComments', 'original', 'paid']
+  for (const field of booleanFields) if (query[field] !== undefined) searchParams.set(field, String(query[field]))
+  const numberFields: ReadonlyArray<keyof Omit<ArticleQuery, 'accountId' | 'albumId' | 'keyword' | 'author' | 'state' | 'publishedFrom' | 'publishedTo' | 'deleted' | 'hasContent' | 'hasComments' | 'original' | 'paid' | 'messageTypes' | 'sorts'>> = ['readMin', 'readMax', 'oldLikeMin', 'oldLikeMax', 'shareMin', 'shareMax', 'likeMin', 'likeMax', 'commentMin', 'commentMax', 'weCoinMin', 'weCoinMax', 'mediaSecondsMin', 'mediaSecondsMax']
+  for (const field of numberFields) {
+    const value = query[field]
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) searchParams.set(field, String(value))
+  }
+  for (const value of query.messageTypes ?? []) if (Number.isInteger(value) && value >= 0) searchParams.append('messageType', String(value))
+  for (const sort of query.sorts ?? []) searchParams.append('sort', `${sort.field}:${sort.direction}`)
+}
+
+export function withoutArticleQuerySorting(query: ArticleQuery): ArticleQuery {
+  const filters = { ...query }
+  delete filters.sorts
+  return filters
+}
+
+export function parseArticleQuery(value: unknown): ArticleQuery {
+  if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error('article query must be an object')
+  const input = value as Record<string, unknown>
+  const stringFields = ['accountId', 'albumId', 'keyword', 'author', 'state', 'publishedFrom', 'publishedTo'] as const
+  const booleanFields = ['deleted', 'hasContent', 'hasComments', 'original', 'paid'] as const
+  const numberFields = ['readMin', 'readMax', 'oldLikeMin', 'oldLikeMax', 'shareMin', 'shareMax', 'likeMin', 'likeMax', 'commentMin', 'commentMax', 'weCoinMin', 'weCoinMax', 'mediaSecondsMin', 'mediaSecondsMax'] as const
+  const allowed = new Set<string>([...stringFields, ...booleanFields, ...numberFields, 'messageTypes', 'sorts'])
+  if (Object.keys(input).some((key) => !allowed.has(key))) throw new Error('article query contains an unsupported field')
+  const query: Record<string, unknown> = {}
+  for (const field of stringFields) {
+    const item = input[field]
+    if (item === undefined || item === '') continue
+    if (typeof item !== 'string') throw new Error('article query string filter is invalid')
+    const normalized = item.trim()
+    if (normalized) query[field] = normalized
+  }
+  for (const field of booleanFields) {
+    const item = input[field]
+    if (item === undefined) continue
+    if (typeof item !== 'boolean') throw new Error('article query boolean filter is invalid')
+    query[field] = item
+  }
+  for (const field of numberFields) {
+    const item = input[field]
+    if (item === undefined || item === '') continue
+    if (!Number.isInteger(item) || (item as number) < 0) throw new Error('article query number filter is invalid')
+    query[field] = item
+  }
+  const messageTypes = input.messageTypes
+  if (messageTypes !== undefined) {
+    if (!Array.isArray(messageTypes) || messageTypes.some((item) => !Number.isInteger(item) || item < 0)) throw new Error('article query message types are invalid')
+    query.messageTypes = [...messageTypes]
+  }
+  const sorts = input.sorts
+  if (sorts !== undefined) {
+    if (!Array.isArray(sorts) || sorts.some((item) => !item || typeof item !== 'object' || typeof (item as Record<string, unknown>).field !== 'string' || !['asc', 'desc'].includes(String((item as Record<string, unknown>).direction)))) throw new Error('article query sorting is invalid')
+    query.sorts = sorts.map((item) => ({ field: (item as ArticleSort).field.trim(), direction: (item as ArticleSort).direction }))
+  }
+  const publishedFrom = query.publishedFrom as string | undefined
+  const publishedTo = query.publishedTo as string | undefined
+  if ((publishedFrom && Number.isNaN(Date.parse(publishedFrom))) || (publishedTo && Number.isNaN(Date.parse(publishedTo)))) throw new Error('article query date filter is invalid')
+  if (publishedFrom && publishedTo && publishedFrom > publishedTo) throw new Error('article query date range is invalid')
+  for (const [minimum, maximum] of [['readMin', 'readMax'], ['oldLikeMin', 'oldLikeMax'], ['shareMin', 'shareMax'], ['likeMin', 'likeMax'], ['commentMin', 'commentMax'], ['weCoinMin', 'weCoinMax'], ['mediaSecondsMin', 'mediaSecondsMax']] as const) {
+    if (typeof query[minimum] === 'number' && typeof query[maximum] === 'number' && query[minimum] > query[maximum]) throw new Error('article query range is invalid')
+  }
+  return query as ArticleQuery
+}
+
+export function saveExportHandoff(handoff: ExportHandoff): void {
+  try { window.sessionStorage.setItem(exportHandoffStorageKey, JSON.stringify(handoff)) } catch { /* Browser storage can be unavailable. */ }
+}
+
+export function consumeExportHandoff(): ExportHandoff | undefined {
+  try {
+    const raw = window.sessionStorage.getItem(exportHandoffStorageKey)
+    window.sessionStorage.removeItem(exportHandoffStorageKey)
+    if (!raw) return undefined
+    const value = JSON.parse(raw) as Partial<ExportHandoff>
+    return value.selection && typeof value.label === 'string' ? value as ExportHandoff : undefined
+  } catch { return undefined }
+}
+
+export function saveArticleQueryHandoff(query: ArticleQuery): void {
+  try { window.sessionStorage.setItem(articleQueryHandoffStorageKey, JSON.stringify(query)) } catch { /* Browser storage can be unavailable. */ }
+}
+
+export function consumeArticleQueryHandoff(): ArticleQuery | undefined {
+  try {
+    const raw = window.sessionStorage.getItem(articleQueryHandoffStorageKey)
+    window.sessionStorage.removeItem(articleQueryHandoffStorageKey)
+    if (!raw) return undefined
+    const value = JSON.parse(raw)
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as ArticleQuery : undefined
+  } catch { return undefined }
 }
 
 function normalizePage<T>(response: PaginatedResponse<T> | WorkspacePageResponse<T>): PaginatedResponse<T> {

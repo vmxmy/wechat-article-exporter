@@ -27,6 +27,23 @@ test('sanitized account and article selections remain browser-local', async ({ p
   await expectOnlyLoopbackRequests(page)
 })
 
+test('advanced article query and export handoff preserve typed local selections', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/articles')
+  await page.getByRole('textbox', { name: 'Account ID' }).fill('account-fixture')
+  await page.getByRole('textbox', { name: 'Minimum reads' }).fill('10')
+  await page.getByRole('button', { name: 'Apply filters' }).click()
+  await expect.poll(() => fixture.requests.some((request) => request === 'GET /api/v1/articles')).toBe(true)
+  await page.getByRole('button', { name: 'Export current matches' }).click()
+  await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Selection: Current matching filter' })).toBeVisible()
+  await page.getByRole('button', { name: 'Authorize default directory' }).click()
+  await page.getByRole('button', { name: 'Queue export' }).click()
+  await expect.poll(() => fixture.exports.length).toBe(1)
+  expect(JSON.parse(fixture.exports[0])).toMatchObject({ selection: { kind: 'all_matching', query: { accountId: 'account-fixture', readMin: 10 } } })
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('saved queries are created, updated, and deleted with scoped confirmation', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/saved-queries')

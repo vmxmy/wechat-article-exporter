@@ -17,6 +17,9 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 	if request.Method == http.MethodGet {
 		return false
 	}
+	if server.credentialUploadControl(writer, request) {
+		return true
+	}
 	if server.maintenanceControl(writer, request) {
 		return true
 	}
