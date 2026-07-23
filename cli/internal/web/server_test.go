@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -186,6 +187,34 @@ func TestSessionExpiryAndCancellationInvalidateCredentials(t *testing.T) {
 	}
 }
 
+func TestServerShutdownClearsOutstandingStagedRestoreUploads(t *testing.T) {
+	backend := &shutdownUploadBackend{}
+	uploads, err := application.NewUploadStaging(application.UploadStagingOptions{
+		Backend: backend,
+		NewID:   func() (application.UploadHandle, error) { return "upload-shutdown-1", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore, err := application.NewRestore(application.RestoreOptions{Uploads: uploads, Coordinator: shutdownRestoreCoordinator{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(Options{Application: testApplication{}, Restore: restore})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restore.Stage(context.Background(), strings.NewReader("archive"), int64(len("archive"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if backend.deletes != 1 {
+		t.Fatalf("shutdown deleted %d staged uploads, want 1", backend.deletes)
+	}
+}
+
 func newTestServer(t *testing.T, now func() time.Time) *Server {
 	t.Helper()
 	server, err := New(Options{Application: testApplication{}, Now: now})
@@ -298,6 +327,28 @@ func readResponse(t *testing.T, response *http.Response) string {
 }
 
 type testApplication struct{}
+
+type shutdownUploadBackend struct{ deletes int }
+
+func (backend *shutdownUploadBackend) Stage(_ context.Context, source io.Reader, _ int64) (application.UploadStagedObject, error) {
+	if _, err := io.ReadAll(source); err != nil {
+		return application.UploadStagedObject{}, err
+	}
+	return application.UploadStagedObject{Reference: "private"}, nil
+}
+func (backend *shutdownUploadBackend) Open(context.Context, application.UploadStagedObject) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(nil)), nil
+}
+func (backend *shutdownUploadBackend) Delete(context.Context, application.UploadStagedObject) error {
+	backend.deletes++
+	return nil
+}
+
+type shutdownRestoreCoordinator struct{}
+
+func (shutdownRestoreCoordinator) Restore(context.Context, io.Reader, application.RestoreConflictPolicy) (application.RestoreCompletion, error) {
+	return application.RestoreCompletion{}, nil
+}
 
 func (testApplication) RuntimeStatus(context.Context) (domain.RuntimeStatus, error) {
 	return domain.RuntimeStatus{Profile: "test"}, nil

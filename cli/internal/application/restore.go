@@ -84,6 +84,7 @@ type RestoreService struct {
 	mu           sync.Mutex
 	preparations map[string]issuedRestorePreparation
 	reserved     map[UploadHandle]string
+	closed       bool
 }
 
 func NewRestore(options RestoreOptions) (*RestoreService, error) {
@@ -124,6 +125,10 @@ func (service *RestoreService) Prepare(ctx context.Context, request RestorePrepa
 		return RestorePreparation{}, ErrRestoreConfirmationRequired
 	}
 	service.mu.Lock()
+	if service.closed {
+		service.mu.Unlock()
+		return RestorePreparation{}, ErrUnavailable
+	}
 	service.discardExpiredLocked(ctx)
 	service.mu.Unlock()
 	if _, err := service.uploads.Receipt(ctx, request.UploadHandle); err != nil {
@@ -139,7 +144,7 @@ func (service *RestoreService) Prepare(ctx context.Context, request RestorePrepa
 	}
 	expiresAt := service.now().Add(service.confirmationTTL)
 	service.mu.Lock()
-	if _, reserved := service.reserved[request.UploadHandle]; reserved {
+	if service.closed || service.reserved[request.UploadHandle] != "" {
 		service.mu.Unlock()
 		return RestorePreparation{}, ErrRestoreConfirmationRequired
 	}
@@ -164,6 +169,20 @@ func (service *RestoreService) Discard(ctx context.Context, handle UploadHandle)
 	return service.uploads.Discard(ctx, handle)
 }
 
+// Close abandons all outstanding restore confirmations and removes every
+// unconsumed staged archive without exposing backend paths to its caller.
+func (service *RestoreService) Close(ctx context.Context) error {
+	if service == nil || service.uploads == nil {
+		return ErrUnavailable
+	}
+	service.mu.Lock()
+	service.closed = true
+	service.preparations = make(map[string]issuedRestorePreparation)
+	service.reserved = make(map[UploadHandle]string)
+	service.mu.Unlock()
+	return service.uploads.Close(ctx)
+}
+
 func (service *RestoreService) Commit(ctx context.Context, request RestoreCommitRequest) (RestoreCompletion, error) {
 	if service == nil || service.uploads == nil || service.coordinator == nil {
 		return RestoreCompletion{}, ErrUnavailable
@@ -172,6 +191,10 @@ func (service *RestoreService) Commit(ctx context.Context, request RestoreCommit
 		return RestoreCompletion{}, ErrRestoreConfirmationRequired
 	}
 	service.mu.Lock()
+	if service.closed {
+		service.mu.Unlock()
+		return RestoreCompletion{}, ErrUnavailable
+	}
 	issued, found := service.preparations[request.PreparationID]
 	if found && (!issued.expiresAt.After(service.now()) || issued.confirmation != request.Confirmation) {
 		if !issued.expiresAt.After(service.now()) {

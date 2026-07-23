@@ -92,11 +92,92 @@ func TestUploadStagingEnforcesLimitsAndExpiresWithoutLeakingBackendErrors(t *tes
 	}
 }
 
+func TestUploadStagingPreStageReclaimsExpiryAndHonorsAggregateQuota(t *testing.T) {
+	backend := &memoryUploadBackend{}
+	now := time.Date(2026, 7, 24, 9, 0, 0, 0, time.UTC)
+	ids := []UploadHandle{"upload-quota-1", "upload-quota-2"}
+	service, err := NewUploadStaging(UploadStagingOptions{
+		Backend: backend,
+		Limits:  UploadStagingLimits{MaximumBytes: 4, MaximumUploads: 1, MaximumTotalBytes: 4, TTL: time.Minute},
+		Now:     func() time.Time { return now },
+		NewID: func() (UploadHandle, error) {
+			id := ids[0]
+			ids = ids[1:]
+			return id, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Stage(context.Background(), strings.NewReader("four"), 4); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Stage(context.Background(), strings.NewReader("next"), 4); err == nil || !strings.Contains(err.Error(), "capacity") {
+		t.Fatalf("aggregate quota Stage() error=%v", err)
+	}
+	now = now.Add(time.Minute)
+	if _, err := service.Stage(context.Background(), strings.NewReader("next"), 4); err != nil {
+		t.Fatalf("Stage() after pre-stage expiry reclamation: %v", err)
+	}
+	if backend.deleteCount != 1 {
+		t.Fatalf("expired upload delete count=%d, want 1", backend.deleteCount)
+	}
+}
+
+func TestUploadStagingCloseDeletesAllUploadsWithoutHoldingLock(t *testing.T) {
+	backend := &memoryUploadBackend{deleteStarted: make(chan struct{}), allowDelete: make(chan struct{})}
+	service, err := NewUploadStaging(UploadStagingOptions{
+		Backend: backend,
+		Limits:  UploadStagingLimits{MaximumBytes: 4, MaximumUploads: 2, MaximumTotalBytes: 8},
+		NewID:   uploadIDs("upload-close-1", "upload-close-2"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, archive := range []string{"one", "two"} {
+		if _, err := service.Stage(context.Background(), strings.NewReader(archive), int64(len(archive))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := make(chan error, 1)
+	go func() { done <- service.Close(context.Background()) }()
+	<-backend.deleteStarted
+	// The cleanup call is blocked in backend deletion. A concurrent operation
+	// must still acquire the staging lock rather than being serialized behind I/O.
+	receiptDone := make(chan struct{})
+	go func() {
+		_, _ = service.Receipt(context.Background(), "upload-close-1")
+		close(receiptDone)
+	}()
+	select {
+	case <-receiptDone:
+	case <-time.After(time.Second):
+		t.Fatal("Receipt blocked behind backend deletion")
+	}
+	close(backend.allowDelete)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if backend.deleteCount != 2 {
+		t.Fatalf("close delete count=%d, want 2", backend.deleteCount)
+	}
+}
+
+func uploadIDs(ids ...UploadHandle) func() (UploadHandle, error) {
+	return func() (UploadHandle, error) {
+		id := ids[0]
+		ids = ids[1:]
+		return id, nil
+	}
+}
+
 type memoryUploadBackend struct {
-	mu          sync.Mutex
-	data        map[string][]byte
-	stageErr    error
-	deleteCount int
+	mu            sync.Mutex
+	data          map[string][]byte
+	stageErr      error
+	deleteCount   int
+	deleteStarted chan struct{}
+	allowDelete   chan struct{}
 }
 
 func (backend *memoryUploadBackend) Stage(_ context.Context, source io.Reader, _ int64) (UploadStagedObject, error) {
@@ -123,6 +204,13 @@ func (backend *memoryUploadBackend) Open(_ context.Context, object UploadStagedO
 }
 
 func (backend *memoryUploadBackend) Delete(_ context.Context, object UploadStagedObject) error {
+	if backend.deleteStarted != nil {
+		select {
+		case backend.deleteStarted <- struct{}{}:
+		default:
+		}
+		<-backend.allowDelete
+	}
 	backend.mu.Lock()
 	defer backend.mu.Unlock()
 	delete(backend.data, "/private/staging/archive.wab")

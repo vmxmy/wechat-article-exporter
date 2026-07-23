@@ -73,6 +73,8 @@ type Server struct {
 	exportVerificationWindow time.Time
 	exportVerifications      int
 	terminalShutdown         sync.Once
+	cleanup                  sync.Once
+	cleanupErr               error
 }
 
 type session struct {
@@ -175,14 +177,14 @@ func (server *Server) Serve(ctx context.Context) error {
 	select {
 	case err := <-result:
 		server.invalidate()
-		return err
+		return errors.Join(err, server.cleanupRestore())
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), server.shutdownTimeout)
 		err := httpServer.Shutdown(shutdownCtx)
 		cancel()
 		server.invalidate()
 		serveErr := <-result
-		return errors.Join(err, serveErr)
+		return errors.Join(err, serveErr, server.cleanupRestore())
 	}
 }
 
@@ -204,12 +206,24 @@ func (server *Server) Close() error {
 				err = errors.Join(err, closeErr)
 			}
 		}
-		return err
+		return errors.Join(err, server.cleanupRestore())
 	}
 	if listener != nil {
-		return listener.Close()
+		return errors.Join(listener.Close(), server.cleanupRestore())
 	}
-	return nil
+	return server.cleanupRestore()
+}
+
+func (server *Server) cleanupRestore() error {
+	server.cleanup.Do(func() {
+		if server.restore == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), server.shutdownTimeout)
+		defer cancel()
+		server.cleanupErr = server.restore.Close(ctx)
+	})
+	return server.cleanupErr
 }
 
 func (server *Server) invalidate() {
@@ -294,6 +308,7 @@ func (server *Server) closeAfterRestore() {
 			if listener != nil {
 				_ = listener.Close()
 			}
+			_ = server.cleanupRestore()
 		}()
 	})
 }
