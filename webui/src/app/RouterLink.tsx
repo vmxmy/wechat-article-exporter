@@ -1,4 +1,5 @@
 import type { AnchorHTMLAttributes, MouseEvent, PropsWithChildren } from 'react'
+import { navigateTo } from './navigation'
 
 export function RouterLink({ children, href, onClick, ...props }: PropsWithChildren<AnchorHTMLAttributes<HTMLAnchorElement>>) {
   function navigate(event: MouseEvent<HTMLAnchorElement>) {
@@ -19,8 +20,7 @@ export function RouterLink({ children, href, onClick, ...props }: PropsWithChild
     }
 
     event.preventDefault()
-    window.history.pushState({}, '', href)
-    window.dispatchEvent(new PopStateEvent('popstate'))
+    navigateTo(href)
   }
 
   return <a {...props} href={href} onClick={navigate}>{children}</a>

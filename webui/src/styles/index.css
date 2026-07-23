@@ -15,20 +15,6 @@
 
   button, input { font: inherit; }
 
-  .skip-link {
-    position: fixed;
-    inset-block-start: var(--spacing-3);
-    inset-inline-start: var(--spacing-3);
-    z-index: 20;
-    transform: translateY(-200%);
-    padding: var(--spacing-2) var(--spacing-3);
-    border-radius: var(--radius-control);
-    color: var(--color-text-on-accent);
-    background: var(--color-accent);
-  }
-
-  .skip-link:focus { transform: translateY(0); }
-
   .workspace-header, .page-heading, .table-toolbar, .pagination {
     display: flex;
     align-items: center;

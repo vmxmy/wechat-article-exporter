@@ -5,10 +5,10 @@ test('keyboard-only navigation preserves skip focus and live login status', asyn
   await installLoopbackFixture(page)
   await page.goto('/login')
 
-  const skip = page.getByRole('link', { name: 'Skip to workspace content' })
+  const skip = page.getByRole('link', { name: 'Skip to content' })
   await focusWithKeyboard(page, skip)
   await page.keyboard.press('Enter')
-  await expect(page.locator('main')).toBeFocused()
+  await expect(page.getByRole('main')).toBeFocused()
 
   await focusWithKeyboard(page, page.getByRole('button', { name: 'Start QR login' }))
   await page.keyboard.press('Enter')
@@ -22,6 +22,43 @@ test('keyboard-only navigation preserves skip focus and live login status', asyn
   await page.keyboard.press('Enter')
   await expect(page.getByRole('status').filter({ hasText: 'Completed' })).toBeVisible()
   await expect(page.getByText('Authenticated', { exact: true })).toBeVisible()
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('SPA navigation keeps one main landmark and moves focus to each destination heading', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/login')
+
+  await expect(page.getByRole('main')).toHaveCount(1)
+  await page.getByRole('link', { name: 'Articles', exact: true }).click()
+  await expect(page).toHaveURL(/\/articles$/)
+  await expect(page.getByRole('heading', { name: 'Articles', level: 1 })).toBeFocused()
+
+  await page.goBack()
+  await expect(page).toHaveURL(/\/login$/)
+  await expect(page.getByRole('heading', { name: 'WeChat login', level: 1 })).toBeFocused()
+
+  await page.goForward()
+  await expect(page).toHaveURL(/\/articles$/)
+  await expect(page.getByRole('heading', { name: 'Articles', level: 1 })).toBeFocused()
+  await expect(page.getByRole('main')).toHaveCount(1)
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('article and album export handoffs use SPA navigation and focus the export heading', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/articles')
+
+  await page.getByRole('button', { name: 'Export current matches' }).click()
+  await expect(page).toHaveURL(/\/exports$/)
+  await expect(page.getByRole('heading', { name: 'Export articles', level: 1 })).toBeFocused()
+
+  await page.goto('/albums')
+  await page.getByRole('checkbox', { name: 'Select album-fixture-1' }).check()
+  await page.getByRole('button', { name: 'Export selected album' }).click()
+  await expect(page).toHaveURL(/\/exports$/)
+  await expect(page.getByRole('heading', { name: 'Export articles', level: 1 })).toBeFocused()
+  await expect(page.getByRole('main')).toHaveCount(1)
   await expectOnlyLoopbackRequests(page)
 })
 

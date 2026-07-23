@@ -8,6 +8,7 @@ import type { Locale, MessageCatalog } from '../../i18n'
 import { getArticlePreview, parseArticleQuery, saveArticleQueryHandoff, saveExportHandoff, type ArticleQuery, type ArticleRecord, type ArticleSort } from '../../lib/api'
 import { useArticlePage, useArticleResourceSummary } from '../../lib/queries'
 import { useWorkspaceMutations } from '../../lib/queries'
+import { navigateTo } from '../../app/navigation'
 
 interface ArticleTableProps {
   readonly locale: Locale
@@ -127,13 +128,11 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
       : { selection: { kind: 'all_matching' as const, query: { ...query, sorts: [activeSort] } }, label: messages.exports.selection.matchingLabel }
     if (!value) return
     saveExportHandoff(value)
-    window.history.pushState({}, '', '/exports')
-    window.dispatchEvent(new PopStateEvent('popstate'))
+    navigateTo('/exports')
   }
   const saveCurrentQuery = () => {
     saveArticleQueryHandoff({ ...query, sorts: [activeSort] })
-    window.history.pushState({}, '', '/saved-queries')
-    window.dispatchEvent(new PopStateEvent('popstate'))
+    navigateTo('/saved-queries')
   }
   const preview = () => {
     if (!selectedArticle) return

@@ -2,9 +2,10 @@ import { AppShell } from '@astryxdesign/core/AppShell'
 import { Button } from '@astryxdesign/core/Button'
 import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
-import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { Component, lazy, Suspense, useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import { type Locale, type MessageCatalog, useMessages } from '../i18n'
 import { useRuntimeStatus, useWorkspaceSnapshot } from '../lib/queries'
+import { navigationEvent } from './navigation'
 
 const ArticleTable = lazy(() => import('../features/articles/ArticleTable').then(({ ArticleTable }) => ({ default: ArticleTable })))
 const ImportPage = lazy(() => import('../features/import/ImportPage').then(({ ImportPage }) => ({ default: ImportPage })))
@@ -37,12 +38,31 @@ const navigation = [
 export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
   const messages = useMessages(locale)
   const [path, setPath] = useState(window.location.pathname)
+  const [navigationID, setNavigationID] = useState(0)
   const runtime = useRuntimeStatus()
 
   useEffect(() => {
-    const updatePath = () => setPath(window.location.pathname)
+    const updatePath = () => {
+      setPath(window.location.pathname)
+      setNavigationID((current) => current + 1)
+    }
     window.addEventListener('popstate', updatePath)
-    return () => window.removeEventListener('popstate', updatePath)
+    window.addEventListener(navigationEvent, updatePath)
+    return () => {
+      window.removeEventListener('popstate', updatePath)
+      window.removeEventListener(navigationEvent, updatePath)
+    }
+  }, [])
+
+  useEffect(() => {
+    const main = document.getElementById('astryx-app-shell-main')
+    const skipLink = document.querySelector<HTMLAnchorElement>('[data-testid="skip-to-content"]')
+    if (!main || !skipLink) return
+
+    main.tabIndex = -1
+    const focusMain = () => main.focus()
+    skipLink.addEventListener('click', focusMain)
+    return () => skipLink.removeEventListener('click', focusMain)
   }, [])
 
   const connection = getConnectionState(runtime.isSuccess, runtime.isError, messages)
@@ -73,7 +93,6 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
         </SideNav>
       }
     >
-      <a className="skip-link" href="#workspace-content">{messages.a11y.skip}</a>
       <header className="workspace-header">
         <div className="connection-state" role="status" aria-live="polite">
           <StatusDot variant={connection.variant} label={connection.label} isPulsing={runtime.isFetching} />
@@ -89,13 +108,15 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
           />
         </div>
       </header>
-      <main id="workspace-content" className="workspace-content" tabIndex={-1}>
+      <div className="workspace-content">
         <PageErrorBoundary key={path} messages={messages}>
           <Suspense fallback={<PageLoading messages={messages} />}>
-            {renderPage(path, locale, messages)}
+            <PageFocus key={navigationID} shouldFocus={navigationID > 0}>
+              {renderPage(path, locale, messages)}
+            </PageFocus>
           </Suspense>
         </PageErrorBoundary>
-      </main>
+      </div>
     </AppShell>
   )
 }
@@ -121,6 +142,18 @@ function getConnectionState(isSuccess: boolean, isError: boolean, messages: Mess
 
 function PageLoading({ messages }: { readonly messages: MessageCatalog }) {
   return <p role="status" aria-live="polite">{messages.connection.checking}</p>
+}
+
+function PageFocus({ children, shouldFocus }: { readonly children: ReactNode; readonly shouldFocus: boolean }) {
+  useLayoutEffect(() => {
+    if (!shouldFocus) return
+    const heading = document.querySelector<HTMLElement>('#astryx-app-shell-main h1')
+    if (!heading) return
+    heading.tabIndex = -1
+    heading.focus()
+  }, [shouldFocus])
+
+  return <>{children}</>
 }
 
 class PageErrorBoundary extends Component<{ readonly children: ReactNode; readonly messages: MessageCatalog }, { readonly hasError: boolean }> {
