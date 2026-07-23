@@ -206,13 +206,15 @@ test('saved queries are created, updated, and deleted with typed scoped confirma
   await expectOnlyLoopbackRequests(page)
 })
 
-test('job controls require typed proofs except resume and preserve keyboard cancellation', async ({ page }) => {
+test('job controls require typed proofs and disable unavailable actions', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/jobs')
   await expect(page.getByText('Running', { exact: true })).toBeVisible()
   await page.getByRole('checkbox', { name: 'Select job-fixture-1' }).check()
   await expect(page.getByRole('heading', { name: 'Task detail' })).toBeVisible()
   await expect(page.getByText('Sanitized local progress', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Resume selected task' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Retry selected task' })).toBeDisabled()
   await page.getByRole('button', { name: 'Refresh detail' }).click()
   await page.getByRole('button', { name: 'Pause selected task' }).click()
   const pauseConfirmation = page.getByRole('alertdialog', { name: 'Pause selected task' })
@@ -228,16 +230,12 @@ test('job controls require typed proofs except resume and preserve keyboard canc
   await expect.poll(() => fixture.controls.length).toBe(1)
   expect(fixture.controls[0]).toEqual({ path: '/api/v1/jobs/job-fixture-1/pause', confirmation: 'pause-job:job-fixture-1' })
 
-  const retryTrigger = page.getByRole('button', { name: 'Retry selected task' })
-  await retryTrigger.click()
-  const retryConfirmation = page.getByRole('alertdialog', { name: 'Retry selected task' })
-  await retryConfirmation.getByRole('textbox', { name: 'Exact confirmation for this task action' }).press('Escape')
-  await expect(retryConfirmation).toBeHidden()
-  await expect(retryTrigger).toBeFocused()
-
-  const resumeRequest = page.waitForRequest((candidate) => candidate.method() === 'POST' && candidate.url().endsWith('/api/v1/jobs/job-fixture-1/resume'))
-  await page.getByRole('button', { name: 'Resume selected task' }).click()
-  expect((await resumeRequest).postDataJSON()).toEqual({})
+  const cancelTrigger = page.getByRole('button', { name: 'Cancel selected task' })
+  await cancelTrigger.click()
+  const cancelConfirmation = page.getByRole('alertdialog', { name: 'Cancel selected task' })
+  await cancelConfirmation.getByRole('textbox', { name: 'Exact confirmation for this task action' }).press('Escape')
+  await expect(cancelConfirmation).toBeHidden()
+  await expect(cancelTrigger).toBeFocused()
   await expectOnlyLoopbackRequests(page)
 })
 
