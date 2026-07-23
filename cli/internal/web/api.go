@@ -46,6 +46,9 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 	if server.maintenanceRead(writer, request) {
 		return
 	}
+	if server.diagnosticBundleRead(writer, request) {
+		return
+	}
 
 	switch request.URL.Path {
 	case "/api/v1/runtime":
@@ -79,11 +82,20 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 			return
 		}
 		if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/jobs/"); ok {
-			if !validJobID(id) {
+			jobID, suffix, hasSuffix := strings.Cut(id, "/")
+			if hasSuffix && suffix != "detail" {
+				server.apiError(writer, http.StatusNotFound, "not_found", "workspace resource was not found")
+				return
+			}
+			if !validJobID(jobID) {
 				server.apiError(writer, http.StatusBadRequest, "invalid_argument", "job identifier is invalid")
 				return
 			}
-			server.job(writer, request, domain.JobID(id))
+			if hasSuffix {
+				server.jobDetails(writer, request, domain.JobID(jobID))
+				return
+			}
+			server.job(writer, request, domain.JobID(jobID))
 			return
 		}
 		server.apiError(writer, http.StatusNotFound, "not_found", "workspace resource was not found")
@@ -242,6 +254,19 @@ func (server *Server) job(writer http.ResponseWriter, request *http.Request, id 
 	writeAPI(writer, http.StatusOK, value)
 }
 
+func (server *Server) jobDetails(writer http.ResponseWriter, request *http.Request, id domain.JobID) {
+	if len(request.URL.Query()) != 0 {
+		server.apiError(writer, http.StatusBadRequest, "invalid_argument", "job detail does not accept query parameters")
+		return
+	}
+	value, err := server.workspace.JobDetails(request.Context(), id)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusOK, value)
+}
+
 func (server *Server) storage(writer http.ResponseWriter, request *http.Request) {
 	runtime, err := server.workspace.Runtime(request.Context())
 	if err != nil {
@@ -270,7 +295,7 @@ func (server *Server) snapshot(writer http.ResponseWriter, request *http.Request
 		server.workspaceError(writer, err)
 		return
 	}
-	writeAPI(writer, http.StatusOK, map[string]any{"runtime": runtime, "session": session, "storage": runtime.Storage, "jobs": jobs})
+	writeAPI(writer, http.StatusOK, map[string]any{"runtime": runtime, "session": session, "storage": runtime.Storage, "jobs": jobs, "checkedAt": runtime.CheckedAt})
 }
 
 func (server *Server) workspaceError(writer http.ResponseWriter, err error) {

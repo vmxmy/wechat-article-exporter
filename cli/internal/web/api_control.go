@@ -20,6 +20,9 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 	if server.maintenanceControl(writer, request) {
 		return true
 	}
+	if server.diagnosticBundleControl(writer, request) {
+		return true
+	}
 	switch request.URL.Path {
 	case "/api/v1/saved-queries":
 		switch request.Method {

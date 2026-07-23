@@ -38,6 +38,7 @@ type Options struct {
 	Exports            application.WorkspaceExportService
 	Maintenance        *application.MaintenanceService
 	StorageMaintenance *application.MaintenanceStorageService
+	DiagnosticBundles  *application.DiagnosticBundleService
 	SessionTTL         time.Duration
 	ShutdownTimeout    time.Duration
 	Now                func() time.Time
@@ -51,6 +52,7 @@ type Server struct {
 	exports            application.WorkspaceExportService
 	maintenance        *application.MaintenanceService
 	storageMaintenance *application.MaintenanceStorageService
+	diagnosticBundles  *application.DiagnosticBundleService
 	sessionTTL         time.Duration
 	shutdownTimeout    time.Duration
 	now                func() time.Time
@@ -94,7 +96,7 @@ func New(options Options) (*Server, error) {
 		return nil, fmt.Errorf("generate local browser bootstrap credential: %w", err)
 	}
 	return &Server{
-		application: options.Application, exports: options.Exports, maintenance: options.Maintenance, storageMaintenance: options.StorageMaintenance, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
+		application: options.Application, exports: options.Exports, maintenance: options.Maintenance, storageMaintenance: options.StorageMaintenance, diagnosticBundles: options.DiagnosticBundles, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
 		workspace: application.NewWorkspaceWithPreview(options.Application, options.Preview), now: options.Now, bootstrapToken: bootstrap,
 		sessions: make(map[string]session), serveCompleted: make(chan struct{}),
 	}, nil
