@@ -6,7 +6,6 @@ import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type Sortin
 import { useEffect, useMemo, useState } from 'react'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { getArticlePreview, parseArticleQuery, saveArticleQueryHandoff, saveExportHandoff, type ArticleQuery, type ArticleRecord, type ArticleSort } from '../../lib/api'
-import { handoffCreatedJob } from '../../lib/jobHandoff'
 import { useArticlePage, useArticleResourceSummary } from '../../lib/queries'
 import { useWorkspaceMutations } from '../../lib/queries'
 import { navigateTo } from '../../app/navigation'
@@ -119,10 +118,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   const startDownload = (kind: 'article' | 'metadata' | 'comments' | 'resources', force = false) => {
     if (selectedIDs.length === 0) return
     mutations.downloadArticles.mutate({ articleIds: selectedIDs, kind, force }, {
-      onSuccess: (job) => {
-        setNotice(`${kind}: ${job.id}`)
-        handoffCreatedJob(job)
-      },
+      onSuccess: (job) => setNotice(`${kind}: ${job.id}`),
       onError: () => setNotice(messages.articles.actions.failed)
     })
   }
@@ -261,11 +257,11 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
         {selectedArticle ? <ResourceSummary summary={resourceSummary} messages={messages} /> : null}
         <div className="action-button-group">
           <Button label={messages.articles.actions.preview} variant="secondary" isDisabled={!selectedArticle} onClick={preview} />
-          <Button label={messages.articles.actions.download} variant="primary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('article')} />
-          <Button label={messages.articles.actions.metadata} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('metadata')} />
-          <Button label={messages.articles.actions.comments} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('comments')} />
-          <Button label={messages.articles.actions.resources} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('resources')} />
-          <Button label={messages.articles.actions.forceResources} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={!selectedArticle} onClick={() => startDownload('resources', true)} />
+          <Button label={messages.articles.actions.download} variant="primary" isDisabled={selectedIDs.length === 0} onClick={() => startDownload('article')} />
+          <Button label={messages.articles.actions.metadata} variant="secondary" isDisabled={selectedIDs.length === 0} onClick={() => startDownload('metadata')} />
+          <Button label={messages.articles.actions.comments} variant="secondary" isDisabled={selectedIDs.length === 0} onClick={() => startDownload('comments')} />
+          <Button label={messages.articles.actions.resources} variant="secondary" isDisabled={selectedIDs.length === 0} onClick={() => startDownload('resources')} />
+          <Button label={messages.articles.actions.forceResources} variant="secondary" isDisabled={!selectedArticle} onClick={() => startDownload('resources', true)} />
           <Button label={messages.articles.actions.exportSelected} variant="primary" isDisabled={selectedIDs.length === 0} onClick={() => handoffExport('selected')} />
           <Button label={messages.articles.actions.exportMatching} variant="secondary" onClick={() => handoffExport('matching')} />
           <Button label={messages.articles.actions.saveQuery} variant="secondary" onClick={saveCurrentQuery} />
