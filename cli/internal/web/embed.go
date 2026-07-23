@@ -80,6 +80,7 @@ func serveEmbeddedAsset(writer http.ResponseWriter, request *http.Request) {
 }
 
 func serveEmbeddedFile(writer http.ResponseWriter, request *http.Request, name string) {
+	setAssetCacheControl(writer.Header(), name)
 	file, err := embeddedAssetFS().Open(name)
 	if err != nil {
 		http.NotFound(writer, request)
@@ -97,6 +98,17 @@ func serveEmbeddedFile(writer http.ResponseWriter, request *http.Request, name s
 		return
 	}
 	http.ServeContent(writer, request, name, info.ModTime(), reader)
+}
+
+// setAssetCacheControl permits long-lived caching only for assets whose
+// content hash is part of their validated filename. The application shell is
+// intentionally not cached: it carries the current asset references and is
+// used for every SPA fallback route.
+func setAssetCacheControl(header http.Header, name string) {
+	if fingerprintedAsset(name) {
+		header.Set("Cache-Control", "public, max-age=31536000, immutable")
+		header.Del("Pragma")
+	}
 }
 
 func assetRequestPath(requestPath string) (string, bool) {

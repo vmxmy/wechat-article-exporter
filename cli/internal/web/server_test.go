@@ -81,10 +81,18 @@ func TestAuthenticatedWorkspaceServesEmbeddedAssetsAndSPAFallback(t *testing.T) 
 	if !strings.Contains(indexBody, "/"+entrypoint.File) || !strings.Contains(indexBody, "/"+entrypoint.CSS[0]) {
 		t.Fatalf("embedded index did not reference manifest entrypoint")
 	}
+	assertSecurityHeaders(t, index.Header)
 
 	asset := get(t, client, base+"/"+entrypoint.File)
 	if asset.StatusCode != http.StatusOK || !strings.HasPrefix(asset.Header.Get("Content-Type"), "text/javascript") {
 		t.Fatalf("GET entrypoint status=%d content-type=%q", asset.StatusCode, asset.Header.Get("Content-Type"))
+	}
+	assertSecurityHeadersExceptCacheControl(t, asset.Header)
+	if got := asset.Header.Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("entrypoint Cache-Control = %q; want immutable cache policy", got)
+	}
+	if got := asset.Header.Get("Pragma"); got != "" {
+		t.Fatalf("entrypoint Pragma = %q; want absent so immutable assets remain cacheable", got)
 	}
 	if body := readResponse(t, asset); body == "" {
 		t.Fatal("embedded entrypoint was empty")
@@ -94,6 +102,7 @@ func TestAuthenticatedWorkspaceServesEmbeddedAssetsAndSPAFallback(t *testing.T) 
 	if fallback.StatusCode != http.StatusOK {
 		t.Fatalf("GET SPA route status = %d; want 200", fallback.StatusCode)
 	}
+	assertSecurityHeaders(t, fallback.Header)
 	if body := readResponse(t, fallback); body != indexBody {
 		t.Fatal("SPA fallback did not serve the embedded application shell")
 	}
@@ -309,6 +318,18 @@ func assertSecurityHeaders(t *testing.T, header http.Header) {
 	for key, want := range map[string]string{
 		"Content-Security-Policy": "frame-ancestors 'none'", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
 		"X-Frame-Options": "DENY", "Cache-Control": "no-store",
+	} {
+		if got := header.Get(key); !strings.Contains(got, want) {
+			t.Fatalf("%s = %q; want %q", key, got, want)
+		}
+	}
+}
+
+func assertSecurityHeadersExceptCacheControl(t *testing.T, header http.Header) {
+	t.Helper()
+	for key, want := range map[string]string{
+		"Content-Security-Policy": "frame-ancestors 'none'", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
+		"X-Frame-Options": "DENY",
 	} {
 		if got := header.Get(key); !strings.Contains(got, want) {
 			t.Fatalf("%s = %q; want %q", key, got, want)

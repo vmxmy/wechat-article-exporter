@@ -42,11 +42,26 @@ func TestFingerprintedAsset(t *testing.T) {
 func TestAssetHandlerServesAssetsAndSPAFallback(t *testing.T) {
 	handler := AssetHandler()
 	manifest := mustEmbeddedManifest(t)
-	for target, wantContentType := range map[string]string{
-		"/":                                 "text/html",
-		"/articles":                         "text/html",
-		"/" + manifest["index.html"].File:   "text/javascript",
-		"/" + manifest["index.html"].CSS[0]: "text/css",
+	for target, want := range map[string]struct {
+		contentType  string
+		cacheControl string
+	}{
+		"/": {
+			contentType:  "text/html",
+			cacheControl: "",
+		},
+		"/articles": {
+			contentType:  "text/html",
+			cacheControl: "",
+		},
+		"/" + manifest["index.html"].File: {
+			contentType:  "text/javascript",
+			cacheControl: "public, max-age=31536000, immutable",
+		},
+		"/" + manifest["index.html"].CSS[0]: {
+			contentType:  "text/css",
+			cacheControl: "public, max-age=31536000, immutable",
+		},
 	} {
 		t.Run(target, func(t *testing.T) {
 			response := httptest.NewRecorder()
@@ -54,8 +69,11 @@ func TestAssetHandlerServesAssetsAndSPAFallback(t *testing.T) {
 			if response.Code != http.StatusOK {
 				t.Fatalf("GET %s status = %d; want 200", target, response.Code)
 			}
-			if got := response.Header().Get("Content-Type"); !strings.HasPrefix(got, wantContentType) {
-				t.Fatalf("GET %s Content-Type = %q; want prefix %q", target, got, wantContentType)
+			if got := response.Header().Get("Content-Type"); !strings.HasPrefix(got, want.contentType) {
+				t.Fatalf("GET %s Content-Type = %q; want prefix %q", target, got, want.contentType)
+			}
+			if got := response.Header().Get("Cache-Control"); got != want.cacheControl {
+				t.Fatalf("GET %s Cache-Control = %q; want %q", target, got, want.cacheControl)
 			}
 		})
 	}
