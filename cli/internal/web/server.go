@@ -19,14 +19,15 @@ import (
 )
 
 const (
-	bootstrapTokenBytes = 32
-	sessionTokenBytes   = 32
-	csrfTokenBytes      = 32
-	defaultSessionTTL   = 30 * time.Minute
-	defaultShutdownWait = 5 * time.Second
-	maxMutationBytes    = 64 << 10
-	sessionCookieName   = "wechat_article_session"
-	csrfCookieName      = "wechat_article_csrf"
+	bootstrapTokenBytes   = 32
+	sessionTokenBytes     = 32
+	csrfTokenBytes        = 32
+	defaultSessionTTL     = 30 * time.Minute
+	defaultShutdownWait   = 5 * time.Second
+	maxMutationBytes      = 64 << 10
+	maxRestoreUploadBytes = 2 << 30
+	sessionCookieName     = "wechat_article_session"
+	csrfCookieName        = "wechat_article_csrf"
 )
 
 // Options are intentionally limited to presentation-safe application seams.
@@ -39,6 +40,7 @@ type Options struct {
 	Maintenance        *application.MaintenanceService
 	StorageMaintenance *application.MaintenanceStorageService
 	DiagnosticBundles  *application.DiagnosticBundleService
+	Restore            *application.RestoreService
 	SessionTTL         time.Duration
 	ShutdownTimeout    time.Duration
 	Now                func() time.Time
@@ -53,6 +55,7 @@ type Server struct {
 	maintenance        *application.MaintenanceService
 	storageMaintenance *application.MaintenanceStorageService
 	diagnosticBundles  *application.DiagnosticBundleService
+	restore            *application.RestoreService
 	sessionTTL         time.Duration
 	shutdownTimeout    time.Duration
 	now                func() time.Time
@@ -69,6 +72,7 @@ type Server struct {
 
 	exportVerificationWindow time.Time
 	exportVerifications      int
+	terminalShutdown         sync.Once
 }
 
 type session struct {
@@ -96,7 +100,7 @@ func New(options Options) (*Server, error) {
 		return nil, fmt.Errorf("generate local browser bootstrap credential: %w", err)
 	}
 	return &Server{
-		application: options.Application, exports: options.Exports, maintenance: options.Maintenance, storageMaintenance: options.StorageMaintenance, diagnosticBundles: options.DiagnosticBundles, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
+		application: options.Application, exports: options.Exports, maintenance: options.Maintenance, storageMaintenance: options.StorageMaintenance, diagnosticBundles: options.DiagnosticBundles, restore: options.Restore, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
 		workspace: application.NewWorkspaceWithPreview(options.Application, options.Preview), now: options.Now, bootstrapToken: bootstrap,
 		sessions: make(map[string]session), serveCompleted: make(chan struct{}),
 	}, nil
@@ -230,6 +234,13 @@ func validateLoopbackListener(listener net.Listener) error {
 
 func (server *Server) handler() http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		server.mu.Lock()
+		closed := server.closed
+		server.mu.Unlock()
+		if closed {
+			server.error(writer, http.StatusServiceUnavailable)
+			return
+		}
 		setSecurityHeaders(writer.Header())
 		if !server.validRequestTarget(request) {
 			server.error(writer, http.StatusMisdirectedRequest)
@@ -237,7 +248,7 @@ func (server *Server) handler() http.Handler {
 		}
 		if strings.HasPrefix(request.URL.Path, "/api/") && request.URL.Path != "/api/v1/status" {
 			if request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodPatch || request.Method == http.MethodDelete {
-				if !server.validMutationShape(request) {
+				if request.URL.Path != "/api/v1/maintenance/restore/upload" && !server.validMutationShape(request) {
 					server.error(writer, http.StatusUnsupportedMediaType)
 					return
 				}
@@ -262,6 +273,28 @@ func (server *Server) handler() http.Handler {
 		default:
 			server.workspaceAsset(writer, request)
 		}
+	})
+}
+
+// closeAfterRestore invalidates all credentials and drains the listener only
+// after the successful completion response has been committed to the client.
+func (server *Server) closeAfterRestore() {
+	server.terminalShutdown.Do(func() {
+		go func() {
+			server.invalidate()
+			server.mu.Lock()
+			httpServer := server.httpServer
+			listener := server.listener
+			server.mu.Unlock()
+			if httpServer != nil {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), server.shutdownTimeout)
+				_ = httpServer.Shutdown(shutdownCtx)
+				cancel()
+			}
+			if listener != nil {
+				_ = listener.Close()
+			}
+		}()
 	})
 }
 

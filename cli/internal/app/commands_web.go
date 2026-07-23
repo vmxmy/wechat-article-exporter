@@ -31,9 +31,13 @@ func (a *App) webCommand() *cobra.Command {
 			preview := newWorkspaceExtensions(a).(application.WorkspaceArticlePreviewRenderer)
 			maintenance, storageMaintenance := newWebMaintenance(a)
 			diagnosticBundles := newWebDiagnosticBundles(a)
+			restore, err := newWebRestore(a)
+			if err != nil {
+				return err
+			}
 			server, err := localweb.New(localweb.Options{
 				Application: a.core, Exports: exports, Preview: preview,
-				Maintenance: maintenance, StorageMaintenance: storageMaintenance, DiagnosticBundles: diagnosticBundles,
+				Maintenance: maintenance, StorageMaintenance: storageMaintenance, DiagnosticBundles: diagnosticBundles, Restore: restore,
 			})
 			if err != nil {
 				return err

@@ -177,6 +177,33 @@ func (service *UploadStagingService) Consume(ctx context.Context, handle UploadH
 	return &consumedUpload{ReadCloser: reader, cleanup: func() { _ = service.backend.Delete(context.Background(), upload.object) }}, upload.receipt, nil
 }
 
+// Receipt validates that a staged upload is still available without consuming
+// it. It is used only to bind a later confirmation; callers still need Consume
+// to access bytes.
+func (service *UploadStagingService) Receipt(_ context.Context, handle UploadHandle) (UploadReceipt, error) {
+	if service == nil || service.backend == nil {
+		return UploadReceipt{}, errors.New("upload staging is unavailable")
+	}
+	if !validUploadHandle(handle) {
+		return UploadReceipt{}, errors.New("upload handle is invalid")
+	}
+	service.mu.Lock()
+	upload, exists := service.uploads[handle]
+	expired := exists && !service.now().Before(upload.expiresAt)
+	if expired {
+		delete(service.uploads, handle)
+	}
+	service.mu.Unlock()
+	if expired {
+		_ = service.backend.Delete(context.Background(), upload.object)
+		exists = false
+	}
+	if !exists {
+		return UploadReceipt{}, errors.New("upload handle is unavailable")
+	}
+	return upload.receipt, nil
+}
+
 // Discard removes an unconsumed upload. Unknown and already-consumed handles
 // are deliberately idempotent to simplify adapter cleanup paths.
 func (service *UploadStagingService) Discard(ctx context.Context, handle UploadHandle) error {
