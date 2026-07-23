@@ -31,6 +31,30 @@ test('sanitized account and article selections remain browser-local', async ({ p
   await expectOnlyLoopbackRequests(page)
 })
 
+test('discovery candidates populate the explicit account save form before sync is available', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/accounts')
+
+  await page.getByRole('textbox', { name: 'Search discovery' }).fill('fixture')
+  await page.getByRole('button', { name: 'Discover account' }).click()
+  const results = page.getByRole('region', { name: 'Discovery results' })
+  await expect(results.getByText('Discovered Fixture Account', { exact: true })).toBeVisible()
+  await expect(results).not.toContainText('fixture-discovered')
+  await expect(results).not.toContainText('discovery-opaque-id')
+  await results.getByRole('button', { name: 'Use candidate' }).click()
+
+  await expect(page.getByRole('textbox', { name: 'Account fakeid' })).toHaveValue('fixture-discovered')
+  await expect(page.getByRole('textbox', { name: 'Account name' })).toHaveValue('Discovered Fixture Account')
+  await expect(page.getByRole('textbox', { name: 'Alias' })).toHaveValue('discovered')
+  await page.getByRole('button', { name: 'Save account' }).click()
+  await expect.poll(() => fixture.savedAccounts).toEqual([{ fakeid: 'fixture-discovered', name: 'Discovered Fixture Account', alias: 'discovered' }])
+  await expect(page.getByText('Saved Discovered Fixture Account. You can now start synchronization.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Sync selected account' })).toBeEnabled()
+  await page.getByRole('button', { name: 'Sync selected account' }).click()
+  await expect.poll(() => fixture.accountSyncs).toEqual(['/api/v1/accounts/account-discovered/sync'])
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('article resource completeness only exposes aggregate counts and queues missing or forced downloads', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/articles')
@@ -86,7 +110,9 @@ test('advanced article query and export handoff preserve typed local selections'
   await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
   await expect(page.getByRole('status').filter({ hasText: 'Selection: Current matching filter' })).toBeVisible()
   await page.getByRole('button', { name: 'Authorize default directory' }).click()
+  const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
   await page.getByRole('button', { name: 'Queue export' }).click()
+  await jobHandoff
   await expect.poll(() => fixture.exports.length).toBe(1)
   expect(JSON.parse(fixture.exports[0])).toMatchObject({ selection: { kind: 'all_matching', query: { accountId: 'account-fixture', readMin: 10 } } })
   await expectOnlyLoopbackRequests(page)
@@ -103,7 +129,9 @@ test('selected album export handoff queues an opaque album selection', async ({ 
   await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
   await expect(page.getByRole('status').filter({ hasText: 'Selection: Album album-fixture-1' })).toBeVisible()
   await page.getByRole('button', { name: 'Authorize default directory' }).click()
+  const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
   await page.getByRole('button', { name: 'Queue export' }).click()
+  await jobHandoff
   await expect.poll(() => fixture.exports.length).toBe(1)
   expect(JSON.parse(fixture.exports[0])).toMatchObject({ selection: { kind: 'album', albumId: 'album-fixture-1' } })
   await expectOnlyLoopbackRequests(page)
@@ -128,7 +156,7 @@ test('account deletion requires a typed exact proof and returns focus when cance
   await page.getByRole('checkbox', { name: 'Select account-fixture' }).check()
   const deleteButton = page.getByRole('button', { name: 'Delete selected account' })
   await deleteButton.click()
-  const dialog = page.getByRole('dialog', { name: 'Delete selected accounts' })
+  const dialog = page.getByRole('alertdialog', { name: 'Delete selected accounts' })
   const confirmation = dialog.getByRole('textbox', { name: 'Exact confirmation to delete these accounts' })
   const confirmButton = dialog.getByRole('button', { name: 'Delete accounts' })
   await expect(confirmation).toBeFocused()
@@ -161,7 +189,7 @@ test('saved queries are created, updated, and deleted with typed scoped confirma
   await page.getByRole('button', { name: 'Save query' }).click()
   await expect(page.getByRole('button', { name: 'Load selected query' })).toBeEnabled()
   await page.getByRole('button', { name: 'Delete selected query' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Delete saved query' })
+  const dialog = page.getByRole('alertdialog', { name: 'Delete saved query' })
   await expect(dialog).toBeVisible()
   const confirmation = dialog.getByRole('textbox', { name: 'Exact confirmation to delete this saved query' })
   const deleteQuery = dialog.getByRole('button', { name: 'Delete query' })
@@ -187,7 +215,7 @@ test('job controls require typed proofs except resume and preserve keyboard canc
   await expect(page.getByText('Sanitized local progress', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Refresh detail' }).click()
   await page.getByRole('button', { name: 'Pause selected task' }).click()
-  const pauseConfirmation = page.getByRole('dialog', { name: 'Pause selected task' })
+  const pauseConfirmation = page.getByRole('alertdialog', { name: 'Pause selected task' })
   await expect(pauseConfirmation).toBeVisible()
   const pauseProof = pauseConfirmation.getByRole('textbox', { name: 'Exact confirmation for this task action' })
   const pauseButton = pauseConfirmation.getByRole('button', { name: 'Pause selected task' })
@@ -202,7 +230,7 @@ test('job controls require typed proofs except resume and preserve keyboard canc
 
   const retryTrigger = page.getByRole('button', { name: 'Retry selected task' })
   await retryTrigger.click()
-  const retryConfirmation = page.getByRole('dialog', { name: 'Retry selected task' })
+  const retryConfirmation = page.getByRole('alertdialog', { name: 'Retry selected task' })
   await retryConfirmation.getByRole('textbox', { name: 'Exact confirmation for this task action' }).press('Escape')
   await expect(retryConfirmation).toBeHidden()
   await expect(retryTrigger).toBeFocused()
@@ -231,10 +259,12 @@ test('sanitized export flow authorizes a directory, downloads an artifact, opens
   })
   await expect(articleIDs).toHaveValue('article-fixture-1')
   await expect(page.getByRole('button', { name: 'Queue export' })).toBeEnabled()
+  const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
   await page.getByRole('button', { name: 'Queue export' }).click()
-  await expect(page.getByText('Export queued. Job ID: job-export-fixture')).toBeVisible()
+  await jobHandoff
   expect(fixture.exports).toHaveLength(1)
   expect(fixture.exports[0]).toContain('dir-sanitized')
+  await page.goto('/exports')
   const exportRecord = page.getByRole('checkbox', { name: 'Select export export-fixture-1' })
   await exportRecord.evaluate((element) => (element as HTMLInputElement).click())
   await expect(exportRecord).toBeChecked()
@@ -264,6 +294,22 @@ test('sanitized export flow authorizes a directory, downloads an artifact, opens
   await expect(page.getByText('Valid: 1 output verified.')).toBeVisible()
   await expectOnlyLoopbackRequests(page)
 })
+
+test('import job creation navigates directly to the selected task', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.route('**/api/v1/ingest/url', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(createdJob('job-import-fixture', 'import')) }))
+  await page.goto('/import')
+
+  await page.getByRole('textbox', { name: 'Article URL' }).fill('https://mp.weixin.qq.com/s/sanitized-import')
+  const importHandoff = page.waitForURL('**/jobs?job=job-import-fixture')
+  await page.getByRole('button', { name: 'Import URL' }).click()
+  await importHandoff
+  await expectOnlyLoopbackRequests(page)
+})
+
+function createdJob(id: string, kind: string) {
+  return { id, kind, state: 'queued', profile: 'fixture-profile', createdAt: '2026-07-24T09:30:00.000Z', updatedAt: '2026-07-24T09:30:00.000Z', counts: { completed: 0, total: 1 } }
+}
 
 test('sanitized settings and storage maintenance flows do not reveal secrets', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
