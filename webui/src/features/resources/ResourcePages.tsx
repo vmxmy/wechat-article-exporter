@@ -38,6 +38,21 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   const actions = messages.resources.accounts.actions
   const one = selected.length === 1 ? selected[0] : undefined
   const accountInput = { fakeid: fakeid.trim(), name: name.trim(), alias: alias.trim() || undefined }
+  const selectDiscoveryCandidate = (account: AccountRecord) => {
+    setFakeid(account.fakeid?.trim() ?? '')
+    setName(account.name)
+    setAlias(account.alias ?? '')
+    setNotice(actions.candidateSelected(account.name))
+  }
+  const saveAccount = () => {
+    mutations.saveAccount.mutate(accountInput, {
+      onSuccess: (account) => {
+        setSelected([account.id])
+        setNotice(actions.saved(account.name))
+      },
+      onError: () => setNotice(actions.actionFailed)
+    })
+  }
   const importManifest = (manifest: File | undefined) => {
     if (!manifest) return
     mutations.uploadAccountManifest.mutate(manifest, {
@@ -301,6 +316,11 @@ function formatCounts(value: Readonly<Record<string, number>> | undefined) {
   if (!value) return '—'
   const entries = Object.entries(value)
   return entries.length === 0 ? '—' : entries.map(([key, count]) => `${key}: ${count}`).join(' · ')
+}
+
+function readJobHandoff(): string | undefined {
+  const queryID = new URLSearchParams(window.location.search).get('job')?.trim()
+  return queryID || loadJobHandoff()?.id.trim()
 }
 
 function formatQuery(value: Readonly<Record<string, unknown>> | undefined) {

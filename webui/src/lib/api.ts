@@ -75,6 +75,7 @@ export interface SessionStatus {
 
 export interface AccountRecord {
   readonly id: string
+  readonly fakeid?: string
   readonly name: string
   readonly alias?: string
   readonly description?: string

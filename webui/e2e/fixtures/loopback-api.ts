@@ -7,6 +7,8 @@ export interface LoopbackFixture {
   readonly requests: readonly string[]
   readonly controls: readonly { readonly path: string; readonly confirmation?: string }[]
   readonly accountDeletions: readonly unknown[]
+  readonly savedAccounts: readonly unknown[]
+  readonly accountSyncs: readonly string[]
   readonly exports: readonly string[]
   readonly accountManifestImports: readonly unknown[]
   readonly preferencePatches: readonly unknown[]
@@ -21,6 +23,8 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
   const requests: string[] = []
   const controls: Array<{ path: string; confirmation?: string }> = []
   const accountDeletions: unknown[] = []
+  const savedAccounts: unknown[] = []
+  const accountSyncs: string[] = []
   const exports: string[] = []
   const accountManifestImports: unknown[] = []
   const preferencePatches: unknown[] = []
@@ -54,6 +58,8 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       gcPlan,
       controls,
       accountDeletions,
+      savedAccounts,
+      accountSyncs,
       exports,
       accountManifestImports,
       preferencePatches,
@@ -70,7 +76,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       ,onSavedQueries: (next) => { savedQueries = next }
     })
   })
-  return { requests, controls, accountDeletions, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, proxyRemovals, resourceDownloads, albumTraversals }
+  return { requests, controls, accountDeletions, savedAccounts, accountSyncs, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, proxyRemovals, resourceDownloads, albumTraversals }
 }
 
 export async function expectOnlyLoopbackRequests(page: Page) {
@@ -91,6 +97,8 @@ interface State {
   readonly gcPlan: boolean
   readonly controls: Array<{ path: string; confirmation?: string }>
   readonly accountDeletions: unknown[]
+  readonly savedAccounts: unknown[]
+  readonly accountSyncs: string[]
   readonly exports: string[]
   readonly accountManifestImports: unknown[]
   readonly preferencePatches: unknown[]
@@ -130,7 +138,16 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
     state.accountDeletions.push(body)
     return route.fulfill({ status: 204, body: '' })
   }
-  if (url.pathname === '/api/v1/accounts' || url.pathname === '/api/v1/accounts/search') return page(route, [{ id: 'account-fixture', name: 'Fixture Account', alias: 'fixture', articleCount: 2, lastSyncAt: now, syncCompleted: true }])
+  if (url.pathname === '/api/v1/accounts' && method === 'POST') {
+    state.savedAccounts.push(body)
+    return json(route, { id: 'account-discovered', fakeid: body?.fakeid, name: body?.name, alias: body?.alias, articleCount: 0, syncCompleted: false })
+  }
+  if (url.pathname === '/api/v1/accounts/account-discovered/sync' && method === 'POST') {
+    state.accountSyncs.push(url.pathname)
+    return json(route, { id: 'job-account-sync-fixture', kind: 'account_sync', state: 'queued', createdAt: now, updatedAt: now })
+  }
+  if (url.pathname === '/api/v1/accounts') return page(route, [{ id: 'account-fixture', fakeid: 'fixture-account', name: 'Fixture Account', alias: 'fixture', articleCount: 2, lastSyncAt: now, syncCompleted: true }])
+  if (url.pathname === '/api/v1/accounts/search') return page(route, [{ id: 'discovery-opaque-id', fakeid: 'fixture-discovered', name: 'Discovered Fixture Account', alias: 'discovered', articleCount: 0, syncCompleted: false }])
   if (url.pathname === '/api/v1/accounts/manifest') return route.fulfill({ contentType: 'application/json', headers: { 'content-disposition': 'attachment; filename="wechat-article-accounts-manifest.json"' }, body: '{"schemaVersion":1,"accounts":[]}' })
   if (url.pathname === '/api/v1/accounts/manifest/upload') return json(route, { handle: 'account-manifest-upload-fixture', sizeBytes: 24, sha256: 'e'.repeat(64), expiresAt: '2026-07-24T09:45:00.000Z' })
   if (url.pathname === '/api/v1/accounts/manifest/import') { state.accountManifestImports.push(body); return json(route, { report: { added: 1, merged: 2, unchanged: 3 } }) }
