@@ -63,6 +63,15 @@ type ArticleResourceAvailability struct {
 	Available int
 }
 
+// ArticleResourceDetail is a safe presentation projection. Resource IDs,
+// source/original URLs, object digests, media types, and host paths remain in
+// the repository and must not cross an adapter boundary.
+type ArticleResourceDetail struct {
+	Role      string
+	Ordinal   int
+	Available bool
+}
+
 type ExportSnapshotRecord struct {
 	Article   domain.Article
 	Content   ContentVersion
@@ -380,6 +389,40 @@ WHERE ar.article_id=? AND r.profile_id=?`, articleID, database.profileID).Scan(&
 		return ArticleResourceAvailability{}, err
 	}
 	return availability, nil
+}
+
+// ListArticleResourceDetails returns a bounded, profile-scoped page of safe
+// resource state for one article. An absent article is distinguished from an
+// article with no discovered resources.
+func (database *Database) ListArticleResourceDetails(ctx context.Context, articleID domain.ArticleID, offset, limit int) (domain.Page[ArticleResourceDetail], error) {
+	var exists int
+	if err := database.db.QueryRowContext(ctx, `SELECT 1 FROM articles WHERE profile_id=? AND id=?`, database.profileID, articleID).Scan(&exists); err != nil {
+		return domain.Page[ArticleResourceDetail]{}, err
+	}
+	var total int
+	if err := database.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM article_resources ar JOIN resources r ON r.id=ar.resource_id
+WHERE ar.article_id=? AND r.profile_id=?`, articleID, database.profileID).Scan(&total); err != nil {
+		return domain.Page[ArticleResourceDetail]{}, err
+	}
+	rows, err := database.db.QueryContext(ctx, `SELECT ar.role, ar.ordinal, CASE WHEN r.status='available' THEN 1 ELSE 0 END
+FROM article_resources ar JOIN resources r ON r.id=ar.resource_id
+WHERE ar.article_id=? AND r.profile_id=? ORDER BY ar.role, ar.ordinal, ar.resource_id LIMIT ? OFFSET ?`, articleID, database.profileID, limit, offset)
+	if err != nil {
+		return domain.Page[ArticleResourceDetail]{}, err
+	}
+	defer rows.Close()
+	items := make([]ArticleResourceDetail, 0)
+	for rows.Next() {
+		var item ArticleResourceDetail
+		if err := rows.Scan(&item.Role, &item.Ordinal, &item.Available); err != nil {
+			return domain.Page[ArticleResourceDetail]{}, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.Page[ArticleResourceDetail]{}, err
+	}
+	return domain.Page[ArticleResourceDetail]{Items: items, Total: total, Offset: offset, Limit: limit}, nil
 }
 
 func (database *Database) CommitResource(

@@ -55,16 +55,22 @@ test('discovery candidates populate the explicit account save form before sync i
   await expectOnlyLoopbackRequests(page)
 })
 
-test('article resource completeness only exposes aggregate counts and queues missing or forced downloads', async ({ page }) => {
+test('article metrics and resource details stay bounded and sanitized while resource actions queue jobs', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/articles')
   await page.getByRole('checkbox', { name: 'Select Sanitized article one' }).check()
   await expect(page.getByRole('heading', { name: 'Resource availability' })).toBeVisible()
   await expect(page.getByText('4 resources · 3 available · 1 missing')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Article details' })).toBeVisible()
+  await expect(page.getByText('120 reads · 3 old likes · 4 likes · 5 shares · 6 comments', { exact: false })).toBeVisible()
+  await expect(page.getByText('image #1 · available locally')).toBeVisible()
+  await expect(page.getByText('image #2 · missing locally')).toBeVisible()
+  await expect(page.getByText('Showing 2 of 4 resources.')).toBeVisible()
   await expect(page.locator('body')).not.toContainText('https://sensitive.example/resource')
   await expect(page.locator('body')).not.toContainText('sensitive-resource-digest')
   await expect(page.locator('body')).not.toContainText('/sensitive/resource/path')
   await expect(page.locator('body')).not.toContainText('sensitive-resource-id')
+  await expect(page.locator('body')).not.toContainText('sensitive-credential')
   await page.getByRole('button', { name: 'Complete missing resources' }).click()
   await expect.poll(() => fixture.resourceDownloads).toEqual([{ articleIds: ['article-fixture-1'], force: false }])
   await page.getByRole('button', { name: 'Re-download resources' }).click()

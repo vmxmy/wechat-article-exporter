@@ -113,6 +113,13 @@ func TestArticleResourceAvailabilityCountsPersistedMappings(t *testing.T) {
 	if _, err := database.ArticleResourceAvailability(context.Background(), "unknown"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("unknown article error = %v", err)
 	}
+	details, err := database.ListArticleResourceDetails(context.Background(), "article-a", 0, 1)
+	if err != nil || details.Total != 2 || details.Offset != 0 || details.Limit != 1 || len(details.Items) != 1 || details.Items[0] != (ArticleResourceDetail{Role: "image", Ordinal: 0, Available: true}) {
+		t.Fatalf("ListArticleResourceDetails() = %#v, %v", details, err)
+	}
+	if _, err := database.ListArticleResourceDetails(context.Background(), "unknown", 0, 1); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("unknown article detail error = %v", err)
+	}
 }
 
 func openContentDatabase(t *testing.T) *Database {

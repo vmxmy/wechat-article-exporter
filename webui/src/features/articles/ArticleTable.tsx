@@ -6,7 +6,7 @@ import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type Sortin
 import { useEffect, useMemo, useState } from 'react'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { getArticlePreview, parseArticleQuery, saveArticleQueryHandoff, saveExportHandoff, type ArticleQuery, type ArticleRecord, type ArticleSort } from '../../lib/api'
-import { useArticlePage, useArticleResourceSummary } from '../../lib/queries'
+import { useArticleDetail, useArticlePage, useArticleResourceSummary } from '../../lib/queries'
 import { useWorkspaceMutations } from '../../lib/queries'
 import { navigateTo } from '../../app/navigation'
 
@@ -115,6 +115,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   const selectedIDs = Object.entries(rowSelection).filter(([, selected]) => selected).map(([id]) => id)
   const selectedArticle = selectedIDs.length === 1 ? articlePage.data?.data.find((article) => article.id === selectedIDs[0]) : undefined
   const resourceSummary = useArticleResourceSummary(selectedArticle?.id)
+  const articleDetail = useArticleDetail(selectedArticle?.id)
   const startDownload = (kind: 'article' | 'metadata' | 'comments' | 'resources', force = false) => {
     if (selectedIDs.length === 0) return
     mutations.downloadArticles.mutate({ articleIds: selectedIDs, kind, force }, {
@@ -255,6 +256,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
       <section className="unavailable-actions" aria-labelledby="article-actions-title">
         <div><h2 id="article-actions-title">{messages.articles.actions.title}</h2><p>{messages.articles.actions.description}</p></div>
         {selectedArticle ? <ResourceSummary summary={resourceSummary} messages={messages} /> : null}
+        {selectedArticle ? <ArticleDetail detail={articleDetail} messages={messages} locale={locale} /> : null}
         <div className="action-button-group">
           <Button label={messages.articles.actions.preview} variant="secondary" isDisabled={!selectedArticle} onClick={preview} />
           <Button label={messages.articles.actions.download} variant="primary" isDisabled={selectedIDs.length === 0} onClick={() => startDownload('article')} />
@@ -267,6 +269,32 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
           <Button label={messages.articles.actions.saveQuery} variant="secondary" onClick={saveCurrentQuery} />
         </div>
         {notice ? <p role="status">{notice}</p> : null}
+      </section>
+    </section>
+  )
+}
+
+function ArticleDetail({ detail, messages, locale }: { readonly detail: ReturnType<typeof useArticleDetail>; readonly messages: MessageCatalog; readonly locale: Locale }) {
+  if (detail.isLoading) return <p role="status">{messages.articles.actions.detailLoading}</p>
+  if (detail.isError || !detail.data) return <p role="status">{messages.articles.actions.detailUnavailable}</p>
+  const { metrics, resources } = detail.data
+  return (
+    <section aria-label={messages.articles.actions.detailTitle}>
+      <h3>{messages.articles.actions.detailTitle}</h3>
+      <section aria-label={messages.articles.actions.metricsTitle}>
+        <h4>{messages.articles.actions.metricsTitle}</h4>
+        {metrics.available ? (
+          <p>{messages.articles.actions.metricsSummary(metrics.readCount, metrics.oldLikeCount, metrics.likeCount, metrics.shareCount, metrics.commentCount, metrics.capturedAt ? formatDate(metrics.capturedAt, locale) : '—')}</p>
+        ) : <p>{messages.articles.actions.metricsUnavailable}</p>}
+      </section>
+      <section aria-label={messages.articles.actions.resourceDetailsTitle}>
+        <h4>{messages.articles.actions.resourceDetailsTitle}</h4>
+        {resources.items.length === 0 ? <p>{messages.articles.actions.resourceDetailsEmpty}</p> : (
+          <ul>
+            {resources.items.map((resource) => <li key={`${resource.role}-${resource.ordinal}`}>{messages.articles.actions.resourceDetail(resource.role, resource.ordinal, resource.available ? messages.articles.actions.resourceAvailable : messages.articles.actions.resourceMissing)}</li>)}
+          </ul>
+        )}
+        {resources.total > resources.items.length ? <p>{messages.articles.actions.resourceDetailsLimited(resources.items.length, resources.total)}</p> : null}
       </section>
     </section>
   )

@@ -282,6 +282,35 @@ type WorkspaceArticleResources struct {
 	Complete  bool             `json:"complete"`
 }
 
+// WorkspaceArticleMetrics is the browser-safe engagement projection. It has
+// no snapshot ID or credential identity.
+type WorkspaceArticleMetrics struct {
+	Available    bool      `json:"available"`
+	ReadCount    int       `json:"readCount"`
+	OldLikeCount int       `json:"oldLikeCount"`
+	LikeCount    int       `json:"likeCount"`
+	ShareCount   int       `json:"shareCount"`
+	CommentCount int       `json:"commentCount"`
+	CapturedAt   time.Time `json:"capturedAt,omitempty"`
+}
+
+// WorkspaceArticleResourceDetail contains only a resource's position and
+// local availability. It deliberately omits IDs, URLs, digests, media types,
+// and filesystem paths.
+type WorkspaceArticleResourceDetail struct {
+	Role      string `json:"role"`
+	Ordinal   int    `json:"ordinal"`
+	Available bool   `json:"available"`
+}
+
+// WorkspaceArticleDetail combines bounded safe resource state with the
+// article's latest persisted engagement snapshot.
+type WorkspaceArticleDetail struct {
+	ArticleID domain.ArticleID                              `json:"articleId"`
+	Metrics   WorkspaceArticleMetrics                       `json:"metrics"`
+	Resources WorkspacePage[WorkspaceArticleResourceDetail] `json:"resources"`
+}
+
 // WorkspaceAlbumController is the typed application capability for the
 // persisted album workflow. Both variants return the durable album_sync job.
 type WorkspaceAlbumController interface {
@@ -310,6 +339,7 @@ type WorkspaceReader interface {
 	JobDetails(context.Context, domain.JobID) (WorkspaceJobDetail, error)
 	ArticlePreview(context.Context, domain.ArticleID) (WorkspaceArticlePreview, error)
 	ArticleResources(context.Context, domain.ArticleID) (WorkspaceArticleResources, error)
+	ArticleDetail(context.Context, domain.ArticleID, WorkspacePageRequest) (WorkspaceArticleDetail, error)
 }
 
 // WorkspaceSavedQueryController is the mutable saved-query contract exposed
@@ -557,6 +587,42 @@ func (workspace *Workspace) ArticleResources(ctx context.Context, id domain.Arti
 	}
 	return WorkspaceArticleResources{ArticleID: id, Total: availability.Total, Available: availability.Available,
 		Missing: missing, Complete: availability.Total > 0 && availability.Available == availability.Total}, nil
+}
+
+func (workspace *Workspace) ArticleDetail(ctx context.Context, id domain.ArticleID, page WorkspacePageRequest) (WorkspaceArticleDetail, error) {
+	id = domain.ArticleID(strings.TrimSpace(string(id)))
+	if id == "" {
+		return WorkspaceArticleDetail{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "article identifier is required"}
+	}
+	page, err := page.normalize()
+	if err != nil {
+		return WorkspaceArticleDetail{}, err
+	}
+	details, ok := workspace.application.(interface {
+		LatestArticleMetrics(context.Context, domain.ArticleID) (library.ArticleMetrics, error)
+		ListArticleResourceDetails(context.Context, domain.ArticleID, int, int) (domain.Page[library.ArticleResourceDetail], error)
+	})
+	if !ok {
+		return WorkspaceArticleDetail{}, workspaceError(fmt.Errorf("article detail: %w", ErrUnavailable))
+	}
+	resources, err := details.ListArticleResourceDetails(ctx, id, page.Offset, page.Limit)
+	if err != nil {
+		return WorkspaceArticleDetail{}, workspaceError(err)
+	}
+	result := WorkspaceArticleDetail{ArticleID: id, Resources: WorkspacePage[WorkspaceArticleResourceDetail]{Items: make([]WorkspaceArticleResourceDetail, 0, len(resources.Items)), Total: resources.Total, Offset: resources.Offset, Limit: resources.Limit}}
+	for _, resource := range resources.Items {
+		result.Resources.Items = append(result.Resources.Items, WorkspaceArticleResourceDetail{Role: resource.Role, Ordinal: resource.Ordinal, Available: resource.Available})
+	}
+	metrics, err := details.LatestArticleMetrics(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return result, nil
+	}
+	if err != nil {
+		return WorkspaceArticleDetail{}, workspaceError(err)
+	}
+	result.Metrics = WorkspaceArticleMetrics{Available: true, ReadCount: metrics.ReadCount, OldLikeCount: metrics.OldLikeCount,
+		LikeCount: metrics.LikeCount, ShareCount: metrics.ShareCount, CommentCount: metrics.CommentCount, CapturedAt: metrics.CapturedAt}
+	return result, nil
 }
 
 func (workspace *Workspace) RenderArticlePreview(ctx context.Context, id domain.ArticleID) (WorkspaceRenderedArticlePreview, error) {

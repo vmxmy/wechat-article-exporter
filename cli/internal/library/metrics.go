@@ -23,6 +23,17 @@ type MetricSnapshot struct {
 	CapturedAt   time.Time
 }
 
+// ArticleMetrics is the browser-safe metric projection for one article. It
+// deliberately excludes metric snapshot IDs and credential references.
+type ArticleMetrics struct {
+	ReadCount    int
+	OldLikeCount int
+	LikeCount    int
+	ShareCount   int
+	CommentCount int
+	CapturedAt   time.Time
+}
+
 func (database *Database) CommitMetricSnapshot(ctx context.Context, snapshot MetricSnapshot) (MetricSnapshot, error) {
 	if snapshot.ArticleID == "" || snapshot.CredentialID == "" {
 		return MetricSnapshot{}, errors.New("article ID and credential ID are required")
@@ -90,4 +101,17 @@ WHERE a.profile_id=? AND ms.article_id=? ORDER BY ms.captured_at DESC, ms.id DES
 	}
 	snapshot.CapturedAt = time.UnixMilli(capturedAt).UTC()
 	return snapshot, nil
+}
+
+// LatestArticleMetrics returns the newest persisted engagement values without
+// exposing the credential identity that was used to capture them.
+func (database *Database) LatestArticleMetrics(ctx context.Context, articleID domain.ArticleID) (ArticleMetrics, error) {
+	snapshot, err := database.LatestMetricSnapshot(ctx, articleID)
+	if err != nil {
+		return ArticleMetrics{}, err
+	}
+	return ArticleMetrics{
+		ReadCount: snapshot.ReadCount, OldLikeCount: snapshot.OldLikeCount, LikeCount: snapshot.LikeCount,
+		ShareCount: snapshot.ShareCount, CommentCount: snapshot.CommentCount, CapturedAt: snapshot.CapturedAt,
+	}, nil
 }

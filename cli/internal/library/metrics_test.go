@@ -26,6 +26,10 @@ func TestMetricSnapshotsPersistCaptureTimeAndCredentialProvenance(t *testing.T) 
 	if err != nil || latest != written {
 		t.Fatalf("latest=%#v err=%v", latest, err)
 	}
+	metrics, err := database.LatestArticleMetrics(context.Background(), "article-a")
+	if err != nil || metrics != (ArticleMetrics{ReadCount: 1200, OldLikeCount: 31, ShareCount: 17, LikeCount: 42, CommentCount: 6, CapturedAt: capturedAt}) {
+		t.Fatalf("LatestArticleMetrics() = %#v, %v", metrics, err)
+	}
 	articles, err := database.QueryArticles(context.Background(), domain.ArticleQuery{Keyword: "Article"})
 	if err != nil || len(articles.Items) != 1 || articles.Items[0].ReadCount != 1200 || articles.Items[0].CommentCount != 6 {
 		t.Fatalf("articles=%#v err=%v", articles, err)

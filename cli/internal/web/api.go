@@ -103,8 +103,12 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		}
 		if suffix, ok := strings.CutPrefix(request.URL.Path, "/api/v1/articles/"); ok {
 			articleID, endpoint, hasEndpoint := strings.Cut(suffix, "/")
-			if !hasEndpoint || endpoint != "resources" || articleID == "" || strings.Contains(articleID, "/") {
+			if !hasEndpoint || (endpoint != "resources" && endpoint != "detail") || articleID == "" || strings.Contains(articleID, "/") {
 				server.apiError(writer, http.StatusNotFound, "not_found", "workspace resource was not found")
+				return
+			}
+			if endpoint == "detail" {
+				server.articleDetail(writer, request, domain.ArticleID(articleID))
 				return
 			}
 			server.articleResources(writer, request, domain.ArticleID(articleID))
@@ -214,6 +218,20 @@ func (server *Server) articleResources(writer http.ResponseWriter, request *http
 		return
 	}
 	value, err := server.workspace.ArticleResources(request.Context(), articleID)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusOK, value)
+}
+
+func (server *Server) articleDetail(writer http.ResponseWriter, request *http.Request, articleID domain.ArticleID) {
+	page, err := parsePage(request)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	value, err := server.workspace.ArticleDetail(request.Context(), articleID, page)
 	if err != nil {
 		server.workspaceError(writer, err)
 		return

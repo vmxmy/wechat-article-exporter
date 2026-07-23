@@ -7,6 +7,7 @@ import {
   getAccountPage,
   getAlbumPage,
   getArticleResourceSummary,
+  getArticleDetail,
   getDiagnosticBundleDownloadURL,
   getExportArtifactDownloadURL,
   getRuntimeStatus,
@@ -83,6 +84,17 @@ describe('browser API client', () => {
       credentials: 'same-origin',
       headers: { Accept: 'application/json' }
     }))
+  })
+
+  it('loads bounded safe article metrics and resource details', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      apiVersion: 'v1',
+      data: { articleId: 'article / fixture', metrics: { available: true, readCount: 12, oldLikeCount: 3, likeCount: 4, shareCount: 5, commentCount: 6, capturedAt: '2026-07-24T10:00:00Z' }, resources: { items: [{ role: 'image', ordinal: 0, available: true }], total: 1, offset: 0, limit: 25 } }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getArticleDetail('article / fixture')).resolves.toMatchObject({ articleId: 'article / fixture', metrics: { readCount: 12 }, resources: { items: [{ role: 'image', ordinal: 0, available: true }] } })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/articles/article%20%2F%20fixture/detail?offset=0&limit=25', expect.any(Object))
   })
 
   it('sends caller-supplied exact confirmations for account and saved-query deletion', async () => {

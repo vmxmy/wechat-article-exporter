@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -28,6 +29,10 @@ type workspaceLibrary struct {
 	accountsError   error
 	availability    library.ArticleResourceAvailability
 	availabilityErr error
+	metrics         library.ArticleMetrics
+	metricsErr      error
+	resourceDetails domain.Page[library.ArticleResourceDetail]
+	resourceErr     error
 }
 
 func (library *workspaceLibrary) GetArticle(_ context.Context, id domain.ArticleID) (domain.Article, error) {
@@ -43,6 +48,16 @@ func (repository *workspaceLibrary) ArticleResourceAvailability(_ context.Contex
 	availability := repository.availability
 	availability.ArticleID = id
 	return availability, repository.availabilityErr
+}
+
+func (repository *workspaceLibrary) LatestArticleMetrics(context.Context, domain.ArticleID) (library.ArticleMetrics, error) {
+	return repository.metrics, repository.metricsErr
+}
+
+func (repository *workspaceLibrary) ListArticleResourceDetails(_ context.Context, _ domain.ArticleID, offset, limit int) (domain.Page[library.ArticleResourceDetail], error) {
+	page := repository.resourceDetails
+	page.Offset, page.Limit = offset, limit
+	return page, repository.resourceErr
 }
 
 func (library *workspaceLibrary) QueryAccounts(_ context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
@@ -198,6 +213,24 @@ func TestWorkspaceArticleResourcesReturnsSafeCompletenessAggregate(t *testing.T)
 	var workspaceErr *WorkspaceError
 	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInvalidArgument {
 		t.Fatalf("empty ArticleResources error = %v", err)
+	}
+}
+
+func TestWorkspaceArticleDetailReturnsBoundedSafeMetricsAndResources(t *testing.T) {
+	capturedAt := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
+	service := New(Options{Library: &workspaceLibrary{
+		metrics:         library.ArticleMetrics{ReadCount: 12, OldLikeCount: 3, LikeCount: 4, ShareCount: 5, CommentCount: 6, CapturedAt: capturedAt},
+		resourceDetails: domain.Page[library.ArticleResourceDetail]{Items: []library.ArticleResourceDetail{{Role: "image", Ordinal: 2, Available: true}, {Role: "audio", Ordinal: 0}}, Total: 3},
+	}})
+	detail, err := NewWorkspace(service).ArticleDetail(context.Background(), " article-1 ", WorkspacePageRequest{Offset: 1, Limit: 2})
+	if err != nil || detail.ArticleID != "article-1" || !detail.Metrics.Available || detail.Metrics.ReadCount != 12 || !detail.Metrics.CapturedAt.Equal(capturedAt) || detail.Resources.Total != 3 || detail.Resources.Offset != 1 || detail.Resources.Limit != 2 || len(detail.Resources.Items) != 2 || detail.Resources.Items[0] != (WorkspaceArticleResourceDetail{Role: "image", Ordinal: 2, Available: true}) {
+		t.Fatalf("ArticleDetail() = %#v, %v", detail, err)
+	}
+
+	withoutMetrics := NewWorkspace(New(Options{Library: &workspaceLibrary{resourceDetails: domain.Page[library.ArticleResourceDetail]{}, metricsErr: sql.ErrNoRows}}))
+	detail, err = withoutMetrics.ArticleDetail(context.Background(), "article-1", WorkspacePageRequest{})
+	if err != nil || detail.Metrics.Available || detail.Resources.Limit != WorkspaceDefaultPageLimit {
+		t.Fatalf("detail without metrics = %#v, %v", detail, err)
 	}
 }
 

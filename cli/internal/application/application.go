@@ -334,6 +334,30 @@ func (service *Service) ArticleResourceAvailability(ctx context.Context, id doma
 	return resources.ArticleResourceAvailability(ctx, id)
 }
 
+// LatestArticleMetrics exposes the safe metric projection while the concrete
+// library retains snapshot identifiers and credential references.
+func (service *Service) LatestArticleMetrics(ctx context.Context, id domain.ArticleID) (library.ArticleMetrics, error) {
+	metrics, ok := service.library.(interface {
+		LatestArticleMetrics(context.Context, domain.ArticleID) (library.ArticleMetrics, error)
+	})
+	if !ok {
+		return library.ArticleMetrics{}, fmt.Errorf("article metrics: %w", ErrUnavailable)
+	}
+	return metrics.LatestArticleMetrics(ctx, id)
+}
+
+// ListArticleResourceDetails exposes bounded safe resource state while the
+// concrete library retains resource identifiers, URLs, digests, and media.
+func (service *Service) ListArticleResourceDetails(ctx context.Context, id domain.ArticleID, offset, limit int) (domain.Page[library.ArticleResourceDetail], error) {
+	resources, ok := service.library.(interface {
+		ListArticleResourceDetails(context.Context, domain.ArticleID, int, int) (domain.Page[library.ArticleResourceDetail], error)
+	})
+	if !ok {
+		return domain.Page[library.ArticleResourceDetail]{}, fmt.Errorf("article resource details: %w", ErrUnavailable)
+	}
+	return resources.ListArticleResourceDetails(ctx, id, offset, limit)
+}
+
 func (service *Service) QueryAccounts(ctx context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
 	if service.library == nil {
 		return domain.Page[domain.Account]{Items: []domain.Account{}, Offset: query.Offset, Limit: query.Limit}, nil

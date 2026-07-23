@@ -190,6 +190,40 @@ func TestArticleResourcesAPIProvidesOnlySafeCompletenessDTO(t *testing.T) {
 	assertAPIError(t, response, "invalid_argument")
 }
 
+func TestArticleDetailAPIProvidesBoundedSafeMetricsAndResourceDetails(t *testing.T) {
+	capturedAt := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
+	app := &apiApplication{
+		metrics:         library.ArticleMetrics{ReadCount: 12, OldLikeCount: 3, LikeCount: 4, ShareCount: 5, CommentCount: 6, CapturedAt: capturedAt},
+		resourceDetails: domain.Page[library.ArticleResourceDetail]{Items: []library.ArticleResourceDetail{{Role: "image", Ordinal: 0, Available: true}, {Role: "audio", Ordinal: 1}}, Total: 3},
+	}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+
+	response := get(t, client, base+"/api/v1/articles/article-1/detail?offset=1&limit=2")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("detail status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	body := readResponse(t, response)
+	for _, forbidden := range []string{"resourceId", "sourceUrl", "originalUrl", "objectDigest", "digest", "mediaType", "credential", "https://", "/private"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("detail API leaked %q: %s", forbidden, body)
+		}
+	}
+	var value application.WorkspaceArticleDetail
+	if err := json.Unmarshal([]byte(body), &value); err != nil || value.ArticleID != "article-1" || !value.Metrics.Available || value.Metrics.ReadCount != 12 || !value.Metrics.CapturedAt.Equal(capturedAt) || value.Resources.Total != 3 || value.Resources.Offset != 1 || value.Resources.Limit != 2 || len(value.Resources.Items) != 2 || value.Resources.Items[0] != (application.WorkspaceArticleResourceDetail{Role: "image", Ordinal: 0, Available: true}) {
+		t.Fatalf("detail DTO=%#v err=%v", value, err)
+	}
+	if app.detailArticleID != "article-1" || app.detailOffset != 1 || app.detailLimit != 2 {
+		t.Fatalf("detail lookup = article=%q offset=%d limit=%d", app.detailArticleID, app.detailOffset, app.detailLimit)
+	}
+
+	response = get(t, client, base+"/api/v1/articles/article-1/detail?unexpected=1")
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("detail query status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "invalid_argument")
+}
+
 func TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries(t *testing.T) {
 	server, client := startAPIApplicationServer(t, &apiApplication{})
 	base := strings.TrimSuffix(strings.Split(server.URL(), "?")[0], "/")
@@ -635,6 +669,11 @@ type apiApplication struct {
 	article              domain.Article
 	resourceAvailability library.ArticleResourceAvailability
 	resourceArticleID    domain.ArticleID
+	metrics              library.ArticleMetrics
+	resourceDetails      domain.Page[library.ArticleResourceDetail]
+	detailArticleID      domain.ArticleID
+	detailOffset         int
+	detailLimit          int
 	accountsErr          error
 	accountQuery         domain.AccountQuery
 	articleQuery         domain.ArticleQuery
@@ -762,6 +801,16 @@ func (app *apiApplication) ArticleResourceAvailability(_ context.Context, id dom
 	availability := app.resourceAvailability
 	availability.ArticleID = id
 	return availability, nil
+}
+func (app *apiApplication) LatestArticleMetrics(_ context.Context, id domain.ArticleID) (library.ArticleMetrics, error) {
+	app.detailArticleID = id
+	return app.metrics, nil
+}
+func (app *apiApplication) ListArticleResourceDetails(_ context.Context, id domain.ArticleID, offset, limit int) (domain.Page[library.ArticleResourceDetail], error) {
+	app.detailArticleID, app.detailOffset, app.detailLimit = id, offset, limit
+	page := app.resourceDetails
+	page.Offset, page.Limit = offset, limit
+	return page, nil
 }
 func (app *apiApplication) QueryAlbums(_ context.Context, query domain.AlbumQuery) (domain.Page[domain.Album], error) {
 	app.albumQuery = query

@@ -106,6 +106,25 @@ export interface ArticleResourceSummary {
   readonly missing: number
   readonly complete: boolean
 }
+export interface ArticleMetrics {
+  readonly available: boolean
+  readonly readCount: number
+  readonly oldLikeCount: number
+  readonly likeCount: number
+  readonly shareCount: number
+  readonly commentCount: number
+  readonly capturedAt?: string
+}
+export interface ArticleResourceDetail {
+  readonly role: string
+  readonly ordinal: number
+  readonly available: boolean
+}
+export interface ArticleDetail {
+  readonly articleId: string
+  readonly metrics: ArticleMetrics
+  readonly resources: WorkspacePageResponse<ArticleResourceDetail>
+}
 
 export interface AlbumRecord {
   readonly id: string
@@ -478,6 +497,10 @@ export async function getArticlePreview(articleId: string, signal?: AbortSignal)
 }
 export async function getArticleResourceSummary(articleId: string, signal?: AbortSignal): Promise<ArticleResourceSummary> {
   return request<ArticleResourceSummary>(`${apiBase}/articles/${encodeURIComponent(articleId)}/resources`, { signal })
+}
+export async function getArticleDetail(articleId: string, signal?: AbortSignal): Promise<ArticleDetail> {
+  const params = new URLSearchParams({ offset: '0', limit: '25' })
+  return request<ArticleDetail>(`${apiBase}/articles/${encodeURIComponent(articleId)}/detail?${params}`, { signal })
 }
 export async function saveSavedQuery(input: SavedQueryInput): Promise<SavedQueryRecord> { return mutate<SavedQueryRecord>('saved-queries', 'POST', input) }
 export async function deleteSavedQuery(name: string, confirmation: string): Promise<void> {
