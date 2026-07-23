@@ -13,14 +13,15 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "pnpm run typecheck && vite build && pnpm run verify:assets",
+    "build": "pnpm run theme:build && pnpm run typecheck && vite build && pnpm run verify:assets",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint . --max-warnings=0",
+    "theme:build": "astryx theme build src/theme/workspaceTheme.source.ts --out src/styles/theme.css",
     "astryx:doctor": "astryx doctor",
     "verify:assets": "node scripts/verify-assets.mjs",
     "sync:go-assets": "node scripts/sync-go-assets.mjs",
     "verify:go-assets": "node scripts/sync-go-assets.mjs --check",
-    "check": "pnpm run lint && pnpm run typecheck && pnpm run astryx:doctor"
+    "check": "pnpm run theme:build && pnpm run lint && pnpm run typecheck && pnpm run astryx:doctor"
   },
   "dependencies": {
     "@astryxdesign/core": "0.1.6",
