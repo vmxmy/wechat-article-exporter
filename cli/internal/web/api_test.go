@@ -132,7 +132,7 @@ func TestSnapshotPollingRevisionAdvancesOnlyForObservedStateChanges(t *testing.T
 func TestJobDetailAPIUsesSafeBoundedWorkspaceDTO(t *testing.T) {
 	const jobID = "11111111-1111-1111-1111-111111111111"
 	app := &apiApplication{job: domain.Job{ID: jobID, Kind: "download", State: domain.JobRunning}, jobDetail: application.WorkspaceJobDetail{
-		Job: domain.Job{ID: jobID, Kind: "download", State: domain.JobRunning}, Items: []application.WorkspaceJobItemDetail{{ID: "item-1", State: domain.JobRunning, AttemptCount: 1, ErrorClass: "network"}},
+		Job: application.WorkspaceJob{ID: jobID, Kind: "download", State: domain.JobRunning, PermittedActions: []application.WorkspaceJobAction{application.WorkspaceJobActionPause, application.WorkspaceJobActionCancel}}, Items: []application.WorkspaceJobItemDetail{{ID: "item-1", State: domain.JobRunning, AttemptCount: 1, ErrorClass: "network"}},
 		ItemsTotal: 1, Logs: []application.WorkspaceJobLogDetail{{ID: 1, ItemID: "item-1", Level: "info", Message: "sanitized local progress"}}, Lease: application.WorkspaceJobLeaseDetail{Active: true},
 	}}
 	server, client := startAPIApplicationServer(t, app)
@@ -149,7 +149,7 @@ func TestJobDetailAPIUsesSafeBoundedWorkspaceDTO(t *testing.T) {
 		}
 	}
 	var detail application.WorkspaceJobDetail
-	if err := json.Unmarshal([]byte(body), &detail); err != nil || detail.Job.ID != jobID || len(detail.Items) != 1 || len(detail.Logs) != 1 || !detail.Lease.Active {
+	if err := json.Unmarshal([]byte(body), &detail); err != nil || detail.Job.ID != jobID || len(detail.Job.PermittedActions) != 2 || len(detail.Items) != 1 || len(detail.Logs) != 1 || !detail.Lease.Active {
 		t.Fatalf("detail DTO=%#v err=%v", detail, err)
 	}
 

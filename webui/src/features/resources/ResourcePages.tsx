@@ -5,7 +5,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
-import { consumeArticleQueryHandoff, parseArticleQuery, saveExportHandoff, type AccountRecord, type AlbumRecord, type AlbumTraversalOrder, type JobDetail, type JobRecord, type SavedQueryRecord } from '../../lib/api'
+import { consumeArticleQueryHandoff, parseArticleQuery, saveExportHandoff, type AccountRecord, type AlbumRecord, type AlbumTraversalOrder, type JobControlAction, type JobDetail, type JobRecord, type SavedQueryRecord } from '../../lib/api'
 import { getAccountManifestDownloadURL } from '../../lib/api'
 import { loadJobHandoff } from '../../lib/jobHandoff'
 import { useAccountPage, useAccountSearch, useAlbumPage, useJobDetail, useJobPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
@@ -142,6 +142,8 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   ], [locale, messages])
   const actions = messages.resources.jobs.actions
   const one = selected.length === 1 ? selected[0] : undefined
+  const permittedActions = detail.data?.job.permittedActions ?? []
+  const isPermitted = (action: JobControlAction) => Boolean(one && detail.isSuccess && permittedActions.includes(action))
 
   useEffect(() => {
     const location = new URL(window.location.href)
@@ -156,7 +158,7 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
     setPageIndex(nextPageIndex)
   }
   const control = (action: 'pause' | 'resume' | 'retry' | 'cancel') => {
-    if (!one) return setNotice(actions.selectOne)
+    if (!one || !isPermitted(action)) return setNotice(actions.selectOne)
     if (action === 'resume') return mutations.controlJob.mutate({ id: one, action }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })
     setConfirmationProof('')
     setConfirmationAction(action)
@@ -166,7 +168,7 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
     <>
       <ResourceTable eyebrow={messages.navigation.operations} messages={messages.resources.jobs} columns={columns} query={query} pageIndex={pageIndex} onPageChange={changePage} onSelectionChange={setSelected} />
       <UnavailableActionPanel messages={messages} title={actions.title} description={actions.description}>
-        <Button label={actions.pause} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('pause')} /><Button label={actions.resume} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('resume')} /><Button label={actions.retry} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('retry')} /><Button label={actions.cancel} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('cancel')} />
+        <Button label={actions.pause} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!isPermitted('pause')} onClick={() => control('pause')} /><Button label={actions.resume} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!isPermitted('resume')} onClick={() => control('resume')} /><Button label={actions.retry} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!isPermitted('retry')} onClick={() => control('retry')} /><Button label={actions.cancel} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!isPermitted('cancel')} onClick={() => control('cancel')} />
         {notice ? <p role="alert">{notice}</p> : null}
       </UnavailableActionPanel>
       <TypedConfirmationDialog isOpen={Boolean(confirmationAction)} onOpenChange={(isOpen) => { if (!isOpen) { setConfirmationAction(undefined); setConfirmationProof('') } }} title={confirmation?.title ?? ''} description={confirmation?.description ?? ''} expected={confirmation?.confirmation ?? ''} inputLabel={actions.confirmationLabel} inputHint={actions.confirmationHint} actionLabel={confirmation?.actionLabel ?? ''} cancelLabel={actions.cancelConfirmation} confirmation={confirmationProof} onConfirmationChange={setConfirmationProof} isActionLoading={mutations.controlJob.isPending} onAction={() => { if (one && confirmationAction) mutations.controlJob.mutate({ id: one, action: confirmationAction, confirmation: confirmationProof }, { onSuccess: () => { setNotice(undefined); setConfirmationAction(undefined); setConfirmationProof('') }, onError: () => setNotice(actions.actionFailed) }) }} />

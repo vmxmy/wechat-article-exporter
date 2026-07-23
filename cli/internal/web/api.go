@@ -38,12 +38,12 @@ type apiError struct {
 // semantic state change without treating an event stream as the source of
 // truth.
 type workspaceSnapshot struct {
-	Runtime    application.WorkspaceRuntime          `json:"runtime"`
-	Session    application.WorkspaceSession          `json:"session"`
-	Storage    domain.StorageStatus                  `json:"storage"`
-	Jobs       application.WorkspacePage[domain.Job] `json:"jobs"`
-	ObservedAt time.Time                             `json:"observedAt"`
-	Revision   uint64                                `json:"revision"`
+	Runtime    application.WorkspaceRuntime                        `json:"runtime"`
+	Session    application.WorkspaceSession                        `json:"session"`
+	Storage    domain.StorageStatus                                `json:"storage"`
+	Jobs       application.WorkspacePage[application.WorkspaceJob] `json:"jobs"`
+	ObservedAt time.Time                                           `json:"observedAt"`
+	Revision   uint64                                              `json:"revision"`
 }
 
 // api is the authenticated P0 read surface. Every route is GET-only and

@@ -235,7 +235,7 @@ func TestWorkspaceJobDetailsAreBoundedAndDoNotExposeSensitiveInternals(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.Job.ID != "job-1" || len(detail.Items) != WorkspaceJobDetailMaximumItems || detail.ItemsTotal != WorkspaceJobDetailMaximumItems+2 || !detail.ItemsLimited || len(detail.Logs) != 1 || !detail.Lease.Active || detail.RefreshedAt != now {
+	if detail.Job.ID != "job-1" || len(detail.Job.PermittedActions) != 1 || detail.Job.PermittedActions[0] != WorkspaceJobActionCancel || len(detail.Items) != WorkspaceJobDetailMaximumItems || detail.ItemsTotal != WorkspaceJobDetailMaximumItems+2 || !detail.ItemsLimited || len(detail.Logs) != 1 || !detail.Lease.Active || detail.RefreshedAt != now {
 		t.Fatalf("JobDetails() = %#v", detail)
 	}
 	if detail.Items[0].ID == "" || detail.Items[0].ErrorClass != string(jobs.FailureNetwork) {

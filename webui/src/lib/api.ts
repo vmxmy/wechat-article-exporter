@@ -124,7 +124,10 @@ export interface JobRecord {
   readonly createdAt: string
   readonly updatedAt: string
   readonly counts?: Readonly<Record<string, number>>
+  readonly permittedActions: readonly JobControlAction[]
 }
+
+export type JobControlAction = 'cancel' | 'pause' | 'resume' | 'retry'
 
 export interface JobItemDetail {
   readonly id: string
@@ -344,6 +347,10 @@ export interface CredentialImportInput {
   readonly expiresAt?: string
 }
 
+// Credential validation is a non-persistent, write-only check. The response
+// carries no credential fields, file metadata, local paths, or session data.
+export interface CredentialValidation { readonly valid: boolean; readonly status: string }
+
 export type ProxyTrust = 'public-only' | 'credential-trusted'
 export type ProxyRequestClass = 'public_content' | 'public_resource' | 'management_session' | 'article_credential' | 'engagement_metrics' | 'comments' | 'paid_content'
 
@@ -484,7 +491,7 @@ export async function deleteSavedQuery(name: string, confirmation: string): Prom
 export async function traverseAlbum(albumId: string, accountId: string, order: AlbumTraversalOrder, download: boolean): Promise<JobRecord> {
   return mutate<JobRecord>(`albums/${encodeURIComponent(albumId)}/traverse`, 'POST', { accountId, order, download })
 }
-export type ConfirmedJobControlAction = 'cancel' | 'pause' | 'retry'
+export type ConfirmedJobControlAction = Exclude<JobControlAction, 'resume'>
 
 export async function controlJob(id: string, action: 'resume'): Promise<JobRecord>
 export async function controlJob(id: string, action: ConfirmedJobControlAction, confirmation: string): Promise<JobRecord>
@@ -561,6 +568,7 @@ export async function openExportOutput(id: string, confirmation: string): Promis
 }
 
 export async function getCredentials(signal?: AbortSignal): Promise<readonly CredentialMetadata[]> { return request(`${apiBase}/settings/credentials`, { signal }) }
+export async function validateCredential(input: CredentialImportInput): Promise<CredentialValidation> { return mutate('settings/credentials/validate', 'POST', input) }
 export async function importCredential(input: CredentialImportInput): Promise<CredentialMetadata> { return mutate('settings/credentials/import', 'POST', input) }
 export async function uploadCredentialFile(credential: File): Promise<CredentialMetadata> {
   const csrfToken = await getCSRFToken()

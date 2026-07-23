@@ -21,6 +21,71 @@ type JobControls interface {
 	RetryExport(context.Context, domain.JobID) (domain.Job, error)
 }
 
+// WorkspaceJobPermissionProvider lets the application publish the already
+// evaluated safe control vocabulary without exposing control implementation
+// details to a browser adapter.
+type WorkspaceJobPermissionProvider interface {
+	PermittedJobActions(domain.JobState) []WorkspaceJobAction
+}
+
+func (workspace *Workspace) workspaceJob(job domain.Job) WorkspaceJob {
+	return WorkspaceJob{
+		ID: job.ID, Kind: job.Kind, State: job.State, Profile: job.Profile, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
+		Counts: job.Counts, PermittedActions: workspace.permittedJobActions(job.State),
+	}
+}
+
+func (workspace *Workspace) permittedJobActions(state domain.JobState) []WorkspaceJobAction {
+	if provider, ok := workspace.application.(WorkspaceJobPermissionProvider); ok {
+		return provider.PermittedJobActions(state)
+	}
+	return workspaceJobActions(state, workspace.canCancelJob(), workspace.canPauseJob(), workspace.canResumeOrRetryJob())
+}
+
+func workspaceJobActions(state domain.JobState, cancel, pause, restart bool) []WorkspaceJobAction {
+	actions := make([]WorkspaceJobAction, 0, 2)
+	if cancel && (state == domain.JobQueued || state == domain.JobRunning || state == domain.JobPaused || state == domain.JobBlockedAuth) {
+		actions = append(actions, WorkspaceJobActionCancel)
+	}
+	if pause && (state == domain.JobQueued || state == domain.JobRunning) {
+		actions = append(actions, WorkspaceJobActionPause)
+	}
+	if restart && (state == domain.JobPaused || state == domain.JobBlockedAuth) {
+		actions = append(actions, WorkspaceJobActionResume)
+	}
+	if restart && (state == domain.JobFailed || state == domain.JobPartial || state == domain.JobCancelled) {
+		actions = append(actions, WorkspaceJobActionRetry)
+	}
+	return actions
+}
+
+func (workspace *Workspace) canCancelJob() bool {
+	_, ok := workspace.application.(interface {
+		CancelJob(context.Context, domain.JobID) (domain.Job, error)
+	})
+	return ok
+}
+
+func (workspace *Workspace) canPauseJob() bool {
+	_, ok := workspace.application.(interface {
+		PauseJob(context.Context, domain.JobID) (domain.Job, error)
+	})
+	return ok
+}
+
+func (workspace *Workspace) canResumeOrRetryJob() bool {
+	_, ok := workspace.application.(interface {
+		ResumeJob(context.Context, domain.JobID) (domain.Job, error)
+		RetryJob(context.Context, domain.JobID) (domain.Job, error)
+	})
+	return ok
+}
+
+func (service *Service) PermittedJobActions(state domain.JobState) []WorkspaceJobAction {
+	_, controls := service.jobs.(JobControls)
+	return workspaceJobActions(state, service.jobs != nil, controls, controls && service.starter != nil)
+}
+
 // WorkspaceLoginFlow is safe for the authenticated, no-store local browser
 // response. The QR payload is transient scan data, not a stored credential;
 // raw gateway structs and cookies never cross this boundary.

@@ -124,6 +124,32 @@ type WorkspacePage[T any] struct {
 	Limit  int `json:"limit"`
 }
 
+// WorkspaceJobAction is a browser-safe indication that a single job control
+// is currently available. It exposes only stable action names, never the
+// scheduler, lease, or persistence conditions that produced the decision.
+type WorkspaceJobAction string
+
+const (
+	WorkspaceJobActionCancel WorkspaceJobAction = "cancel"
+	WorkspaceJobActionPause  WorkspaceJobAction = "pause"
+	WorkspaceJobActionResume WorkspaceJobAction = "resume"
+	WorkspaceJobActionRetry  WorkspaceJobAction = "retry"
+)
+
+// WorkspaceJob is the browser-safe persistent job DTO. Domain.Job remains an
+// internal record; browser adapters receive only this projection and its
+// derived permitted controls.
+type WorkspaceJob struct {
+	ID               domain.JobID         `json:"id"`
+	Kind             string               `json:"kind"`
+	State            domain.JobState      `json:"state"`
+	Profile          domain.ProfileID     `json:"profile,omitempty"`
+	CreatedAt        time.Time            `json:"createdAt"`
+	UpdatedAt        time.Time            `json:"updatedAt"`
+	Counts           map[string]int       `json:"counts,omitempty"`
+	PermittedActions []WorkspaceJobAction `json:"permittedActions"`
+}
+
 type WorkspaceRuntime struct {
 	Version       string               `json:"version"`
 	Profile       string               `json:"profile"`
@@ -280,7 +306,7 @@ type WorkspaceReader interface {
 	Articles(context.Context, WorkspaceArticleQuery) (WorkspacePage[domain.Article], error)
 	Albums(context.Context, WorkspaceAlbumQuery) (WorkspacePage[domain.Album], error)
 	SavedArticleQueries(context.Context, WorkspacePageRequest) (WorkspacePage[domain.SavedArticleQuery], error)
-	Jobs(context.Context, WorkspaceJobQuery) (WorkspacePage[domain.Job], error)
+	Jobs(context.Context, WorkspaceJobQuery) (WorkspacePage[WorkspaceJob], error)
 	JobDetails(context.Context, domain.JobID) (WorkspaceJobDetail, error)
 	ArticlePreview(context.Context, domain.ArticleID) (WorkspaceArticlePreview, error)
 	ArticleResources(context.Context, domain.ArticleID) (WorkspaceArticleResources, error)
@@ -413,14 +439,21 @@ func (workspace *Workspace) SavedArticleQueries(ctx context.Context, request Wor
 		Total: total, Offset: page.Offset, Limit: page.Limit}, nil
 }
 
-func (workspace *Workspace) Jobs(ctx context.Context, input WorkspaceJobQuery) (WorkspacePage[domain.Job], error) {
+func (workspace *Workspace) Jobs(ctx context.Context, input WorkspaceJobQuery) (WorkspacePage[WorkspaceJob], error) {
 	page, err := input.Page.normalize()
 	if err != nil {
-		return WorkspacePage[domain.Job]{}, err
+		return WorkspacePage[WorkspaceJob]{}, err
 	}
 	result, err := workspace.application.QueryJobs(ctx, domain.JobQuery{Kind: strings.TrimSpace(input.Kind),
 		States: append([]domain.JobState(nil), input.States...), Offset: page.Offset, Limit: page.Limit})
-	return workspacePage(result), workspaceError(err)
+	if err != nil {
+		return WorkspacePage[WorkspaceJob]{}, workspaceError(err)
+	}
+	items := make([]WorkspaceJob, 0, len(result.Items))
+	for _, job := range result.Items {
+		items = append(items, workspace.workspaceJob(job))
+	}
+	return WorkspacePage[WorkspaceJob]{Items: items, Total: result.Total, Offset: result.Offset, Limit: result.Limit}, nil
 }
 
 func (workspace *Workspace) BeginLogin(ctx context.Context, clientSessionID string) (wechat.LoginFlow, error) {
