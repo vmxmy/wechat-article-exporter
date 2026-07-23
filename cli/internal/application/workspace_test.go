@@ -2,13 +2,16 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/jobs"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/runtime"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
@@ -68,13 +71,17 @@ func (*workspaceLibrary) DeleteSavedArticleQuery(context.Context, string) (bool,
 type workspaceJobManager struct {
 	page  domain.Page[domain.Job]
 	query domain.JobQuery
+	job   domain.Job
+	items []jobs.Item
+	logs  []library.JobLog
+	lease library.JobLease
 }
 
 func (*workspaceJobManager) Create(context.Context, jobs.Spec) (domain.Job, error) {
 	return domain.Job{}, nil
 }
-func (*workspaceJobManager) Get(context.Context, domain.JobID) (domain.Job, error) {
-	return domain.Job{}, nil
+func (manager *workspaceJobManager) Get(context.Context, domain.JobID) (domain.Job, error) {
+	return manager.job, nil
 }
 func (manager *workspaceJobManager) Query(_ context.Context, query domain.JobQuery) (domain.Page[domain.Job], error) {
 	manager.query = query
@@ -82,6 +89,15 @@ func (manager *workspaceJobManager) Query(_ context.Context, query domain.JobQue
 }
 func (*workspaceJobManager) Cancel(context.Context, domain.JobID) (domain.Job, error) {
 	return domain.Job{}, nil
+}
+func (manager *workspaceJobManager) ListItems(context.Context, domain.JobID) ([]jobs.Item, error) {
+	return append([]jobs.Item(nil), manager.items...), nil
+}
+func (manager *workspaceJobManager) ListLogsBounded(context.Context, domain.JobID, library.JobLogBudget) ([]library.JobLog, error) {
+	return append([]library.JobLog(nil), manager.logs...), nil
+}
+func (manager *workspaceJobManager) Lease(context.Context, domain.JobID) (library.JobLease, error) {
+	return manager.lease, nil
 }
 
 func TestWorkspaceReadFacadeUsesApplicationAndReturnsSafeDTOs(t *testing.T) {
@@ -164,6 +180,46 @@ func TestWorkspacePaginationRejectsUnboundedOrInvalidRequests(t *testing.T) {
 			t.Fatalf("Jobs(%#v) error = %v", request, err)
 		}
 	}
+}
+
+func TestWorkspaceJobDetailsAreBoundedAndDoNotExposeSensitiveInternals(t *testing.T) {
+	now := time.Date(2026, 7, 24, 9, 0, 0, 0, time.UTC)
+	items := make([]jobs.Item, WorkspaceJobDetailMaximumItems+2)
+	for index := range items {
+		items[index] = jobs.Item{ID: "item-" + string(rune('a'+index%26)), Key: "/private/secret/item", State: domain.JobRunning, AttemptCount: 2, Checkpoint: []byte(`{"token":"secret"}`), ErrorClass: jobs.FailureNetwork, ErrorMessage: "cookie=secret", CreatedAt: now, UpdatedAt: now}
+	}
+	manager := &workspaceJobManager{
+		job: domain.Job{ID: "job-1", Kind: "download", State: domain.JobRunning}, items: items,
+		logs:  []library.JobLog{{ID: 1, ItemID: "item-a", Level: "error", Message: "failed at /private/profile with token=secret", Fields: map[string]any{"path": "/private/profile", "token": "secret"}, CreatedAt: now}},
+		lease: library.JobLease{Owner: "executor-secret", Active: true, ExpiresAt: now.Add(time.Minute)},
+	}
+	workspace := NewWorkspace(New(Options{Jobs: manager, Runtime: runtimeenv.Dependencies{Clock: fixedClock{value: now}}}))
+
+	detail, err := workspace.JobDetails(context.Background(), "job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Job.ID != "job-1" || len(detail.Items) != WorkspaceJobDetailMaximumItems || detail.ItemsTotal != WorkspaceJobDetailMaximumItems+2 || !detail.ItemsLimited || len(detail.Logs) != 1 || !detail.Lease.Active || detail.RefreshedAt != now {
+		t.Fatalf("JobDetails() = %#v", detail)
+	}
+	if detail.Items[0].ID == "" || detail.Items[0].ErrorClass != string(jobs.FailureNetwork) {
+		t.Fatalf("item detail = %#v", detail.Items[0])
+	}
+	encoded := string(mustJSON(t, detail))
+	for _, forbidden := range []string{"/private", "secret", "executor-secret", "checkpoint", "item_key", "fields"} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("job details leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }
 
 func TestWorkspaceSavedArticleQueriesAreBounded(t *testing.T) {

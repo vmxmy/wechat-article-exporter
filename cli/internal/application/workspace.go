@@ -254,6 +254,7 @@ type WorkspaceReader interface {
 	Albums(context.Context, WorkspaceAlbumQuery) (WorkspacePage[domain.Album], error)
 	SavedArticleQueries(context.Context, WorkspacePageRequest) (WorkspacePage[domain.SavedArticleQuery], error)
 	Jobs(context.Context, WorkspaceJobQuery) (WorkspacePage[domain.Job], error)
+	JobDetails(context.Context, domain.JobID) (WorkspaceJobDetail, error)
 	ArticlePreview(context.Context, domain.ArticleID) (WorkspaceArticlePreview, error)
 }
 

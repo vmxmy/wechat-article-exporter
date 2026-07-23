@@ -4,8 +4,8 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
-import type { AccountRecord, AlbumRecord, JobRecord, SavedQueryRecord } from '../../lib/api'
-import { useAccountPage, useAccountSearch, useAlbumPage, useJobPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
+import type { AccountRecord, AlbumRecord, JobDetail, JobRecord, SavedQueryRecord } from '../../lib/api'
+import { useAccountPage, useAccountSearch, useAlbumPage, useJobDetail, useJobPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 import { ResourceTable } from './ResourceTable'
 import { UnavailableActionPanel } from '../actions/UnavailableActionPanel'
 
@@ -77,6 +77,7 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   const [selected, setSelected] = useState<readonly string[]>([])
   const [notice, setNotice] = useState<string>()
   const query = useJobPage({ page: pageIndex + 1, pageSize })
+  const detail = useJobDetail(selected.length === 1 ? selected[0] : undefined)
   const mutations = useWorkspaceMutations()
   const columns = useMemo<ColumnDef<JobRecord>[]>(() => [
     { accessorKey: 'kind', header: messages.resources.jobs.columns.kind },
@@ -87,6 +88,10 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   ], [locale, messages])
   const actions = messages.resources.jobs.actions
   const one = selected.length === 1 ? selected[0] : undefined
+  const changePage = (nextPageIndex: number) => {
+    setSelected([])
+    setPageIndex(nextPageIndex)
+  }
   const control = (action: 'pause' | 'resume' | 'retry' | 'cancel') => {
     if (!one) return setNotice(actions.selectOne)
     const confirmations = { pause: actions.confirmPause, resume: undefined, retry: actions.confirmRetry, cancel: actions.confirmCancel } as const
@@ -95,13 +100,35 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   }
   return (
     <>
-      <ResourceTable eyebrow={messages.navigation.operations} messages={messages.resources.jobs} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
+      <ResourceTable eyebrow={messages.navigation.operations} messages={messages.resources.jobs} columns={columns} query={query} pageIndex={pageIndex} onPageChange={changePage} onSelectionChange={setSelected} />
       <UnavailableActionPanel messages={messages} title={actions.title} description={actions.description}>
         <Button label={actions.pause} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('pause')} /><Button label={actions.resume} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('resume')} /><Button label={actions.retry} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('retry')} /><Button label={actions.cancel} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('cancel')} />
         {notice ? <p role="alert">{notice}</p> : null}
       </UnavailableActionPanel>
+      {one ? <JobDetailPanel detail={detail} messages={messages} locale={locale} /> : null}
     </>
   )
+}
+
+function JobDetailPanel({ detail, messages, locale }: { readonly detail: ReturnType<typeof useJobDetail>; readonly messages: MessageCatalog; readonly locale: Locale }) {
+  const copy = messages.resources.jobs.detail
+  if (detail.isLoading) return <section className="job-detail" aria-live="polite"><h2>{copy.title}</h2><p role="status">{copy.loading}</p></section>
+  if (detail.isError) return <section className="job-detail" aria-live="polite"><h2>{copy.title}</h2><div className="error-state" role="alert"><p>{copy.unavailable}</p><Button label={copy.refresh} variant="secondary" onClick={() => void detail.refetch()} /></div></section>
+  if (!detail.data) return null
+  return <JobDetailContents detail={detail.data} messages={messages} locale={locale} refreshing={detail.isFetching} onRefresh={() => void detail.refetch()} />
+}
+
+function JobDetailContents({ detail, messages, locale, refreshing, onRefresh }: { readonly detail: JobDetail; readonly messages: MessageCatalog; readonly locale: Locale; readonly refreshing: boolean; readonly onRefresh: () => void }) {
+  const copy = messages.resources.jobs.detail
+  return <section className="job-detail" aria-labelledby="job-detail-title" aria-busy={refreshing}>
+    <header className="job-detail-header"><div><h2 id="job-detail-title">{copy.title}</h2><p>{copy.description}</p></div><Button label={copy.refresh} variant="secondary" isLoading={refreshing} onClick={onRefresh} /></header>
+    <p className="detail-refreshed" role="status">{refreshing ? copy.refreshing : `${copy.refreshed}: ${formatDate(detail.refreshedAt, locale)}`}</p>
+    <div className="job-detail-grid">
+      <section><h3>{copy.lease}</h3><dl className="facts-list"><div><dt>{copy.lease}</dt><dd>{detail.lease.active ? copy.leaseActive : copy.leaseInactive}</dd></div><div><dt>{copy.expires}</dt><dd>{formatDate(detail.lease.expiresAt, locale)}</dd></div></dl></section>
+      <section><h3>{copy.items}</h3>{detail.itemsLimited ? <p>{copy.itemsLimited(detail.items.length, detail.itemsTotal)}</p> : null}{detail.items.length === 0 ? <p>{copy.noItems}</p> : <ul className="job-detail-list">{detail.items.map((item) => <li key={item.id}><State value={item.state} locale={locale} /><span>{copy.attempts}: {item.attemptCount}</span>{item.errorClass ? <span>{copy.errorClass}: {item.errorClass}</span> : null}</li>)}</ul>}</section>
+      <section><h3>{copy.logs}</h3>{detail.logs.length === 0 ? <p>{copy.noLogs}</p> : <ul className="job-detail-list">{detail.logs.map((log) => <li key={log.id}><strong>{log.level}</strong><span>{formatDate(log.createdAt, locale)}</span><span>{log.message}</span></li>)}</ul>}</section>
+    </div>
+  </section>
 }
 
 export function SavedQueriesPage({ messages, locale }: { readonly messages: MessageCatalog; readonly locale: Locale }) {

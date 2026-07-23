@@ -57,6 +57,37 @@ func TestReadAPIProvidesVersionedBoundedWorkspaceData(t *testing.T) {
 	}
 }
 
+func TestJobDetailAPIUsesSafeBoundedWorkspaceDTO(t *testing.T) {
+	const jobID = "11111111-1111-1111-1111-111111111111"
+	app := &apiApplication{job: domain.Job{ID: jobID, Kind: "download", State: domain.JobRunning}, jobDetail: application.WorkspaceJobDetail{
+		Job: domain.Job{ID: jobID, Kind: "download", State: domain.JobRunning}, Items: []application.WorkspaceJobItemDetail{{ID: "item-1", State: domain.JobRunning, AttemptCount: 1, ErrorClass: "network"}},
+		ItemsTotal: 1, Logs: []application.WorkspaceJobLogDetail{{ID: 1, ItemID: "item-1", Level: "info", Message: "sanitized local progress"}}, Lease: application.WorkspaceJobLeaseDetail{Active: true},
+	}}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+
+	response := get(t, client, base+"/api/v1/jobs/"+jobID+"/detail")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("detail status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	body := readResponse(t, response)
+	for _, forbidden := range []string{"checkpoint", "leaseOwner", "fields", "/private", "secret"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("detail API leaked %q: %s", forbidden, body)
+		}
+	}
+	var detail application.WorkspaceJobDetail
+	if err := json.Unmarshal([]byte(body), &detail); err != nil || detail.Job.ID != jobID || len(detail.Items) != 1 || len(detail.Logs) != 1 || !detail.Lease.Active {
+		t.Fatalf("detail DTO=%#v err=%v", detail, err)
+	}
+
+	response = get(t, client, base+"/api/v1/jobs/"+jobID+"/detail?limit=1")
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("detail query status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "invalid_argument")
+}
+
 func TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries(t *testing.T) {
 	server, client := startAPIApplicationServer(t, &apiApplication{})
 	base := strings.TrimSuffix(strings.Split(server.URL(), "?")[0], "/")
@@ -397,6 +428,7 @@ type apiApplication struct {
 	jobs             domain.Page[domain.Job]
 	saved            []domain.SavedArticleQuery
 	job              domain.Job
+	jobDetail        application.WorkspaceJobDetail
 	article          domain.Article
 	accountsErr      error
 	accountQuery     domain.AccountQuery
@@ -505,6 +537,9 @@ func (app *apiApplication) QueryJobs(_ context.Context, query domain.JobQuery) (
 }
 func (app *apiApplication) GetJob(context.Context, domain.JobID) (domain.Job, error) {
 	return app.job, nil
+}
+func (app *apiApplication) JobDetails(context.Context, domain.JobID) (application.WorkspaceJobDetail, error) {
+	return app.jobDetail, nil
 }
 
 var _ application.Application = (*apiApplication)(nil)

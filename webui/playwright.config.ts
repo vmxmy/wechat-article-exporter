@@ -12,11 +12,7 @@ export default defineConfig({
   reporter: process.env.CI ? [['github'], ['html', { outputFolder: '../.playwright-report', open: 'never' }]] : [['list'], ['html', { outputFolder: '../.playwright-report', open: 'never' }]],
   use: {
     baseURL,
-    // The loopback fixture fulfils every API request in-process. Chromium's
-    // network-trace copier races those fulfilled responses on failure, which
-    // can mask the actual assertion with ENOENT; screenshots and videos still
-    // provide failure artifacts.
-    trace: 'off',
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure'
   },
