@@ -139,6 +139,89 @@ func TestMaintenanceAPIStrictMutationProtectionBoundedInputAndConfirmation(t *te
 	response.Body.Close()
 }
 
+func TestMaintenanceAPICredentialRemovalAndProxyControlsUseAuthenticatedFacade(t *testing.T) {
+	credentials := &webCredentialMaintenance{}
+	proxies := &webProxyMaintenance{
+		removed:      application.ProxyRoute{ID: "proxy-1", Endpoint: "https://proxy.test/remove?token=not-for-output"},
+		enabledRoute: application.ProxyRoute{ID: "proxy-1", Endpoint: "https://proxy.test/enable?token=not-for-output", Enabled: true},
+		disabled:     application.ProxyRoute{ID: "proxy-1", Endpoint: "https://proxy.test/disable?token=not-for-output"},
+		probe:        application.ProxyProbeResult{Route: application.ProxyRoute{ID: "proxy-1", Endpoint: "https://proxy.test/test?token=not-for-output"}, CredentialEligible: true},
+	}
+	server, client := startMaintenanceServer(t, application.NewMaintenance(application.MaintenanceOptions{Credentials: credentials, Proxies: proxies}), nil)
+	base := authorizeAPI(t, client, server.URL())
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+
+	response := doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/credentials/remove", `{"id":"credential-1"}`, csrf))
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("credential removal status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	response.Body.Close()
+	if credentials.removedID != "credential-1" {
+		t.Fatalf("removed credential ID=%q", credentials.removedID)
+	}
+
+	response = doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/proxies/disclosure", `{"name":" trusted ","endpoint":"https://proxy.test/?token=not-for-output","authorization":"proxy-secret","trust":"credential-trusted","classes":["article_credential"],"priority":90}`, csrf))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("proxy disclosure status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	disclosure := readResponse(t, response)
+	if !strings.Contains(disclosure, "trust-proxy-credentials:trusted") || strings.Contains(disclosure, "not-for-output") || strings.Contains(disclosure, "proxy-secret") {
+		t.Fatalf("proxy disclosure was unsafe or missing confirmation: %s", disclosure)
+	}
+
+	for _, operation := range []struct {
+		path string
+		want string
+	}{
+		{path: "/api/v1/settings/proxies/proxy-1/remove", want: "remove"},
+		{path: "/api/v1/settings/proxies/proxy-1/enable", want: "enable"},
+		{path: "/api/v1/settings/proxies/proxy-1/disable", want: "disable"},
+		{path: "/api/v1/settings/proxies/proxy-1/test", want: "test"},
+	} {
+		response = doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+operation.path, `{}`, csrf))
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("proxy %s status=%d body=%s", operation.want, response.StatusCode, readResponse(t, response))
+		}
+		if body := readResponse(t, response); strings.Contains(body, "not-for-output") {
+			t.Fatalf("proxy %s leaked endpoint secret: %s", operation.want, body)
+		}
+	}
+	if proxies.removedID != "proxy-1" || proxies.enabledID != "proxy-1" || proxies.disabledID != "proxy-1" || proxies.enabledState || proxies.testedID != "proxy-1" {
+		t.Fatalf("proxy controls did not reach facade: %#v", proxies)
+	}
+}
+
+func TestMaintenanceAPIRejectsMalformedCredentialAndProxyInputsWithSafeEnvelope(t *testing.T) {
+	credentials := &webCredentialMaintenance{}
+	proxies := &webProxyMaintenance{}
+	server, client := startMaintenanceServer(t, application.NewMaintenance(application.MaintenanceOptions{Credentials: credentials, Proxies: proxies}), nil)
+	base := authorizeAPI(t, client, server.URL())
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+
+	for _, request := range []*http.Request{
+		maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/credentials/remove", `{"id":"/private/credential-secret"}`, csrf),
+		maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/proxies/disclosure", `{"name":"","endpoint":"https://proxy.test/?token=not-for-output","authorization":"proxy-secret"}`, csrf),
+		maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/proxies", `{"name":"","endpoint":"https://proxy.test/?token=not-for-output","authorization":"proxy-secret"}`, csrf),
+		requestWith(t, http.MethodPost, base+"/api/v1/settings/proxies/proxy-1/test", strings.NewReader(`{}`), map[string]string{"Origin": "http://evil.example", "Content-Type": "application/json", "X-CSRF-Token": csrf}),
+	} {
+		response := doMaintenance(t, client, request)
+		if response.StatusCode != http.StatusBadRequest && response.StatusCode != http.StatusForbidden {
+			t.Fatalf("invalid maintenance status=%d body=%s", response.StatusCode, readResponse(t, response))
+		}
+		body := readResponse(t, response)
+		if strings.Contains(body, "/private") || strings.Contains(body, "secret") || strings.Contains(body, "not-for-output") {
+			t.Fatalf("invalid maintenance envelope leaked input: %s", body)
+		}
+		var envelope apiErrorEnvelope
+		if err := json.Unmarshal([]byte(body), &envelope); err != nil || envelope.APIVersion != apiVersion || envelope.Error.Code == "" || envelope.Error.Message == "" {
+			t.Fatalf("invalid maintenance envelope=%#v err=%v", envelope, err)
+		}
+	}
+	if credentials.removedID != "" || proxies.added.Name != "" {
+		t.Fatalf("invalid maintenance input reached facade: credentials=%#v proxies=%#v", credentials, proxies)
+	}
+}
+
 func startMaintenanceServer(t *testing.T, maintenance *application.MaintenanceService, storage *application.MaintenanceStorageService) (*Server, *http.Client) {
 	t.Helper()
 	server, err := New(Options{Application: &apiApplication{}, Maintenance: maintenance, StorageMaintenance: storage})
@@ -172,9 +255,10 @@ func doMaintenance(t *testing.T, client *http.Client, request *http.Request) *ht
 }
 
 type webCredentialMaintenance struct {
-	items    []application.CredentialMetadata
-	imported application.CredentialMetadata
-	request  application.CredentialImportRequest
+	items     []application.CredentialMetadata
+	imported  application.CredentialMetadata
+	request   application.CredentialImportRequest
+	removedID string
 }
 
 func (fake *webCredentialMaintenance) ListCredentialMetadata(context.Context) ([]application.CredentialMetadata, error) {
@@ -184,24 +268,47 @@ func (fake *webCredentialMaintenance) ImportCredential(_ context.Context, reques
 	fake.request = request
 	return fake.imported, nil
 }
-func (fake *webCredentialMaintenance) RemoveCredential(context.Context, string) error { return nil }
+func (fake *webCredentialMaintenance) RemoveCredential(_ context.Context, id string) error {
+	fake.removedID = id
+	return nil
+}
 
-type webProxyMaintenance struct{ routes []application.ProxyRoute }
+type webProxyMaintenance struct {
+	routes       []application.ProxyRoute
+	added        application.ProxyAddRequest
+	removed      application.ProxyRoute
+	enabledRoute application.ProxyRoute
+	disabled     application.ProxyRoute
+	probe        application.ProxyProbeResult
+	removedID    string
+	enabledID    string
+	enabledState bool
+	disabledID   string
+	testedID     string
+}
 
 func (fake *webProxyMaintenance) ListProxies(context.Context) ([]application.ProxyRoute, error) {
 	return fake.routes, nil
 }
-func (fake *webProxyMaintenance) AddProxy(context.Context, application.ProxyAddRequest) (application.ProxyRoute, error) {
-	return application.ProxyRoute{}, nil
+func (fake *webProxyMaintenance) AddProxy(_ context.Context, request application.ProxyAddRequest) (application.ProxyRoute, error) {
+	fake.added = request
+	return application.ProxyRoute{ID: "proxy-1", Endpoint: request.Endpoint}, nil
 }
-func (fake *webProxyMaintenance) RemoveProxy(context.Context, string) (application.ProxyRoute, error) {
-	return application.ProxyRoute{}, nil
+func (fake *webProxyMaintenance) RemoveProxy(_ context.Context, id string) (application.ProxyRoute, error) {
+	fake.removedID = id
+	return fake.removed, nil
 }
-func (fake *webProxyMaintenance) SetProxyEnabled(context.Context, string, bool) (application.ProxyRoute, error) {
-	return application.ProxyRoute{}, nil
+func (fake *webProxyMaintenance) SetProxyEnabled(_ context.Context, id string, enabled bool) (application.ProxyRoute, error) {
+	if enabled {
+		fake.enabledID, fake.enabledState = id, true
+		return fake.enabledRoute, nil
+	}
+	fake.disabledID, fake.enabledState = id, false
+	return fake.disabled, nil
 }
-func (fake *webProxyMaintenance) TestProxy(context.Context, string) (application.ProxyProbeResult, error) {
-	return application.ProxyProbeResult{}, nil
+func (fake *webProxyMaintenance) TestProxy(_ context.Context, id string) (application.ProxyProbeResult, error) {
+	fake.testedID = id
+	return fake.probe, nil
 }
 
 type webPreferencesMaintenance struct{ preferences application.Preferences }
@@ -220,6 +327,8 @@ type webStorageMaintenance struct {
 	diagnostics  application.DiagnosticsReport
 	plan         application.GarbageCollectionPlan
 	applied      []application.GarbageCollectionApplyRequest
+	archive      []byte
+	openedID     string
 }
 
 func (fake *webStorageMaintenance) CreateBackup(context.Context) (application.BackupReceipt, error) {
@@ -227,6 +336,13 @@ func (fake *webStorageMaintenance) CreateBackup(context.Context) (application.Ba
 }
 func (fake *webStorageMaintenance) VerifyBackup(context.Context, string) (application.BackupVerification, error) {
 	return fake.verification, nil
+}
+func (fake *webStorageMaintenance) OpenBackup(_ context.Context, id string) (io.ReadCloser, error) {
+	if id != fake.receipt.ID || fake.openedID != "" {
+		return nil, errors.New("unknown backup handle")
+	}
+	fake.openedID = id
+	return io.NopCloser(bytes.NewReader(fake.archive)), nil
 }
 func (fake *webStorageMaintenance) CheckIntegrity(context.Context) (application.IntegrityReport, error) {
 	return fake.integrity, nil

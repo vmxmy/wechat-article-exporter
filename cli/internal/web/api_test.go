@@ -207,6 +207,85 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 	}
 }
 
+func TestAccountCRUDAndSearchUseAuthenticatedWorkspaceFacade(t *testing.T) {
+	app := &apiApplication{
+		account:        domain.Account{ID: "account-1", FakeID: "fixture", Name: "Fixture"},
+		searchAccounts: domain.Page[domain.Account]{Items: []domain.Account{{ID: "account-1", FakeID: "fixture", Name: "Fixture"}}, Total: 1},
+	}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+	mutate := func(method, path, body string) *http.Response {
+		request := requestWith(t, method, base+path, strings.NewReader(body), map[string]string{"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf})
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+
+	response := get(t, client, base+"/api/v1/accounts/search?search=%20fixture%20&page=2&page_size=25")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("account search status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	response.Body.Close()
+	if app.searchQuery.Keyword != "fixture" || app.searchQuery.Offset != 25 || app.searchQuery.Limit != 25 {
+		t.Fatalf("account search query=%#v", app.searchQuery)
+	}
+
+	response = mutate(http.MethodPost, "/api/v1/accounts", `{"id":"ignored","fakeid":" fixture ","name":" Fixture "}`)
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("account create status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	response.Body.Close()
+	if app.savedAccount.ID != "" || app.savedAccount.FakeID != "fixture" || app.savedAccount.Name != "Fixture" {
+		t.Fatalf("created account=%#v", app.savedAccount)
+	}
+
+	response = mutate(http.MethodPatch, "/api/v1/accounts/account-1", `{"id":"wrong","fakeid":"ignored","name":" Updated "}`)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("account update status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	response.Body.Close()
+	if app.updatedAccount.ID != "account-1" || app.updatedAccount.Name != "Updated" {
+		t.Fatalf("updated account=%#v", app.updatedAccount)
+	}
+
+	response = mutate(http.MethodDelete, "/api/v1/accounts", `{"ids":["account-1","account-2"],"confirm":"delete-accounts:account-1,account-2"}`)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("account delete status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	response.Body.Close()
+	if got := app.deletedAccounts; len(got) != 2 || got[0] != "account-1" || got[1] != "account-2" {
+		t.Fatalf("deleted accounts=%#v", got)
+	}
+}
+
+func TestAccountAPIRejectsInvalidMutationInputsBeforeWorkspaceCalls(t *testing.T) {
+	app := &apiApplication{}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+
+	for _, request := range []*http.Request{
+		requestWith(t, http.MethodPost, base+"/api/v1/accounts", strings.NewReader(`{"fakeid":"fixture"}`), map[string]string{"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf}),
+		requestWith(t, http.MethodDelete, base+"/api/v1/accounts", strings.NewReader(`{"ids":["account-1"],"confirm":"wrong"}`), map[string]string{"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf}),
+		requestWith(t, http.MethodPost, base+"/api/v1/accounts", strings.NewReader(`{"fakeid":"fixture","name":"Fixture"}`), map[string]string{"Origin": "http://evil.example", "Content-Type": "application/json", "X-CSRF-Token": csrf}),
+	} {
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusBadRequest && response.StatusCode != http.StatusForbidden && response.StatusCode != http.StatusMethodNotAllowed {
+			t.Fatalf("invalid account mutation status=%d body=%s", response.StatusCode, readResponse(t, response))
+		}
+		assertAPIError(t, response, map[int]string{http.StatusBadRequest: "invalid_argument", http.StatusForbidden: "forbidden", http.StatusMethodNotAllowed: "method_not_allowed"}[response.StatusCode])
+	}
+	if app.savedAccount != (domain.Account{}) || app.updatedAccount != (domain.Account{}) || len(app.deletedAccounts) != 0 {
+		t.Fatalf("invalid account mutation reached application: %#v", app)
+	}
+}
+
 func TestArticlePreviewUsesSafeWorkspaceHandoff(t *testing.T) {
 	app := &apiApplication{article: domain.Article{ID: "article-1", Title: "Fixture", HasContent: true}}
 	server, client := startAPIApplicationServer(t, app)
@@ -439,6 +518,11 @@ type apiApplication struct {
 	completed        wechat.Session
 	loginSessionID   string
 	account          domain.Account
+	searchAccounts   domain.Page[domain.Account]
+	searchQuery      domain.AccountQuery
+	savedAccount     domain.Account
+	updatedAccount   domain.Account
+	deletedAccounts  []domain.AccountID
 	syncRequest      domain.SynchronizeAccountRequest
 	downloadRequests []domain.DownloadRequest
 	albumRequest     application.WorkspaceAlbumTraversalRequest
@@ -460,13 +544,16 @@ func (app *apiApplication) CompleteLogin(context.Context) (wechat.Session, error
 	return app.completed, nil
 }
 func (app *apiApplication) Logout(context.Context) error { app.loggedOut = true; return nil }
-func (app *apiApplication) SaveAccount(context.Context, domain.Account) (domain.Account, error) {
+func (app *apiApplication) SaveAccount(_ context.Context, account domain.Account) (domain.Account, error) {
+	app.savedAccount = account
 	return app.account, nil
 }
-func (app *apiApplication) UpdateAccount(context.Context, domain.Account) (domain.Account, error) {
+func (app *apiApplication) UpdateAccount(_ context.Context, account domain.Account) (domain.Account, error) {
+	app.updatedAccount = account
 	return app.account, nil
 }
-func (app *apiApplication) DeleteAccounts(context.Context, []domain.AccountID) (domain.AccountDeleteReport, error) {
+func (app *apiApplication) DeleteAccounts(_ context.Context, ids []domain.AccountID) (domain.AccountDeleteReport, error) {
+	app.deletedAccounts = append([]domain.AccountID(nil), ids...)
 	return domain.AccountDeleteReport{AccountsDeleted: 1}, nil
 }
 func (app *apiApplication) SynchronizeAccount(_ context.Context, request domain.SynchronizeAccountRequest) (domain.Job, error) {
@@ -515,6 +602,12 @@ func (app *apiApplication) QueryAccounts(_ context.Context, query domain.Account
 	page := app.accounts
 	page.Offset, page.Limit = query.Offset, query.Limit
 	return page, app.accountsErr
+}
+func (app *apiApplication) SearchAccounts(_ context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
+	app.searchQuery = query
+	page := app.searchAccounts
+	page.Offset, page.Limit = query.Offset, query.Limit
+	return page, nil
 }
 func (app *apiApplication) QueryArticles(_ context.Context, query domain.ArticleQuery) (domain.Page[domain.Article], error) {
 	app.articleQuery = query
