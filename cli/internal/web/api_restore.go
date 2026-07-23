@@ -51,7 +51,7 @@ func (server *Server) restoreUpload(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	part, err := reader.NextPart()
-	if err != nil || part.FormName() != restoreArchiveFormField || part.FileName() == "" {
+	if err != nil || part.FormName() != restoreArchiveFormField || !validMultipartFilename(part) {
 		server.invalidMaintenanceInput(writer)
 		return
 	}

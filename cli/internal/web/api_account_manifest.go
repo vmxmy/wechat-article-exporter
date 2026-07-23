@@ -75,7 +75,7 @@ func (server *Server) accountManifestUpload(writer http.ResponseWriter, request 
 		return
 	}
 	part, err := reader.NextPart()
-	if err != nil || part.FormName() != accountManifestFormField || part.FileName() == "" {
+	if err != nil || part.FormName() != accountManifestFormField || !validMultipartFilename(part) {
 		server.invalidAccountManifestInput(writer)
 		return
 	}

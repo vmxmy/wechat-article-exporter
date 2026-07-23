@@ -49,7 +49,7 @@ func (server *Server) credentialUploadControl(writer http.ResponseWriter, reques
 		return true
 	}
 	part, err := reader.NextPart()
-	if err != nil || part.FormName() != credentialUploadFormField || part.FileName() == "" {
+	if err != nil || part.FormName() != credentialUploadFormField || !validMultipartFilename(part) {
 		server.invalidMaintenanceInput(writer)
 		return true
 	}
