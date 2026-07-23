@@ -498,10 +498,12 @@ func (model Model) renderModal() string {
 			"\n\nSafe text/Markdown preview; article scripts are never executed in the terminal."
 	case modalLogin:
 		content = "WeChat QR login\n\n"
-		if text, err := wechat.RenderQRImageText(model.loginFlow.QRBytes); err == nil && !model.options.ASCII {
+		maximumQRWidth := max(12, min(model.width-8, 86))
+		if text, err := wechat.RenderQRImageText(model.loginFlow.QRBytes); err == nil && !model.options.ASCII &&
+			maxLineWidth(text) <= maximumQRWidth {
 			content += text + "\n"
 		} else {
-			content += "QR image loaded in memory. Use an UTF-8 terminal or the non-interactive --qr-output flow if it cannot render.\n"
+			content += "QR image loaded in memory. Use an UTF-8 terminal with more width or the non-interactive --qr-output flow.\n"
 		}
 		content += "Expires: " + formatTime(model.loginFlow.ExpiresAt) + "\nPress r to check status · Esc cancel"
 	}
@@ -509,6 +511,14 @@ func (model Model) renderModal() string {
 		return "---\n" + content + "\n---"
 	}
 	return style.border.Width(max(20, min(model.width-4, 90))).Render(content)
+}
+
+func maxLineWidth(value string) int {
+	maximum := 0
+	for _, line := range strings.Split(value, "\n") {
+		maximum = max(maximum, utf8.RuneCountInString(line))
+	}
+	return maximum
 }
 
 func renderOperation(style workspaceTheme, operation OperationResult) string {

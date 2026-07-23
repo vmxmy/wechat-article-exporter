@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"os"
 	"reflect"
@@ -250,6 +253,58 @@ func TestWorkspaceOnboardingQRAndOfflineEntryPoints(t *testing.T) {
 	model = updateWorkspace(t, model, runCommand(t, command))
 	if model.session.State != wechat.SessionAuthenticated || model.modal != modalNone {
 		t.Fatalf("session=%#v modal=%q", model.session, model.modal)
+	}
+}
+
+func TestWorkspaceLoginCompletesAfterScannedStatus(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	app.session = wechat.Session{State: wechat.SessionMissing}
+	app.loginPoll = wechat.PollResult{State: wechat.QRScanned, AccountCount: 1}
+	model := loadedWorkspace(t, app, nil)
+
+	next, command := model.Update(keyRune("l"))
+	model = next.(Model)
+	model = updateWorkspace(t, model, runCommand(t, command))
+	next, command = model.Update(keyRune("r"))
+	model = next.(Model)
+	next, command = model.Update(runCommand(t, command))
+	model = next.(Model)
+	model = updateWorkspace(t, model, runCommand(t, command))
+
+	if model.session.State != wechat.SessionAuthenticated || model.modal != modalNone {
+		t.Fatalf("session=%#v modal=%q", model.session, model.modal)
+	}
+}
+
+func TestWorkspaceLoginModalRendersRasterQRAtModuleWidth(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, nil)
+	model.options.NoColor = true
+	model.options.ASCII = false
+	model.width = 100
+	model.modal = modalLogin
+	model.loginFlow = wechat.LoginFlow{QRBytes: scaledQRPNG(t, 29, 4, 3), ExpiresAt: time.Now().UTC().Add(time.Minute)}
+
+	view := model.renderModal()
+	for _, line := range strings.Split(view, "\n") {
+		if width := len([]rune(line)); width > 92 {
+			t.Fatalf("login modal wrapped a QR raster line to %d columns:\n%s", width, view)
+		}
+	}
+}
+
+func TestWorkspaceLoginModalFallsBackWhenQRExceedsTerminalWidth(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, nil)
+	model.options.NoColor = true
+	model.options.ASCII = false
+	model.width = 30
+	model.modal = modalLogin
+	model.loginFlow = wechat.LoginFlow{QRBytes: scaledQRPNG(t, 29, 4, 3), ExpiresAt: time.Now().UTC().Add(time.Minute)}
+
+	view := model.renderModal()
+	if !strings.Contains(view, "QR image loaded in memory") {
+		t.Fatalf("narrow login modal must show QR output fallback:\n%s", view)
 	}
 }
 
@@ -851,6 +906,34 @@ func runCommand(t *testing.T, command tea.Cmd) tea.Msg {
 
 func keyRune(value string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)} }
 
+func scaledQRPNG(t *testing.T, modules, scale, quiet int) []byte {
+	t.Helper()
+	size := (modules + quiet*2) * scale
+	imageValue := image.NewGray(image.Rect(0, 0, size, size))
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			imageValue.SetGray(x, y, color.Gray{Y: 255})
+		}
+	}
+	for moduleY := 0; moduleY < modules; moduleY++ {
+		for moduleX := 0; moduleX < modules; moduleX++ {
+			if (moduleX+moduleY)%3 != 0 && moduleX != 0 && moduleY != 0 {
+				continue
+			}
+			for y := 0; y < scale; y++ {
+				for x := 0; x < scale; x++ {
+					imageValue.SetGray((moduleX+quiet)*scale+x, (moduleY+quiet)*scale+y, color.Gray{Y: 0})
+				}
+			}
+		}
+	}
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, imageValue); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
 type fakeWorkspaceExtensions struct {
 	preview  PreviewDocument
 	opened   int
@@ -891,6 +974,7 @@ type fakeWorkspaceApplication struct {
 	deleted        [][]domain.AccountID
 	cancelled      []domain.JobID
 	loginSessions  []string
+	loginPoll      wechat.PollResult
 	savedAccounts  []domain.Account
 	savedQueries   []domain.SavedArticleQuery
 }
@@ -911,6 +995,9 @@ func (app *fakeWorkspaceApplication) BeginLogin(_ context.Context, sessionID str
 }
 func (app *fakeWorkspaceApplication) PollLogin(context.Context) (wechat.PollResult, error) {
 	app.record("PollLogin")
+	if app.loginPoll.State != "" {
+		return app.loginPoll, nil
+	}
 	return wechat.PollResult{State: wechat.QRConfirmed, AccountCount: 1}, nil
 }
 func (app *fakeWorkspaceApplication) CompleteLogin(context.Context) (wechat.Session, error) {

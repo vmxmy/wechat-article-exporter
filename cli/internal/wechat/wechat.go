@@ -478,7 +478,7 @@ func (client *Client) Login(ctx context.Context, options LoginOptions) (Session,
 				options.OnStatus(result)
 			}
 			switch result.State {
-			case QRConfirmed:
+			case QRConfirmed, QRScanned:
 				return client.CompleteLogin(ctx)
 			case QRExpired:
 				client.clearLoginState()
@@ -969,7 +969,125 @@ func RenderQRImageText(imageBytes []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return RenderImageText(imageValue), nil
+	return RenderQRCodeText(imageValue), nil
+}
+
+// RenderQRCodeText renders square QR modules at a terminal-friendly width.
+// WeChat commonly returns a raster QR with a generous quiet zone and multiple
+// pixels per module. Rendering raw pixels makes the QR hundreds of terminal
+// columns wide, so infer its complete module grid, crop the quiet zone, and
+// render one terminal cell per module. The result still uses upper/lower half
+// blocks to preserve the QR's square aspect ratio in terminals whose cells are
+// taller than wide.
+func RenderQRCodeText(imageValue image.Image) string {
+	moduleScale, quietZone, moduleCount, ok := qrRasterGrid(imageValue)
+	if !ok {
+		return RenderImageText(imageValue)
+	}
+	bounds := imageValue.Bounds()
+	left := bounds.Min.X + quietZone*moduleScale
+	top := bounds.Min.Y + quietZone*moduleScale
+	var builder strings.Builder
+	for y := 0; y < moduleCount; y += 2 {
+		for x := 0; x < moduleCount; x++ {
+			topDark := moduleIsDark(imageValue, left+x*moduleScale, top+y*moduleScale, moduleScale)
+			bottomDark := false
+			if y+1 < moduleCount {
+				bottomDark = moduleIsDark(imageValue, left+x*moduleScale, top+(y+1)*moduleScale, moduleScale)
+			}
+			switch {
+			case topDark && bottomDark:
+				builder.WriteRune('█')
+			case topDark:
+				builder.WriteRune('▀')
+			case bottomDark:
+				builder.WriteRune('▄')
+			default:
+				builder.WriteRune(' ')
+			}
+		}
+		builder.WriteByte('\n')
+	}
+	return builder.String()
+}
+
+func qrRasterGrid(imageValue image.Image) (scale, quietZone, moduleCount int, ok bool) {
+	bounds := imageValue.Bounds()
+	if bounds.Dx() != bounds.Dy() {
+		return 0, 0, 0, false
+	}
+	for candidate := bounds.Dx(); candidate >= 1; candidate-- {
+		if bounds.Dx()%candidate != 0 {
+			continue
+		}
+		grid := bounds.Dx() / candidate
+		for quiet := 8; quiet >= 0; quiet-- {
+			modules := grid - quiet*2
+			if !validQRModuleCount(modules) || !uniformModuleGrid(imageValue, candidate) ||
+				!hasLightQuietZone(imageValue, candidate, quiet) {
+				continue
+			}
+			return candidate, quiet, modules, true
+		}
+	}
+	return 0, 0, 0, false
+}
+
+func validQRModuleCount(value int) bool {
+	return value >= 21 && value <= 177 && (value-17)%4 == 0
+}
+
+func uniformModuleGrid(imageValue image.Image, scale int) bool {
+	bounds := imageValue.Bounds()
+	if scale == 1 {
+		return true
+	}
+	mismatches, pixels := 0, 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y += scale {
+		for x := bounds.Min.X; x < bounds.Max.X; x += scale {
+			dark := moduleIsDark(imageValue, x, y, scale)
+			for innerY := y; innerY < y+scale; innerY++ {
+				for innerX := x; innerX < x+scale; innerX++ {
+					pixels++
+					if isDark(imageValue.At(innerX, innerY)) != dark {
+						mismatches++
+					}
+				}
+			}
+		}
+	}
+	return mismatches*100 <= pixels*2
+}
+
+func hasLightQuietZone(imageValue image.Image, scale, quietZone int) bool {
+	if quietZone == 0 {
+		return true
+	}
+	bounds := imageValue.Bounds()
+	grid := bounds.Dx() / scale
+	for moduleY := 0; moduleY < grid; moduleY++ {
+		for moduleX := 0; moduleX < grid; moduleX++ {
+			if moduleX >= quietZone && moduleX < grid-quietZone && moduleY >= quietZone && moduleY < grid-quietZone {
+				continue
+			}
+			if moduleIsDark(imageValue, bounds.Min.X+moduleX*scale, bounds.Min.Y+moduleY*scale, scale) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func moduleIsDark(imageValue image.Image, left, top, scale int) bool {
+	dark, pixels := 0, scale*scale
+	for y := top; y < top+scale; y++ {
+		for x := left; x < left+scale; x++ {
+			if isDark(imageValue.At(x, y)) {
+				dark++
+			}
+		}
+	}
+	return dark*2 >= pixels
 }
 
 func RenderImageText(imageValue image.Image) string {

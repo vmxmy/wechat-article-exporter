@@ -239,6 +239,40 @@ func TestLoginRefreshesExpiredQRWithinBound(t *testing.T) {
 	}
 }
 
+func TestLoginCompletesWhenUpstreamReportsScanned(t *testing.T) {
+	qr := fixturePNG(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Query().Get("action") {
+		case "startlogin":
+			http.SetCookie(writer, &http.Cookie{Name: "uuid", Value: "fixture-scanned", Path: "/"})
+			io.WriteString(writer, `{"base_resp":{"ret":0}}`)
+		case "getqrcode":
+			writer.Write(qr)
+		case "ask":
+			io.WriteString(writer, `{"base_resp":{"ret":0},"status":4,"acct_size":1}`)
+		case "login":
+			http.SetCookie(writer, &http.Cookie{Name: "bizuin", Value: "fixture", Path: "/"})
+			io.WriteString(writer, `{"base_resp":{"ret":0},"redirect_url":"/cgi-bin/home?token=fixture"}`)
+		default:
+			if request.URL.Path == "/cgi-bin/home" {
+				io.WriteString(writer, `wx.cgiData.nick_name = "Fixture";`)
+				return
+			}
+			t.Fatalf("unexpected request %s", request.URL)
+		}
+	}))
+	defer server.Close()
+
+	client := newClient(server.Client(), secrets.NewMemoryStore(), "default", server.URL)
+	session, err := client.Login(context.Background(), LoginOptions{PollInterval: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.State != SessionAuthenticated {
+		t.Fatalf("session=%#v", session)
+	}
+}
+
 func TestLoginCancellationStopsPollingWithoutCompletingOrPersistingSession(t *testing.T) {
 	qr := fixturePNG(t)
 	store := secrets.NewMemoryStore()
@@ -574,6 +608,46 @@ func TestWriteAndRenderQRImage(t *testing.T) {
 	}
 	if !strings.ContainsAny(text, "█▀▄") {
 		t.Fatalf("rendered QR lacks blocks: %q", text)
+	}
+}
+
+func TestRenderQRImageTextDownsamplesRasterModulesAndCropsQuietZone(t *testing.T) {
+	const modules, scale, quiet = 29, 4, 3
+	size := (modules + quiet*2) * scale
+	imageValue := image.NewGray(image.Rect(0, 0, size, size))
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			imageValue.SetGray(x, y, color.Gray{Y: 255})
+		}
+	}
+	for moduleY := 0; moduleY < modules; moduleY++ {
+		for moduleX := 0; moduleX < modules; moduleX++ {
+			if (moduleX+moduleY)%3 != 0 && moduleX != 0 && moduleY != 0 {
+				continue
+			}
+			for y := 0; y < scale; y++ {
+				for x := 0; x < scale; x++ {
+					imageValue.SetGray((moduleX+quiet)*scale+x, (moduleY+quiet)*scale+y, color.Gray{Y: 0})
+				}
+			}
+		}
+	}
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, imageValue); err != nil {
+		t.Fatal(err)
+	}
+	text, err := RenderQRImageText(buffer.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	if len(lines) != (modules+1)/2 {
+		t.Fatalf("QR terminal row count = %d, want %d", len(lines), (modules+1)/2)
+	}
+	for _, line := range lines {
+		if got := len([]rune(line)); got != modules {
+			t.Fatalf("QR terminal width = %d, want %d; line=%q", got, modules, line)
+		}
 	}
 }
 
