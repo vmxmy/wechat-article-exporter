@@ -17,6 +17,8 @@ import {
   addProxy, applyGarbageCollection, commitRestore, createBackup, createDiagnosticBundle, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importAccountManifest, importCredential, patchPreferences, planGarbageCollection, prepareRestore, removeCredential, removeProxy, setProxyEnabled, testProxy, uploadAccountManifest, uploadCredentialFile, uploadRestoreArchive, verifyBackup,
   deleteSavedQuery, downloadArticles, saveSavedQuery, traverseAlbum,
   type AccountInput,
+  type AlbumPageParams,
+  type AlbumTraversalOrder,
   type ArticleDownloadKind,
   type ArticlePageParams,
   type PageParams,
@@ -32,7 +34,7 @@ export const queryKeys = {
   accounts: (params: PageParams) => ['accounts', params] as const,
   articles: (params: ArticlePageParams) => ['articles', params] as const,
   articleResourceSummary: (id: string) => ['articles', id, 'resources'] as const,
-  albums: (params: PageParams) => ['albums', params] as const,
+  albums: (params: AlbumPageParams) => ['albums', params] as const,
   jobs: (params: PageParams) => ['jobs', params] as const,
   jobDetail: (id: string) => ['jobs', id, 'detail'] as const,
   exports: (params: PageParams) => ['exports', params] as const,
@@ -79,7 +81,7 @@ export function useArticleResourceSummary(id: string | undefined) {
   })
 }
 
-export function useAlbumPage(params: PageParams) {
+export function useAlbumPage(params: AlbumPageParams) {
   return usePageQuery(queryKeys.albums(params), ({ signal }) => getAlbumPage(params, signal))
 }
 
@@ -139,7 +141,7 @@ export function useWorkspaceMutations() {
     downloadArticles: useMutation({ mutationFn: ({ articleIds, kind, force }: { articleIds: readonly string[]; kind: ArticleDownloadKind; force?: boolean }) => downloadArticles(articleIds, kind, force), onSuccess: refresh }),
     saveSavedQuery: useMutation({ mutationFn: (input: SavedQueryInput) => saveSavedQuery(input), onSuccess: refresh }),
     deleteSavedQuery: useMutation({ mutationFn: (name: string) => deleteSavedQuery(name), onSuccess: refresh }),
-    traverseAlbum: useMutation({ mutationFn: ({ albumId, accountId, download }: { albumId: string; accountId: string; download: boolean }) => traverseAlbum(albumId, accountId, download), onSuccess: refresh }),
+    traverseAlbum: useMutation({ mutationFn: ({ albumId, accountId, order, download }: { albumId: string; accountId: string; order: AlbumTraversalOrder; download: boolean }) => traverseAlbum(albumId, accountId, order, download), onSuccess: refresh }),
     controlJob: useMutation({ mutationFn: ({ id, action }: { id: string; action: 'cancel' | 'pause' | 'resume' | 'retry' }) => controlJob(id, action), onSuccess: refresh }),
     authorizeDefaultExportDirectory: useMutation({ mutationFn: authorizeDefaultExportDirectory }),
     createExportDirectory: useMutation({ mutationFn: ({ parentToken, name }: { parentToken: string; name: string }) => createExportDirectory(parentToken, name) }),

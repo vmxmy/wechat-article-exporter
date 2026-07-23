@@ -94,6 +94,11 @@ type AlbumSyncJobs interface {
 	StartAlbumByIDAndDownload(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error)
 }
 
+type OrderedAlbumSyncJobs interface {
+	StartAlbumByIDWithOrder(context.Context, domain.AccountID, domain.AlbumID, wechat.AlbumOrder) (domain.Job, error)
+	StartAlbumByIDWithOrderAndDownload(context.Context, domain.AccountID, domain.AlbumID, wechat.AlbumOrder) (domain.Job, error)
+}
+
 type ExportJobs interface {
 	Start(context.Context, domain.ExportRequest) (domain.Job, error)
 	Run(context.Context, domain.JobID) (domain.Job, error)
@@ -404,17 +409,24 @@ func (service *Service) SynchronizeAccount(ctx context.Context, request domain.S
 }
 
 func (service *Service) SynchronizeAlbum(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
+	return service.SynchronizeAlbumWithOrder(ctx, accountID, albumID, wechat.AlbumForward)
+}
+
+func (service *Service) SynchronizeAlbumWithOrder(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID, order wechat.AlbumOrder) (domain.Job, error) {
 	if accountID == "" || albumID == "" {
 		return domain.Job{}, errors.New("album synchronization requires account and album IDs")
 	}
-	albumRuntime, ok := service.syncs.(AlbumSyncJobs)
+	if order != wechat.AlbumForward && order != wechat.AlbumReverse {
+		return domain.Job{}, errors.New("album traversal order must be forward or reverse")
+	}
+	albumRuntime, ok := service.syncs.(OrderedAlbumSyncJobs)
 	if !ok {
 		return domain.Job{}, fmt.Errorf("album synchronization: %w", ErrUnavailable)
 	}
 	if service.starter == nil {
 		return domain.Job{}, fmt.Errorf("start album_sync worker: %w", ErrUnavailable)
 	}
-	job, err := albumRuntime.StartAlbumByID(ctx, accountID, albumID)
+	job, err := albumRuntime.StartAlbumByIDWithOrder(ctx, accountID, albumID, order)
 	return service.startJob(ctx, job, err)
 }
 
@@ -424,17 +436,24 @@ func (service *Service) SynchronizeAlbum(ctx context.Context, accountID domain.A
 // additive capability so older adapter fakes do not gain a bypass around the
 // shared Application interface.
 func (service *Service) SynchronizeAlbumAndDownload(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
+	return service.SynchronizeAlbumWithOrderAndDownload(ctx, accountID, albumID, wechat.AlbumForward)
+}
+
+func (service *Service) SynchronizeAlbumWithOrderAndDownload(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID, order wechat.AlbumOrder) (domain.Job, error) {
 	if accountID == "" || albumID == "" {
 		return domain.Job{}, errors.New("album synchronization requires account and album IDs")
 	}
-	albumRuntime, ok := service.syncs.(AlbumSyncJobs)
+	if order != wechat.AlbumForward && order != wechat.AlbumReverse {
+		return domain.Job{}, errors.New("album traversal order must be forward or reverse")
+	}
+	albumRuntime, ok := service.syncs.(OrderedAlbumSyncJobs)
 	if !ok {
 		return domain.Job{}, fmt.Errorf("album batch download: %w", ErrUnavailable)
 	}
 	if service.starter == nil {
 		return domain.Job{}, fmt.Errorf("start album_sync worker: %w", ErrUnavailable)
 	}
-	job, err := albumRuntime.StartAlbumByIDAndDownload(ctx, accountID, albumID)
+	job, err := albumRuntime.StartAlbumByIDWithOrderAndDownload(ctx, accountID, albumID, order)
 	return service.startJob(ctx, job, err)
 }
 

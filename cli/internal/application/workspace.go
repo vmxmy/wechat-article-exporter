@@ -199,9 +199,10 @@ type WorkspaceJobQuery struct {
 // album traversal. The application resolves the saved account and album IDs
 // before the durable worker contacts WeChat.
 type WorkspaceAlbumTraversalRequest struct {
-	AccountID domain.AccountID `json:"accountId"`
-	AlbumID   domain.AlbumID   `json:"albumId"`
-	Download  bool             `json:"download"`
+	AccountID domain.AccountID  `json:"accountId"`
+	AlbumID   domain.AlbumID    `json:"albumId"`
+	Order     wechat.AlbumOrder `json:"order"`
+	Download  bool              `json:"download"`
 }
 
 // WorkspaceArticlePreview is a small, local handoff descriptor. It does not
@@ -260,6 +261,14 @@ type WorkspaceArticleResources struct {
 type WorkspaceAlbumController interface {
 	SynchronizeAlbum(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error)
 	SynchronizeAlbumAndDownload(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error)
+}
+
+// WorkspaceAlbumTraversalController adds explicit traversal order to the
+// persisted album workflow. It remains separate from WorkspaceAlbumController
+// so older application adapters cannot silently ignore a browser request.
+type WorkspaceAlbumTraversalController interface {
+	SynchronizeAlbumWithOrder(context.Context, domain.AccountID, domain.AlbumID, wechat.AlbumOrder) (domain.Job, error)
+	SynchronizeAlbumWithOrderAndDownload(context.Context, domain.AccountID, domain.AlbumID, wechat.AlbumOrder) (domain.Job, error)
 }
 
 // WorkspaceReader is the P0 read contract for local browser, TUI, and MCP
@@ -445,22 +454,24 @@ func (workspace *Workspace) SynchronizeAlbum(ctx context.Context, request Worksp
 	if strings.TrimSpace(string(request.AccountID)) == "" || strings.TrimSpace(string(request.AlbumID)) == "" {
 		return domain.Job{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "album account and identifier are required"}
 	}
+	if request.Order == "" {
+		request.Order = wechat.AlbumForward
+	}
+	if request.Order != wechat.AlbumForward && request.Order != wechat.AlbumReverse {
+		return domain.Job{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "album traversal order is not supported"}
+	}
+	controls, ok := workspace.application.(WorkspaceAlbumTraversalController)
+	if !ok {
+		return domain.Job{}, workspaceError(fmt.Errorf("album traversal order: %w", ErrUnavailable))
+	}
 	var (
 		job domain.Job
 		err error
 	)
 	if request.Download {
-		controls, ok := workspace.application.(WorkspaceAlbumController)
-		if !ok {
-			return domain.Job{}, workspaceError(fmt.Errorf("album batch download: %w", ErrUnavailable))
-		}
-		job, err = controls.SynchronizeAlbumAndDownload(ctx, request.AccountID, request.AlbumID)
+		job, err = controls.SynchronizeAlbumWithOrderAndDownload(ctx, request.AccountID, request.AlbumID, request.Order)
 	} else {
-		controls, ok := workspace.application.(WorkspaceAlbumController)
-		if !ok {
-			return domain.Job{}, workspaceError(fmt.Errorf("synchronize album: %w", ErrUnavailable))
-		}
-		job, err = controls.SynchronizeAlbum(ctx, request.AccountID, request.AlbumID)
+		job, err = controls.SynchronizeAlbumWithOrder(ctx, request.AccountID, request.AlbumID, request.Order)
 	}
 	return job, workspaceError(err)
 }

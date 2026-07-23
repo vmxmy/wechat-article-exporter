@@ -32,7 +32,7 @@ func TestReadAPIProvidesVersionedBoundedWorkspaceData(t *testing.T) {
 
 	for _, target := range []string{
 		"/api/v1/runtime", "/api/v1/session", "/api/v1/accounts?keyword=fixture&limit=100", "/api/v1/articles?accountId=account-1&deleted=false&messageType=1&messageType=2&sort=published:desc",
-		"/api/v1/albums?accountId=account-1", "/api/v1/saved-queries?limit=100", "/api/v1/jobs?state=running", "/api/v1/jobs/11111111-1111-1111-1111-111111111111", "/api/v1/storage", "/api/v1/events/snapshot", "/api/v1/snapshot",
+		"/api/v1/albums?accountId=account-1&keyword=album&offset=0&limit=20", "/api/v1/saved-queries?limit=100", "/api/v1/jobs?state=running", "/api/v1/jobs/11111111-1111-1111-1111-111111111111", "/api/v1/storage", "/api/v1/events/snapshot", "/api/v1/snapshot",
 	} {
 		response := get(t, client, base+target)
 		if response.StatusCode != http.StatusOK {
@@ -48,8 +48,8 @@ func TestReadAPIProvidesVersionedBoundedWorkspaceData(t *testing.T) {
 			t.Fatalf("GET %s envelope = %#v", target, envelope)
 		}
 	}
-	if app.accountQuery.Limit != 100 || app.articleQuery.Limit != application.WorkspaceDefaultPageLimit || app.articleQuery.Deleted == nil || *app.articleQuery.Deleted || len(app.articleQuery.MessageTypes) != 2 || len(app.articleQuery.Sorts) != 1 {
-		t.Fatalf("queries not parsed/bounded: account=%#v article=%#v", app.accountQuery, app.articleQuery)
+	if app.accountQuery.Limit != 100 || app.articleQuery.Limit != application.WorkspaceDefaultPageLimit || app.articleQuery.Deleted == nil || *app.articleQuery.Deleted || len(app.articleQuery.MessageTypes) != 2 || len(app.articleQuery.Sorts) != 1 || app.albumQuery != (domain.AlbumQuery{AccountID: "account-1", Keyword: "album", Limit: 20}) {
+		t.Fatalf("queries not parsed/bounded: account=%#v article=%#v album=%#v", app.accountQuery, app.articleQuery, app.albumQuery)
 	}
 	response := get(t, client, base+"/api/v1/runtime")
 	body := readResponse(t, response)
@@ -206,7 +206,7 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 		{"/api/v1/articles/metadata", `{"articleIds":["article-1"]}`, http.StatusAccepted, true},
 		{"/api/v1/articles/comments", `{"articleIds":["article-1"]}`, http.StatusAccepted, true},
 		{"/api/v1/articles/resources", `{"articleIds":["article-1"],"force":true}`, http.StatusAccepted, true},
-		{"/api/v1/albums/album-1/traverse", `{"accountId":"account-1","download":true}`, http.StatusAccepted, true},
+		{"/api/v1/albums/album-1/traverse", `{"accountId":"account-1","order":"reverse","download":true}`, http.StatusAccepted, true},
 		{"/api/v1/jobs/" + jobID + "/pause", `{"confirm":"pause-job:` + jobID + `"}`, http.StatusOK, true},
 		{"/api/v1/jobs/" + jobID + "/resume", `{}`, http.StatusOK, true},
 		{"/api/v1/jobs/" + jobID + "/retry", `{"confirm":"retry-job:` + jobID + `"}`, http.StatusOK, true},
@@ -222,7 +222,7 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 		}
 		response.Body.Close()
 	}
-	if app.loginSessionID != "browser-session" || app.syncRequest.AccountID != "account-1" || app.albumRequest.AccountID != "account-1" || app.albumRequest.AlbumID != "album-1" || !app.albumBatch || len(app.downloadRequests) != 5 {
+	if app.loginSessionID != "browser-session" || app.syncRequest.AccountID != "account-1" || app.albumRequest.AccountID != "account-1" || app.albumRequest.AlbumID != "album-1" || app.albumRequest.Order != wechat.AlbumReverse || !app.albumBatch || len(app.downloadRequests) != 5 {
 		t.Fatalf("control inputs were not routed through application: login=%q sync=%#v album=%#v batch=%t downloads=%#v", app.loginSessionID, app.syncRequest, app.albumRequest, app.albumBatch, app.downloadRequests)
 	}
 	if app.downloadRequests[0].URLs[0] != "https://mp.weixin.qq.com/s/fixture" || app.downloadRequests[1].Kind != "article" || app.downloadRequests[2].Kind != "metadata" || app.downloadRequests[3].Kind != "comments" || app.downloadRequests[4].Kind != "resources" || !app.downloadRequests[4].Force {
@@ -567,6 +567,7 @@ type apiApplication struct {
 	accountsErr          error
 	accountQuery         domain.AccountQuery
 	articleQuery         domain.ArticleQuery
+	albumQuery           domain.AlbumQuery
 	jobQuery             domain.JobQuery
 	loginFlow            wechat.LoginFlow
 	poll                 wechat.PollResult
@@ -636,6 +637,15 @@ func (app *apiApplication) SynchronizeAlbumAndDownload(_ context.Context, accoun
 	app.albumBatch = true
 	return app.job, nil
 }
+func (app *apiApplication) SynchronizeAlbumWithOrder(_ context.Context, accountID domain.AccountID, albumID domain.AlbumID, order wechat.AlbumOrder) (domain.Job, error) {
+	app.albumRequest = application.WorkspaceAlbumTraversalRequest{AccountID: accountID, AlbumID: albumID, Order: order}
+	return app.job, nil
+}
+func (app *apiApplication) SynchronizeAlbumWithOrderAndDownload(_ context.Context, accountID domain.AccountID, albumID domain.AlbumID, order wechat.AlbumOrder) (domain.Job, error) {
+	app.albumRequest = application.WorkspaceAlbumTraversalRequest{AccountID: accountID, AlbumID: albumID, Order: order, Download: true}
+	app.albumBatch = true
+	return app.job, nil
+}
 func (app *apiApplication) PauseJob(context.Context, domain.JobID) (domain.Job, error) {
 	return app.job, nil
 }
@@ -682,8 +692,11 @@ func (app *apiApplication) ArticleResourceAvailability(_ context.Context, id dom
 	availability.ArticleID = id
 	return availability, nil
 }
-func (app *apiApplication) QueryAlbums(context.Context, domain.AlbumQuery) (domain.Page[domain.Album], error) {
-	return app.albums, nil
+func (app *apiApplication) QueryAlbums(_ context.Context, query domain.AlbumQuery) (domain.Page[domain.Album], error) {
+	app.albumQuery = query
+	page := app.albums
+	page.Offset, page.Limit = query.Offset, query.Limit
+	return page, nil
 }
 func (app *apiApplication) ListSavedArticleQueries(context.Context) ([]domain.SavedArticleQuery, error) {
 	return app.saved, nil

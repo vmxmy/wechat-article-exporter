@@ -14,6 +14,7 @@ import (
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
 	runtimeenv "github.com/wechat-article/wechat-article-exporter/cli/internal/runtime"
 	syncrunner "github.com/wechat-article/wechat-article-exporter/cli/internal/sync"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
 
 type localSyncRuntime struct {
@@ -125,14 +126,22 @@ func (runtime *localSyncRuntime) StartAlbum(ctx context.Context, request syncrun
 }
 
 func (runtime *localSyncRuntime) StartAlbumByID(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
-	return runtime.startAlbumByID(ctx, accountID, albumID, false)
+	return runtime.StartAlbumByIDWithOrder(ctx, accountID, albumID, wechat.AlbumForward)
 }
 
 func (runtime *localSyncRuntime) StartAlbumByIDAndDownload(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
-	return runtime.startAlbumByID(ctx, accountID, albumID, true)
+	return runtime.StartAlbumByIDWithOrderAndDownload(ctx, accountID, albumID, wechat.AlbumForward)
 }
 
-func (runtime *localSyncRuntime) startAlbumByID(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID, download bool) (domain.Job, error) {
+func (runtime *localSyncRuntime) StartAlbumByIDWithOrder(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID, order wechat.AlbumOrder) (domain.Job, error) {
+	return runtime.startAlbumByID(ctx, accountID, albumID, order, false)
+}
+
+func (runtime *localSyncRuntime) StartAlbumByIDWithOrderAndDownload(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID, order wechat.AlbumOrder) (domain.Job, error) {
+	return runtime.startAlbumByID(ctx, accountID, albumID, order, true)
+}
+
+func (runtime *localSyncRuntime) startAlbumByID(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID, order wechat.AlbumOrder, download bool) (domain.Job, error) {
 	if runtime == nil || runtime.library == nil {
 		return domain.Job{}, fmt.Errorf("album sync runtime: %w", application.ErrUnavailable)
 	}
@@ -145,7 +154,7 @@ func (runtime *localSyncRuntime) startAlbumByID(ctx context.Context, accountID d
 		return domain.Job{}, fmt.Errorf("album %s does not belong to account %s: %w", albumID, accountID, err)
 	}
 	return runtime.StartAlbum(ctx, syncrunner.AlbumSyncRequest{
-		FakeID: account.FakeID, AlbumID: album.UpstreamID, Order: "forward", PageSize: 20, PageDelay: 5 * time.Second,
+		FakeID: account.FakeID, AlbumID: album.UpstreamID, Order: order, PageSize: 20, PageDelay: 5 * time.Second,
 	}, download)
 }
 

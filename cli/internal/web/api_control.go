@@ -8,6 +8,7 @@ import (
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
 
 // apiControl is the authenticated mutation surface. It only calls the
@@ -388,15 +389,16 @@ func (server *Server) albumTraverse(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	var input struct {
-		AccountID domain.AccountID `json:"accountId"`
-		Download  bool             `json:"download"`
+		AccountID domain.AccountID  `json:"accountId"`
+		Order     wechat.AlbumOrder `json:"order"`
+		Download  bool              `json:"download"`
 	}
 	if err := decodeControl(request, &input); err != nil {
 		server.workspaceError(writer, err)
 		return
 	}
 	job, err := server.workspace.SynchronizeAlbum(request.Context(), application.WorkspaceAlbumTraversalRequest{
-		AccountID: input.AccountID, AlbumID: albumID, Download: input.Download,
+		AccountID: input.AccountID, AlbumID: albumID, Order: input.Order, Download: input.Download,
 	})
 	if err != nil {
 		server.workspaceError(writer, err)

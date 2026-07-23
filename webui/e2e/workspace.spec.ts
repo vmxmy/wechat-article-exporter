@@ -109,6 +109,19 @@ test('selected album export handoff queues an opaque album selection', async ({ 
   await expectOnlyLoopbackRequests(page)
 })
 
+test('album filters stay server-paginated and traversal sends the selected order', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/albums')
+  await page.getByRole('textbox', { name: 'Account ID' }).fill('account-fixture')
+  await page.getByRole('textbox', { name: 'Album keyword' }).fill('Sanitized')
+  await expect.poll(() => fixture.requests.filter((request) => request === 'GET /api/v1/albums').length).toBeGreaterThan(1)
+  await page.getByRole('checkbox', { name: 'Select album-fixture-1' }).check()
+  await page.getByRole('combobox', { name: 'Traversal order' }).selectOption('reverse')
+  await page.getByRole('button', { name: 'Traverse and batch download' }).click()
+  await expect.poll(() => fixture.albumTraversals).toEqual([{ accountId: 'account-fixture', order: 'reverse', download: true }])
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('saved queries are created, updated, and deleted with scoped confirmation', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/saved-queries')

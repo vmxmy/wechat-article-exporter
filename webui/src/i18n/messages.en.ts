@@ -244,7 +244,8 @@ export const en = {
       description: 'Browse saved albums, then traverse their ordered contents or queue one persistent batch download.',
       loading: 'Loading local album page…', unavailable: 'The local albums API is not available yet.', empty: 'No albums match this query.', retry: 'Retry', previous: 'Previous page', next: 'Next page', page: (current: number, total: number) => `Page ${current} of ${total}`, pagination: 'Album pagination', selected: 'selected', selectAll: 'Select all rows on this page', selectRow: (row: string) => `Select ${row}`, visibleColumns: 'Visible album columns',
       columns: { name: 'Album', articles: 'Articles', paid: 'Paid', description: 'Description' },
-      actions: { title: 'Album actions', description: 'Traversal resumes through the shared persistent album job. Batch download queues article downloads after traversal commits.', traverse: 'Traverse selected album', download: 'Traverse and batch download', export: 'Export selected album', selectOne: 'Select one saved album with an owning account first.', queued: (id: string) => `Album job ${id} was queued.`, failed: 'The album action could not be queued.' }
+      filters: { title: 'Album filters', description: 'Filters are applied on the local server before each bounded page is returned.', accountId: 'Account ID', keyword: 'Album keyword' },
+      actions: { title: 'Album actions', description: 'Traversal resumes through the shared persistent album job. Batch download queues article downloads after traversal commits.', order: 'Traversal order', forward: 'Forward', reverse: 'Reverse', traverse: 'Traverse selected album', download: 'Traverse and batch download', export: 'Export selected album', selectOne: 'Select one saved album with an owning account first.', queued: (id: string) => `Album job ${id} was queued.`, failed: 'The album action could not be queued.' }
     },
     jobs: {
       title: 'Jobs',

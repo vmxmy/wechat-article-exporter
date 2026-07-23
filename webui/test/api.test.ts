@@ -3,6 +3,7 @@ import {
   ApiError,
   deleteSavedQuery,
   getAccountPage,
+  getAlbumPage,
   getArticleResourceSummary,
   getDiagnosticBundleDownloadURL,
   getExportArtifactDownloadURL,
@@ -49,6 +50,22 @@ describe('browser API client', () => {
       '/api/v1/accounts?offset=10&limit=10&keyword=a+%26+b&sort=name%3Aasc',
       expect.any(Object)
     )
+  })
+
+  it('requests a server-filtered album page without loading the full collection', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      items: [{ id: 'album-1', accountId: 'account / fixture', name: 'Fixture album', articleCount: 2 }],
+      total: 1,
+      offset: 25,
+      limit: 25
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getAlbumPage({ page: 2, pageSize: 25, accountId: ' account / fixture ', keyword: ' fixture & album ' })).resolves.toEqual({
+      data: [{ id: 'album-1', accountId: 'account / fixture', name: 'Fixture album', articleCount: 2 }],
+      pagination: { page: 2, pageSize: 25, total: 1 }
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/albums?offset=25&limit=25&accountId=account+%2F+fixture&keyword=fixture+%26+album', expect.any(Object))
   })
 
   it('loads a resource summary without requesting resource URLs, digests, or paths', async () => {

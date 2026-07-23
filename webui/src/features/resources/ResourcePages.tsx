@@ -5,7 +5,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
-import { consumeArticleQueryHandoff, parseArticleQuery, saveExportHandoff, type AccountRecord, type AlbumRecord, type JobDetail, type JobRecord, type SavedQueryRecord } from '../../lib/api'
+import { consumeArticleQueryHandoff, parseArticleQuery, saveExportHandoff, type AccountRecord, type AlbumRecord, type AlbumTraversalOrder, type JobDetail, type JobRecord, type SavedQueryRecord } from '../../lib/api'
 import { getAccountManifestDownloadURL } from '../../lib/api'
 import { useAccountPage, useAccountSearch, useAlbumPage, useJobDetail, useJobPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 import { ResourceTable } from './ResourceTable'
@@ -64,8 +64,11 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
 export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) {
   const [pageIndex, setPageIndex] = useState(0)
   const [selected, setSelected] = useState<readonly string[]>([])
+  const [accountId, setAccountId] = useState('')
+  const [keyword, setKeyword] = useState('')
+  const [order, setOrder] = useState<AlbumTraversalOrder>('forward')
   const [notice, setNotice] = useState<string>()
-  const query = useAlbumPage({ page: pageIndex + 1, pageSize })
+  const query = useAlbumPage({ page: pageIndex + 1, pageSize, accountId, keyword })
   const mutations = useWorkspaceMutations()
   const columns = useMemo<ColumnDef<AlbumRecord>[]>(() => [
     { accessorKey: 'name', header: messages.resources.albums.columns.name },
@@ -76,7 +79,7 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
   const album = selected.length === 1 ? query.data?.data.find((item) => item.id === selected[0]) : undefined
   const traverse = (download: boolean) => {
     if (!album?.accountId) return setNotice(messages.resources.albums.actions.selectOne)
-    mutations.traverseAlbum.mutate({ albumId: album.id, accountId: album.accountId, download }, { onSuccess: (job) => setNotice(messages.resources.albums.actions.queued(job.id)), onError: () => setNotice(messages.resources.albums.actions.failed) })
+    mutations.traverseAlbum.mutate({ albumId: album.id, accountId: album.accountId, order, download }, { onSuccess: (job) => setNotice(messages.resources.albums.actions.queued(job.id)), onError: () => setNotice(messages.resources.albums.actions.failed) })
   }
   const handoffExport = () => {
     if (!album?.accountId) return
@@ -84,10 +87,20 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
     window.history.pushState({}, '', '/exports')
     window.dispatchEvent(new PopStateEvent('popstate'))
   }
+  const updateFilter = (set: (value: string) => void) => (value: string) => {
+    set(value)
+    setPageIndex(0)
+    setSelected([])
+  }
   return <>
+    <section className="unavailable-actions" aria-labelledby="album-filters-title">
+      <div><h2 id="album-filters-title">{messages.resources.albums.filters.title}</h2><p>{messages.resources.albums.filters.description}</p></div>
+      <div className="account-action-form"><TextInput label={messages.resources.albums.filters.accountId} value={accountId} onChange={updateFilter(setAccountId)} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={updateFilter(setKeyword)} /></div>
+    </section>
     <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
     <section className="unavailable-actions" aria-labelledby="album-actions-title">
       <div><h2 id="album-actions-title">{messages.resources.albums.actions.title}</h2><p>{messages.resources.albums.actions.description}</p></div>
+      <label>{messages.resources.albums.actions.order}<select aria-label={messages.resources.albums.actions.order} value={order} onChange={(event) => setOrder(event.target.value as AlbumTraversalOrder)}><option value="forward">{messages.resources.albums.actions.forward}</option><option value="reverse">{messages.resources.albums.actions.reverse}</option></select></label>
       <div className="action-button-group"><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending} isDisabled={!album?.accountId} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending} isDisabled={!album?.accountId} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" isDisabled={!album?.accountId} onClick={handoffExport} /></div>
       {notice ? <p role="status">{notice}</p> : null}
     </section>

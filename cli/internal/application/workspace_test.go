@@ -300,9 +300,9 @@ func TestWorkspaceArticleControlsUseSharedApplicationJobs(t *testing.T) {
 	if err != nil || job.ID != "job-1" || application.download.Kind != "metadata" {
 		t.Fatalf("StartDownload() = %#v, request=%#v, err=%v", job, application.download, err)
 	}
-	job, err = workspace.SynchronizeAlbum(context.Background(), WorkspaceAlbumTraversalRequest{AccountID: "account-1", AlbumID: "album-1", Download: true})
-	if err != nil || job.ID != "job-1" || !application.albumDownload {
-		t.Fatalf("SynchronizeAlbum() = %#v, download=%t, err=%v", job, application.albumDownload, err)
+	job, err = workspace.SynchronizeAlbum(context.Background(), WorkspaceAlbumTraversalRequest{AccountID: "account-1", AlbumID: "album-1", Order: wechat.AlbumReverse, Download: true})
+	if err != nil || job.ID != "job-1" || !application.albumDownload || application.albumOrder != wechat.AlbumReverse {
+		t.Fatalf("SynchronizeAlbum() = %#v, download=%t order=%q, err=%v", job, application.albumDownload, application.albumOrder, err)
 	}
 	_, err = workspace.StartDownload(context.Background(), domain.DownloadRequest{Kind: "metadata"})
 	var workspaceErr *WorkspaceError
@@ -316,6 +316,7 @@ type workspaceControlApplication struct {
 	job           domain.Job
 	download      domain.DownloadRequest
 	albumDownload bool
+	albumOrder    wechat.AlbumOrder
 }
 
 func (application *workspaceControlApplication) GetArticle(ctx context.Context, id domain.ArticleID) (domain.Article, error) {
@@ -327,7 +328,13 @@ func (application *workspaceControlApplication) StartDownload(_ context.Context,
 	return application.job, nil
 }
 
-func (application *workspaceControlApplication) SynchronizeAlbumAndDownload(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error) {
+func (application *workspaceControlApplication) SynchronizeAlbumWithOrder(_ context.Context, _ domain.AccountID, _ domain.AlbumID, order wechat.AlbumOrder) (domain.Job, error) {
+	application.albumOrder = order
+	return application.job, nil
+}
+
+func (application *workspaceControlApplication) SynchronizeAlbumWithOrderAndDownload(_ context.Context, _ domain.AccountID, _ domain.AlbumID, order wechat.AlbumOrder) (domain.Job, error) {
 	application.albumDownload = true
+	application.albumOrder = order
 	return application.job, nil
 }

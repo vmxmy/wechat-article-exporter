@@ -41,6 +41,15 @@ export interface PageParams {
   readonly direction?: 'asc' | 'desc'
 }
 
+export interface AlbumPageParams {
+  readonly page: number
+  readonly pageSize: number
+  readonly accountId?: string
+  readonly keyword?: string
+}
+
+export type AlbumTraversalOrder = 'forward' | 'reverse'
+
 export interface RuntimeStatus {
   readonly version?: string
   readonly profileId?: string
@@ -468,8 +477,8 @@ export async function deleteSavedQuery(name: string): Promise<void> {
   })
   if (!response.ok) throw new ApiError(response.status, await readErrorMessage(response))
 }
-export async function traverseAlbum(albumId: string, accountId: string, download: boolean): Promise<JobRecord> {
-  return mutate<JobRecord>(`albums/${encodeURIComponent(albumId)}/traverse`, 'POST', { accountId, download })
+export async function traverseAlbum(albumId: string, accountId: string, order: AlbumTraversalOrder, download: boolean): Promise<JobRecord> {
+  return mutate<JobRecord>(`albums/${encodeURIComponent(albumId)}/traverse`, 'POST', { accountId, order, download })
 }
 export async function controlJob(id: string, action: 'cancel' | 'pause' | 'resume' | 'retry'): Promise<JobRecord> {
   const confirm = action === 'resume' ? undefined : `${action}-job:${id}`
@@ -484,8 +493,12 @@ export async function getArticlePage(params: ArticlePageParams, signal?: AbortSi
   return getArticleQueryPage(params, signal)
 }
 
-export async function getAlbumPage(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<AlbumRecord>> {
-  return getPage<AlbumRecord>('albums', params, signal)
+export async function getAlbumPage(params: AlbumPageParams, signal?: AbortSignal): Promise<PaginatedResponse<AlbumRecord>> {
+  const searchParams = new URLSearchParams({ offset: String((params.page - 1) * params.pageSize), limit: String(params.pageSize) })
+  if (params.accountId?.trim()) searchParams.set('accountId', params.accountId.trim())
+  if (params.keyword?.trim()) searchParams.set('keyword', params.keyword.trim())
+  const response = await request<PaginatedResponse<AlbumRecord> | WorkspacePageResponse<AlbumRecord>>(`${apiBase}/albums?${searchParams.toString()}`, { signal })
+  return normalizePage(response)
 }
 
 export async function getJobPage(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<JobRecord>> {
