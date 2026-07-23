@@ -27,6 +27,30 @@ test('sanitized account and article selections remain browser-local', async ({ p
   await expectOnlyLoopbackRequests(page)
 })
 
+test('account manifest controls download and import locally without retaining file details', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/accounts')
+
+  const downloadLink = page.getByRole('link', { name: 'Download account manifest' })
+  await expect(downloadLink).toHaveAttribute('href', '/api/v1/accounts/manifest')
+  const download = await Promise.all([page.waitForEvent('download'), downloadLink.click()])
+  expect(download[0].suggestedFilename()).toBe('wechat-article-accounts-manifest.json')
+
+  const uploadRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/accounts/manifest/upload'))
+  const importRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/accounts/manifest/import'))
+  const manifestInput = page.getByLabel('Import account manifest')
+  await manifestInput.setInputFiles({ name: 'private-accounts.json', mimeType: 'application/json', buffer: Buffer.from('{"schemaVersion":1,"accounts":[]}') })
+  const upload = await uploadRequest
+  expect(await upload.headerValue('content-type')).toContain('multipart/form-data')
+  expect(upload.postData()).toContain('name="manifest"')
+  expect(await manifestInput.inputValue()).toBe('')
+  expect((await importRequest).postDataJSON()).toEqual({ uploadHandle: 'account-manifest-upload-fixture' })
+  await expect(page.getByRole('alert')).toContainText('Account manifest imported: 1 added, 2 merged, 3 unchanged.')
+  expect(fixture.accountManifestImports).toEqual([{ uploadHandle: 'account-manifest-upload-fixture' }])
+  await expect(page.locator('body')).not.toContainText('private-accounts.json')
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('advanced article query and export handoff preserve typed local selections', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/articles')
@@ -158,7 +182,7 @@ test('sanitized diagnostic bundle creation posts no paths and downloads through 
   const createRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/maintenance/diagnostic-bundles'))
   await page.getByRole('button', { name: 'Create diagnostic bundle' }).click()
   expect((await createRequest).postDataJSON()).toEqual({})
-  expect(fixture.diagnosticBundleRequests).toEqual([{}])
+  await expect.poll(() => fixture.diagnosticBundleRequests).toEqual([{}])
   await expect(page.getByRole('status').filter({ hasText: 'Diagnostic bundle is ready to download.' })).toBeVisible()
   await expect(page.locator('body')).not.toContainText('/Users/')
 

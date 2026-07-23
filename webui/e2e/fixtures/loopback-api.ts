@@ -7,6 +7,7 @@ export interface LoopbackFixture {
   readonly requests: readonly string[]
   readonly controls: readonly string[]
   readonly exports: readonly string[]
+  readonly accountManifestImports: readonly unknown[]
   readonly preferencePatches: readonly unknown[]
   readonly diagnosticBundleRequests: readonly unknown[]
 }
@@ -15,6 +16,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
   const requests: string[] = []
   const controls: string[] = []
   const exports: string[] = []
+  const accountManifestImports: unknown[] = []
   const preferencePatches: unknown[] = []
   const diagnosticBundleRequests: unknown[] = []
   let loginState = 'unauthenticated'
@@ -42,6 +44,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       gcPlan,
       controls,
       exports,
+      accountManifestImports,
       preferencePatches,
       diagnosticBundleRequests,
       onLoginState: (state) => { loginState = state },
@@ -52,7 +55,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       ,onSavedQueries: (next) => { savedQueries = next }
     })
   })
-  return { requests, controls, exports, preferencePatches, diagnosticBundleRequests }
+  return { requests, controls, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests }
 }
 
 export async function expectOnlyLoopbackRequests(page: Page) {
@@ -73,6 +76,7 @@ interface State {
   readonly gcPlan: boolean
   readonly controls: string[]
   readonly exports: string[]
+  readonly accountManifestImports: unknown[]
   readonly preferencePatches: unknown[]
   readonly diagnosticBundleRequests: unknown[]
   readonly onLoginState: (state: string) => void
@@ -85,7 +89,7 @@ interface State {
 
 async function fulfillAPI(route: Route, url: URL, state: State) {
   const method = route.request().method()
-  const body = method === 'GET' || url.pathname === '/api/v1/maintenance/restore/upload' ? undefined : JSON.parse(route.request().postData() || '{}') as Record<string, unknown>
+  const body = method === 'GET' || url.pathname === '/api/v1/maintenance/restore/upload' || url.pathname === '/api/v1/accounts/manifest/upload' ? undefined : JSON.parse(route.request().postData() || '{}') as Record<string, unknown>
   if (method !== 'GET' && url.pathname !== '/api/v1/status') {
     expect(route.request().headers()['x-csrf-token']).toBe(csrfToken)
   }
@@ -101,6 +105,9 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/login/complete') { state.onLoginState('authenticated'); return json(route, { state: 'authenticated', accountId: 'account-fixture', accountName: 'Fixture Account' }) }
 
   if (url.pathname === '/api/v1/accounts' || url.pathname === '/api/v1/accounts/search') return page(route, [{ id: 'account-fixture', name: 'Fixture Account', alias: 'fixture', articleCount: 2, lastSyncAt: now, syncCompleted: true }])
+  if (url.pathname === '/api/v1/accounts/manifest') return route.fulfill({ contentType: 'application/json', headers: { 'content-disposition': 'attachment; filename="wechat-article-accounts-manifest.json"' }, body: '{"schemaVersion":1,"accounts":[]}' })
+  if (url.pathname === '/api/v1/accounts/manifest/upload') return json(route, { handle: 'account-manifest-upload-fixture', sizeBytes: 24, sha256: 'e'.repeat(64), expiresAt: '2026-07-24T09:45:00.000Z' })
+  if (url.pathname === '/api/v1/accounts/manifest/import') { state.accountManifestImports.push(body); return json(route, { report: { added: 1, merged: 2, unchanged: 3 } }) }
   if (url.pathname === '/api/v1/articles') return page(route, [{ id: 'article-fixture-1', title: 'Sanitized article one', accountId: 'account-fixture', accountName: 'Fixture Account', author: 'Fixture Author', publishedAt: now, state: 'ready' }, { id: 'article-fixture-2', title: 'Sanitized article two', accountId: 'account-fixture', accountName: 'Fixture Account', author: 'Fixture Author', publishedAt: now, state: 'queued' }])
   if (url.pathname === '/api/v1/albums') return page(route, [])
   if (url.pathname === '/api/v1/saved-queries' && method === 'GET') return page(route, state.savedQueries)

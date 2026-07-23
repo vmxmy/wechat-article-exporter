@@ -1,11 +1,11 @@
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Button } from '@astryxdesign/core/Button'
-import { FileInput } from '@astryxdesign/core/FileInput'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
-import { consumeArticleQueryHandoff, getAccountManifestDownloadURL, parseArticleQuery, type AccountRecord, type AlbumRecord, type JobDetail, type JobRecord, type SavedQueryRecord } from '../../lib/api'
+import { consumeArticleQueryHandoff, parseArticleQuery, type AccountRecord, type AlbumRecord, type JobDetail, type JobRecord, type SavedQueryRecord } from '../../lib/api'
+import { getAccountManifestDownloadURL } from '../../lib/api'
 import { useAccountPage, useAccountSearch, useAlbumPage, useJobDetail, useJobPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 import { ResourceTable } from './ResourceTable'
 import { UnavailableActionPanel } from '../actions/UnavailableActionPanel'
@@ -33,8 +33,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   const actions = messages.resources.accounts.actions
   const one = selected.length === 1 ? selected[0] : undefined
   const accountInput = { fakeid: fakeid.trim(), name: name.trim(), alias: alias.trim() || undefined }
-  const importManifest = (value: File | readonly File[] | null) => {
-    const manifest = Array.isArray(value) ? value[0] : value
+  const importManifest = (manifest: File | undefined) => {
     if (!manifest) return
     mutations.uploadAccountManifest.mutate(manifest, {
       onSuccess: (upload) => mutations.importAccountManifest.mutate(upload.handle, {
@@ -51,7 +50,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
         <div className="account-action-form"><TextInput label={actions.search} value={search} onChange={setSearch} /><Button label={actions.discover} variant="secondary" isLoading={discovery.isFetching} onClick={() => void discovery.refetch()} /></div>
         {discovery.data?.data.length ? <p>{discovery.data.data.map((account) => `${account.name} (${account.id})`).join(' · ')}</p> : null}
         <div className="account-action-form"><TextInput label={actions.fakeid} value={fakeid} onChange={setFakeid} /><TextInput label={actions.name} value={name} onChange={setName} /><TextInput label={actions.alias} value={alias} onChange={setAlias} /><Button label={actions.add} variant="primary" isLoading={mutations.saveAccount.isPending} isDisabled={!accountInput.fakeid || !accountInput.name} onClick={() => mutations.saveAccount.mutate(accountInput, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.edit} variant="secondary" isLoading={mutations.updateAccount.isPending} isDisabled={!one || !accountInput.fakeid || !accountInput.name} onClick={() => one && mutations.updateAccount.mutate({ id: one, input: accountInput }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.sync} variant="secondary" isLoading={mutations.syncAccount.isPending} isDisabled={!one} onClick={() => one && mutations.syncAccount.mutate(one, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.remove} variant="secondary" isLoading={mutations.deleteAccounts.isPending} isDisabled={selected.length === 0} onClick={() => { if (window.confirm(actions.deleteConfirm)) mutations.deleteAccounts.mutate(selected, { onSuccess: () => { setSelected([]); setNotice(undefined) }, onError: () => setNotice(actions.actionFailed) }) }} /></div>
-        <div className="account-action-form"><a className="artifact-download" href={getAccountManifestDownloadURL()}>{actions.downloadManifest}</a><FileInput label={actions.importManifest} description={actions.manifestHint} value={null} onChange={importManifest} accept="application/json,.json" isLoading={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending} isDisabled={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending} /></div>
+        <div className="account-action-form"><a className="artifact-download" href={getAccountManifestDownloadURL()}>{actions.downloadManifest}</a><label>{actions.importManifest}<input type="file" accept="application/json,.json" disabled={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending} onChange={(event) => { const manifest = event.currentTarget.files?.[0]; event.currentTarget.value = ''; importManifest(manifest) }} /></label><p className="field-hint">{actions.manifestHint}</p></div>
         {!one && selected.length > 0 ? <p>{actions.selectOne}</p> : null}{notice ? <p role="alert">{notice}</p> : null}
       </UnavailableActionPanel>
     </>
