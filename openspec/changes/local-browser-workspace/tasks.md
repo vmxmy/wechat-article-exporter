@@ -51,6 +51,6 @@
 - [ ] 6.1 Add Go handler/integration tests for all API resources, authorization, validation, file boundaries, job transitions, redaction, and graceful shutdown.
 - [ ] 6.2 Add browser E2E tests with sanitized loopback fixtures for login UI, account/article selection, job observation/control, export, settings, storage, and failure states.
 - [ ] 6.3 Run full `go test ./...`, race, vet, staticcheck, front-end lint/typecheck/test, embedded-asset integrity, and release-size checks in CI.
-- [ ] 6.4 Extend clean-room release receipt workflow with loopback browser workspace launch, security headers, no-retired-domain observation, and representative browser operation evidence.
-- [ ] 6.5 Document installation, `wechat-article web`, loopback-only privacy model, profile sharing, directory/upload behavior, troubleshooting, accessibility, and language switching.
-- [ ] 6.6 Publish a capability matrix showing browser parity with Cobra/TUI/MCP; do not mark the browser workspace complete until every required workflow is verified.
+- [x] 6.4 Extend clean-room release receipt workflow with loopback browser workspace launch, security headers, no-retired-domain observation, and representative browser operation evidence.
+- [x] 6.5 Document installation, `wechat-article web`, loopback-only privacy model, profile sharing, directory/upload behavior, troubleshooting, accessibility, and language switching.
+- [x] 6.6 Publish a capability matrix showing browser parity with Cobra/TUI/MCP; do not mark the browser workspace complete until every required workflow is verified.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -23,6 +24,23 @@ func TestRequireExactValues(t *testing.T) {
 				t.Fatal("invalid values were accepted")
 			}
 		})
+	}
+}
+
+func TestRequireBrowserSecurityHeadersRejectsMissingRequiredHeader(t *testing.T) {
+	header := http.Header{
+		"Content-Security-Policy": []string{"default-src 'self'; frame-ancestors 'none'"},
+		"Referrer-Policy":         []string{"no-referrer"},
+		"X-Content-Type-Options":  []string{"nosniff"},
+		"X-Frame-Options":         []string{"DENY"},
+		"Cache-Control":           []string{"no-store, max-age=0"},
+	}
+	if err := requireBrowserSecurityHeaders(header); err != nil {
+		t.Fatalf("valid headers rejected: %v", err)
+	}
+	header.Del("Cache-Control")
+	if err := requireBrowserSecurityHeaders(header); err == nil || !strings.Contains(err.Error(), "Cache-Control") {
+		t.Fatalf("missing header error = %v", err)
 	}
 }
 

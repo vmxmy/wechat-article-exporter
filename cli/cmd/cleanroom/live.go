@@ -292,6 +292,7 @@ func runControlledLive(options runOptions) error {
 		return nil, errors.New("live native PTY observation is not yet available")
 	})
 	run("automation.mcp", phaseOffline, func() (map[string]string, error) { return liveMCPProof(ctx, runner) })
+	run("ui.browser-workspace", phaseOffline, func() (map[string]string, error) { return runBrowserWorkspaceProof(ctx, runner) })
 	backupPath := filepath.Join(workRoot, "backup.zip")
 	run("storage.backup-restore", phaseOffline, func() (map[string]string, error) {
 		evidence, err := liveBackupRestore(ctx, runner, artifact.BinaryPath, workRoot, portableRoot, options.VaultPassphrase, backupPath)

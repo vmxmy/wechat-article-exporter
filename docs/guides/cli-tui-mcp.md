@@ -1,6 +1,6 @@
-# Cobra、TUI 与本地 MCP
+# Cobra、TUI、本地 MCP 与浏览器工作区
 
-三个入口共用同一个 application core、active profile、SQLite、对象存储和持久化任务。它们不分别实现微信协议、下载、解析或导出规则。
+四个本地入口共用同一个 application core、active profile、SQLite、对象存储和持久化任务。它们不分别实现微信协议、下载、解析或导出规则。浏览器工作区是 loopback-only HTTP 展示适配器；MCP 仍严格使用 stdio，不监听 TCP。
 
 ## Cobra
 
@@ -76,3 +76,13 @@ MCP 文件输出只能落在 active profile 数据目录、`preferences.export.r
   }
 }
 ```
+
+## 本地浏览器工作区
+
+```bash
+wechat-article web
+```
+
+浏览器工作区固定使用随机 `127.0.0.1` IPv4 listener、一次性 bootstrap URL、HttpOnly session、Host/Origin/CSRF 验证与禁缓存安全头。它与其他入口共享 active profile 和持久作业；切换 profile 后重启浏览器工作区。
+
+浏览器不接收任意绝对路径：导出使用服务端授权的默认 export root/子目录 token；Credential 字段只写入不回显。恢复上传、任意文件选择、输出文件 streaming/open-folder 和批量导出尚未在浏览器中完成；文章/资源/评论下载及专辑遍历/批量下载使用共享持久作业。请使用功能矩阵确认入口选择：[browser-capability-matrix.md](../release/browser-capability-matrix.md)。详细操作与无障碍/语言排错见[本地浏览器工作区](./browser-workspace.md)。

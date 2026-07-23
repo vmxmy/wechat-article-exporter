@@ -6,11 +6,12 @@
 
 `wechat-article` 是本项目唯一的产品形态：一个 Go 编写的本地优先二进制，用于登录微信公众号后台、同步和保存文章、下载正文与资源，并导出 HTML、Markdown、TXT、JSON、XLSX、DOCX 和 PDF。
 
-同一套应用核心提供三种入口：
+同一套应用核心提供四种本地入口：
 
 - Cobra 命令行，适合脚本、批处理和 CI；
 - Bubble Tea TUI，适合终端交互；
 - 本地 stdio MCP，适合 Claude、Codex、Cursor 等客户端。
+- 本地浏览器工作区，适合在同机浏览器中查看资料库、任务和受控导出。
 
 项目不再提供 Nuxt Web、Nitro API、远程 MCP、远程 OAuth、Cloudflare KV/D1 或托管 PDF 服务。文章与索引保存在本机 SQLite 和内容寻址对象存储中；会话、文章 Credential 与代理授权保存在操作系统凭据库或用户显式初始化的加密 vault 中。
 
@@ -66,6 +67,14 @@ wechat-article export start \
 ```bash
 wechat-article
 ```
+
+也可以启动仅本机可访问的浏览器工作区：
+
+```bash
+wechat-article web
+```
+
+它固定绑定随机 `127.0.0.1` 端口，stdout 输出一次性地址；打开后地址栏会移除 token。不会监听局域网或公网，也不需要 Node.js、前端开发服务器或远程服务。详细的 profile 共享、目录 token、上传限制、无障碍、语言切换与排错说明见[本地浏览器工作区](./docs/guides/browser-workspace.md)。
 
 自动化调用增加 `--json` 后，stdout 只包含一个版本化 JSON 文档；进度和诊断写 stderr。退出码：成功 `0`，运行错误 `1`，用法错误 `2`。
 
@@ -124,6 +133,8 @@ wechat-article export verify \
 校验失败返回退出码 `1`，唯一 JSON error envelope 的 `data` 包含 affected article IDs、expected/actual checksum 或 size。TUI 导出操作必须选择稳定 export ID；任务与导出进度会自动刷新。SQLite leased scheduler permits 在 detached workers 和多个 CLI 进程之间共同执行 global、operation、host 与 sensitive 并发限制。
 
 默认网络路径是本地进程直连微信。代理必须由用户显式配置；包含 Cookie、Credential、评论、指标或付费授权的请求只能直连或通过用户明确确认的 `credential-trusted` 代理。详见 [本地数据与安全](./docs/operations/local-data-security.md) 和 [备份恢复](./docs/operations/backup-restore.md)。
+
+浏览器工作区与 Cobra、TUI、MCP 共享当前 profile，但不会接收任意主机路径：导出通过默认根或其下子目录的 opaque token 完成；Credential 在页面中只写入不回显；恢复归档上传尚未支持，需使用确认过的 CLI 恢复流程。当前逐项支持状态见[浏览器能力矩阵](./docs/release/browser-capability-matrix.md)。
 
 ## PDF
 

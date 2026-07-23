@@ -17,6 +17,15 @@ go run ./cmd/wechat-article
 
 不带子命令且 stdin/stdout 是 TTY 时进入 Bubble Tea；非 TTY 时打印帮助，不阻塞。
 
+本机浏览器工作区使用当前 active profile，并且只绑定随机 IPv4 loopback 端口：
+
+```bash
+./bin/wechat-article web
+./bin/wechat-article web --no-open
+```
+
+stdout 只输出一次性 `127.0.0.1` 地址，不能与 `--json` 合用。首次打开会建立 HttpOnly 本地 session 并清除地址栏 token；关闭进程即失效。它不提供 LAN/public host 选项、任意主机路径或项目运营的网络服务。使用边界、目录 token、上传/恢复限制、可访问性及中英文切换见[本地浏览器工作区](../docs/guides/browser-workspace.md)。
+
 构建本地二进制：
 
 ```bash
@@ -82,6 +91,8 @@ server 不监听网络，不使用 OAuth。stdout 只包含换行分隔的 JSON-
 破坏性工具需要 `confirm:<tool-name>` 精确确认值；敏感 Credential 操作还需要独立启用与确认。
 
 `exports.start` 的输出目录必须位于 active profile 数据目录、`preferences.export.root` 或 profile 配置的 `mcp.allowedOutputRoots` 绝对路径内；路径穿越与 symlink 逃逸会被拒绝。
+
+浏览器的文件模型不同：它只可授权默认 export root 或其下子目录，并把不透明 directory token 交回服务端；不会获得绝对路径。浏览器支持受控导出和 manifest/verification，以及文章/资源/评论下载和专辑遍历/批量下载；restore archive upload、任意文件选择、输出文件 streaming/open-folder 和批量导出仍使用 Cobra/TUI/MCP。完整对照见[浏览器能力矩阵](../docs/release/browser-capability-matrix.md)。
 
 ## 测试与发布
 

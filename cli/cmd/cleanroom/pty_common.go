@@ -134,6 +134,12 @@ func (buffer *lockedBuffer) Len() int {
 	return buffer.b.Len()
 }
 
+func (buffer *lockedBuffer) String() string {
+	buffer.mu.RLock()
+	defer buffer.mu.RUnlock()
+	return buffer.b.String()
+}
+
 func (buffer *lockedBuffer) Overflowed() bool {
 	buffer.mu.RLock()
 	defer buffer.mu.RUnlock()

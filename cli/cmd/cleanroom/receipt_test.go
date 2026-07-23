@@ -61,6 +61,18 @@ func TestValidateReceiptRejectsInvalidWorkflowRegistryAndSummary(t *testing.T) {
 	}
 }
 
+func TestValidateReceiptRequiresBrowserWorkspaceEvidence(t *testing.T) {
+	receipt := validTestReceipt()
+	workflow := workflowIndex(receipt, "ui.browser-workspace")
+	if workflow < 0 {
+		t.Fatal("browser workspace workflow contract is missing")
+	}
+	delete(receipt.Workflows[workflow].Evidence, "securityHeaders")
+	if err := validateReceipt(receipt, false); err == nil || !strings.Contains(err.Error(), "ui.browser-workspace") {
+		t.Fatalf("missing browser workspace evidence error = %v", err)
+	}
+}
+
 func TestReadReceiptRejectsOversizedAndMultipleDocuments(t *testing.T) {
 	root := t.TempDir()
 	oversized := filepath.Join(root, "oversized.json")

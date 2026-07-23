@@ -11,6 +11,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -546,6 +549,10 @@ func runCleanRoom(options runOptions) error {
 			"stderrBytes": fmt.Sprint(len(stderr) + len(unsupportedStderr))}, nil
 	})
 
+	run("ui.browser-workspace", phaseOffline, func() (map[string]string, error) {
+		return runBrowserWorkspaceProof(ctx, runner)
+	})
+
 	backupPath := filepath.Join(workRoot, "backup.zip")
 	run("storage.backup-restore", phaseOffline, func() (map[string]string, error) {
 		backup, err := runner.runJSON(ctx, "db", "backup", "--output", backupPath, "--json")
@@ -671,6 +678,178 @@ func runCleanRoom(options runOptions) error {
 	}
 	fmt.Printf("clean-room receipt written: %s\n", options.Output)
 	return nil
+}
+
+func runBrowserWorkspaceProof(ctx context.Context, runner candidateRunner) (map[string]string, error) {
+	command, err := runner.configuredCommand("web", "--no-open")
+	if err != nil {
+		return nil, fmt.Errorf("configure browser workspace: %w", err)
+	}
+	stdout := &lockedBuffer{}
+	stderr := newBoundedBuffer(candidateStderrLimit)
+	command.Stdout = stdout
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		return nil, fmt.Errorf("start browser workspace: %w", err)
+	}
+	tree, err := attachCandidateProcessTree(command.Process)
+	if err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return nil, fmt.Errorf("attach browser workspace process tree: %w", err)
+	}
+	defer func() { _ = tree.Close() }()
+
+	wait := make(chan error, 1)
+	go func() {
+		waitErr := command.Wait()
+		tree.MarkExited()
+		wait <- waitErr
+	}()
+	defer func() {
+		_ = tree.Close()
+		select {
+		case <-wait:
+		case <-time.After(5 * time.Second):
+		}
+	}()
+
+	workspaceURL, err := awaitBrowserWorkspaceURL(ctx, stdout)
+	if err != nil {
+		return nil, err
+	}
+	if stdout.Overflowed() || stderr.Overflowed() {
+		return nil, errors.New("browser workspace candidate output exceeded its bound")
+	}
+	parsed, err := url.Parse(workspaceURL)
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "127.0.0.1" || parsed.Port() == "" || parsed.Query().Get("token") == "" {
+		return nil, errors.New("browser workspace did not emit a one-time IPv4 loopback URL")
+	}
+	if strings.TrimSpace(string(stderr.Bytes())) != "" {
+		return nil, errors.New("browser workspace emitted unexpected stderr before interaction")
+	}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Jar: jar, Timeout: 5 * time.Second}
+	response, err := client.Get(workspaceURL)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap browser workspace: %w", err)
+	}
+	if response.Request.URL.Query().Get("token") != "" {
+		response.Body.Close()
+		return nil, errors.New("browser bootstrap token remained in the visible URL")
+	}
+	if response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		return nil, fmt.Errorf("browser workspace bootstrap status=%d", response.StatusCode)
+	}
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	response.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if !bytes.Contains(body, []byte(`id="root"`)) {
+		return nil, errors.New("browser workspace did not serve the embedded application shell")
+	}
+	if err := requireBrowserSecurityHeaders(response.Header); err != nil {
+		return nil, err
+	}
+
+	base := parsed.Scheme + "://" + parsed.Host
+	status, err := client.Get(base + "/api/v1/status")
+	if err != nil {
+		return nil, fmt.Errorf("read browser workspace status: %w", err)
+	}
+	statusBody, readErr := io.ReadAll(io.LimitReader(status.Body, 1<<20))
+	status.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if status.StatusCode != http.StatusOK || !bytes.Contains(statusBody, []byte(`"runtime"`)) || !bytes.Contains(statusBody, []byte(`"csrfToken"`)) {
+		return nil, errors.New("browser workspace status did not return an authenticated safe response")
+	}
+	if err := requireBrowserSecurityHeaders(status.Header); err != nil {
+		return nil, err
+	}
+	csrf := browserWorkspaceCookie(jar, parsed, "wechat_article_csrf")
+	if csrf == "" {
+		return nil, errors.New("browser workspace did not issue a CSRF cookie")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/v1/session/logout", strings.NewReader("{}"))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Origin", base)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-CSRF-Token", csrf)
+	logout, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("perform representative browser logout: %w", err)
+	}
+	logout.Body.Close()
+	if logout.StatusCode != http.StatusNoContent {
+		return nil, fmt.Errorf("browser workspace logout status=%d", logout.StatusCode)
+	}
+	if err := requireBrowserSecurityHeaders(logout.Header); err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"listener":                "ipv4-loopback-random",
+		"embeddedAssets":          "true",
+		"sessionBootstrap":        "true",
+		"securityHeaders":         "true",
+		"representativeOperation": "true",
+	}, nil
+}
+
+func awaitBrowserWorkspaceURL(ctx context.Context, output *lockedBuffer) (string, error) {
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	for {
+		if output.Overflowed() {
+			return "", errors.New("browser workspace URL output exceeded its bound")
+		}
+		lines := nonEmptyLines(output.String())
+		if len(lines) > 1 {
+			return "", errors.New("browser workspace wrote more than one stdout line")
+		}
+		if len(lines) == 1 {
+			return lines[0], nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-deadline.C:
+			return "", errors.New("browser workspace did not emit a URL within the deadline")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func requireBrowserSecurityHeaders(header http.Header) error {
+	for key, expected := range map[string]string{
+		"Content-Security-Policy": "frame-ancestors 'none'",
+		"Referrer-Policy":         "no-referrer",
+		"X-Content-Type-Options":  "nosniff",
+		"X-Frame-Options":         "DENY",
+		"Cache-Control":           "no-store",
+	} {
+		if !strings.Contains(header.Get(key), expected) {
+			return fmt.Errorf("browser workspace response is missing required %s header", key)
+		}
+	}
+	return nil
+}
+
+func browserWorkspaceCookie(jar http.CookieJar, target *url.URL, name string) string {
+	for _, cookie := range jar.Cookies(target) {
+		if cookie.Name == name {
+			return cookie.Value
+		}
+	}
+	return ""
 }
 
 func boundedReasonCode(err error) string {
