@@ -14,6 +14,12 @@ import (
 // filesystem, database, cookie, or secret-store capabilities.
 func (server *Server) apiControl(writer http.ResponseWriter, request *http.Request) bool {
 	switch request.URL.Path {
+	case "/api/v1/export-directories/authorize":
+		server.exportDirectoryAuthorize(writer, request)
+	case "/api/v1/export-directories":
+		server.exportDirectoryCreate(writer, request)
+	case "/api/v1/exports/start":
+		server.exportStart(writer, request)
 	case "/api/v1/login/begin":
 		server.loginBegin(writer, request)
 	case "/api/v1/login/poll":
@@ -44,6 +50,9 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 	case "/api/v1/ingest/url":
 		server.ingestURL(writer, request)
 	default:
+		if server.exportControl(writer, request) {
+			return true
+		}
 		if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/accounts/"); ok {
 			if accountID, suffix, found := strings.Cut(id, "/"); found && suffix == "sync" {
 				server.accountSync(writer, request, domain.AccountID(accountID))

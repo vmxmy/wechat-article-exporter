@@ -34,6 +34,7 @@ const (
 // always a random IPv4 loopback listener.
 type Options struct {
 	Application     application.Application
+	Exports         application.WorkspaceExportService
 	SessionTTL      time.Duration
 	ShutdownTimeout time.Duration
 	Now             func() time.Time
@@ -44,6 +45,7 @@ type Options struct {
 type Server struct {
 	application     application.Application
 	workspace       *application.Workspace
+	exports         application.WorkspaceExportService
 	sessionTTL      time.Duration
 	shutdownTimeout time.Duration
 	now             func() time.Time
@@ -57,6 +59,9 @@ type Server struct {
 	bootstrapUsed  bool
 	closed         bool
 	serveCompleted chan struct{}
+
+	exportVerificationWindow time.Time
+	exportVerifications      int
 }
 
 type session struct {
@@ -84,7 +89,7 @@ func New(options Options) (*Server, error) {
 		return nil, fmt.Errorf("generate local browser bootstrap credential: %w", err)
 	}
 	return &Server{
-		application: options.Application, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
+		application: options.Application, exports: options.Exports, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
 		workspace: application.NewWorkspace(options.Application), now: options.Now, bootstrapToken: bootstrap,
 		sessions: make(map[string]session), serveCompleted: make(chan struct{}),
 	}, nil

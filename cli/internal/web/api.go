@@ -64,7 +64,12 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		server.storage(writer, request)
 	case "/api/v1/events/snapshot", "/api/v1/snapshot":
 		server.snapshot(writer, request)
+	case "/api/v1/exports":
+		server.exportsList(writer, request)
 	default:
+		if server.exportRead(writer, request) {
+			return
+		}
 		if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/jobs/"); ok {
 			if !validJobID(id) {
 				server.apiError(writer, http.StatusBadRequest, "invalid_argument", "job identifier is invalid")
