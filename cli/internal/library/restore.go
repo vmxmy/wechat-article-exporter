@@ -200,7 +200,7 @@ func stageRestore(ctx context.Context, options RestoreOptions, manifest BackupMa
 		return stagedRestore{}, err
 	}
 	defer reader.Close()
-	entries, failures := indexBackupEntries(reader.File)
+	entries, failures := indexBackupEntries(reader.File, DefaultBackupArchiveLimits)
 	if len(failures) != 0 {
 		return stagedRestore{}, fmt.Errorf("unsafe restore archive: %v", failures)
 	}

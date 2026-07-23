@@ -169,8 +169,12 @@ func VerifyBackup(ctx context.Context, archivePath string) (BackupVerification, 
 		return verification, fmt.Errorf("open backup archive: %w", err)
 	}
 	defer reader.Close()
-	entries, failures := indexBackupEntries(reader.File)
+	entries, failures := indexBackupEntries(reader.File, DefaultBackupArchiveLimits)
 	verification.Failures = append(verification.Failures, failures...)
+	if len(verification.Failures) != 0 {
+		sort.Strings(verification.Failures)
+		return verification, nil
+	}
 	manifestFile := entries[backupManifestPath]
 	if manifestFile == nil {
 		verification.Failures = append(verification.Failures, "missing manifest.json")
@@ -485,12 +489,11 @@ func verifyBackupDatabase(ctx context.Context, path string, manifest BackupManif
 	return rows.Err()
 }
 
-func indexBackupEntries(files []*zip.File) (map[string]*zip.File, []string) {
+func indexBackupEntries(files []*zip.File, limits BackupArchiveLimits) (map[string]*zip.File, []string) {
 	entries := make(map[string]*zip.File, len(files))
-	failures := []string{}
+	failures := validateBackupArchive(files, limits)
 	for _, file := range files {
 		if !validArchivePath(file.Name) {
-			failures = append(failures, "unsafe archive path "+file.Name)
 			continue
 		}
 		if file.FileInfo().IsDir() {
@@ -524,14 +527,6 @@ func isManifestObjectPath(manifest []BackupObject, path string) bool {
 
 func objectStorePath(store *objects.FileStore, digest string) string {
 	return filepath.Join(store.Root(), "sha256", digest[:2], digest[2:4], digest)
-}
-
-func validArchivePath(path string) bool {
-	if path == "" || strings.Contains(path, "\\") || strings.HasPrefix(path, "/") {
-		return false
-	}
-	clean := filepath.ToSlash(filepath.Clean(path))
-	return clean == path && clean != "." && !strings.HasPrefix(clean, "../")
 }
 
 func commitBackupFile(source, destination string) error {
@@ -610,6 +605,13 @@ func readZipFile(ctx context.Context, file *zip.File, maximum int64) ([]byte, er
 }
 
 func extractZipEntry(ctx context.Context, file *zip.File, destination string) error {
+	if file == nil {
+		return errors.New("archive entry is missing")
+	}
+	limits := DefaultBackupArchiveLimits.normalized()
+	if file.UncompressedSize64 > uint64(limits.MaximumEntryBytes) {
+		return fmt.Errorf("archive entry exceeds %d bytes", limits.MaximumEntryBytes)
+	}
 	if err := ensureParent(destination); err != nil {
 		return err
 	}
@@ -629,7 +631,7 @@ func extractZipEntry(ctx context.Context, file *zip.File, destination string) er
 			_ = os.Remove(destination)
 		}
 	}()
-	if _, err := copyWithContext(ctx, output, reader); err != nil {
+	if _, err := copyWithContextLimit(ctx, output, reader, limits.MaximumEntryBytes); err != nil {
 		return err
 	}
 	if err := output.Sync(); err != nil {
@@ -643,12 +645,15 @@ func extractZipEntry(ctx context.Context, file *zip.File, destination string) er
 }
 
 func hashZipFile(ctx context.Context, file *zip.File) (string, int64, error) {
+	if file == nil {
+		return "", 0, errors.New("archive entry is missing")
+	}
 	reader, err := file.Open()
 	if err != nil {
 		return "", 0, err
 	}
 	defer reader.Close()
-	return hashReader(ctx, reader)
+	return hashReaderLimit(ctx, reader, DefaultBackupArchiveLimits.normalized().MaximumEntryBytes)
 }
 
 func hashFile(ctx context.Context, path string) (string, int64, error) {
@@ -667,6 +672,30 @@ func hashReader(ctx context.Context, reader io.Reader) (string, int64, error) {
 		return "", written, err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), written, nil
+}
+
+func hashReaderLimit(ctx context.Context, reader io.Reader, maximum int64) (string, int64, error) {
+	hash := sha256.New()
+	written, err := copyWithContextLimit(ctx, hash, reader, maximum)
+	if err != nil {
+		return "", written, err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), written, nil
+}
+
+func copyWithContextLimit(ctx context.Context, destination io.Writer, source io.Reader, maximum int64) (int64, error) {
+	if maximum < 0 {
+		return 0, errors.New("copy limit must not be negative")
+	}
+	limited := &io.LimitedReader{R: source, N: maximum + 1}
+	written, err := copyWithContext(ctx, destination, limited)
+	if err != nil {
+		return written, err
+	}
+	if written > maximum {
+		return written, fmt.Errorf("entry exceeds %d bytes", maximum)
+	}
+	return written, nil
 }
 
 func copyWithContext(ctx context.Context, destination io.Writer, source io.Reader) (int64, error) {
