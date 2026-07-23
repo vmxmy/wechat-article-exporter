@@ -2,15 +2,19 @@ import { AppShell } from '@astryxdesign/core/AppShell'
 import { Button } from '@astryxdesign/core/Button'
 import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
-import { useEffect, useState } from 'react'
-import { ArticleTable } from '../features/articles/ArticleTable'
-import { ImportPage } from '../features/import/ImportPage'
-import { ExportPage } from '../features/exports/ExportPage'
-import { LoginPage } from '../features/login/LoginPage'
-import { SettingsPage } from '../features/settings/SettingsPage'
-import { AccountsPage, AlbumsPage, JobsPage, SavedQueriesPage } from '../features/resources/ResourcePages'
+import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { type Locale, type MessageCatalog, useMessages } from '../i18n'
 import { useRuntimeStatus, useWorkspaceSnapshot } from '../lib/queries'
+
+const ArticleTable = lazy(() => import('../features/articles/ArticleTable').then(({ ArticleTable }) => ({ default: ArticleTable })))
+const ImportPage = lazy(() => import('../features/import/ImportPage').then(({ ImportPage }) => ({ default: ImportPage })))
+const ExportPage = lazy(() => import('../features/exports/ExportPage').then(({ ExportPage }) => ({ default: ExportPage })))
+const LoginPage = lazy(() => import('../features/login/LoginPage').then(({ LoginPage }) => ({ default: LoginPage })))
+const SettingsPage = lazy(() => import('../features/settings/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })))
+const AccountsPage = lazy(() => import('../features/resources/ResourcePages').then(({ AccountsPage }) => ({ default: AccountsPage })))
+const AlbumsPage = lazy(() => import('../features/resources/ResourcePages').then(({ AlbumsPage }) => ({ default: AlbumsPage })))
+const JobsPage = lazy(() => import('../features/resources/ResourcePages').then(({ JobsPage }) => ({ default: JobsPage })))
+const SavedQueriesPage = lazy(() => import('../features/resources/ResourcePages').then(({ SavedQueriesPage }) => ({ default: SavedQueriesPage })))
 
 interface WorkspaceProps {
   readonly locale: Locale
@@ -86,7 +90,11 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
         </div>
       </header>
       <main id="workspace-content" className="workspace-content" tabIndex={-1}>
-        {renderPage(path, locale, messages)}
+        <PageErrorBoundary key={path} messages={messages}>
+          <Suspense fallback={<PageLoading messages={messages} />}>
+            {renderPage(path, locale, messages)}
+          </Suspense>
+        </PageErrorBoundary>
       </main>
     </AppShell>
   )
@@ -109,6 +117,30 @@ function getConnectionState(isSuccess: boolean, isError: boolean, messages: Mess
   if (isSuccess) return { label: messages.connection.connected, variant: 'success' as const }
   if (isError) return { label: messages.connection.unavailable, variant: 'error' as const }
   return { label: messages.connection.checking, variant: 'neutral' as const }
+}
+
+function PageLoading({ messages }: { readonly messages: MessageCatalog }) {
+  return <p role="status" aria-live="polite">{messages.connection.checking}</p>
+}
+
+class PageErrorBoundary extends Component<{ readonly children: ReactNode; readonly messages: MessageCatalog }, { readonly hasError: boolean }> {
+  state = { hasError: false }
+
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <section className="error-state" role="alert">
+          <p>{this.props.messages.connection.unavailable}</p>
+          <Button label={this.props.messages.settings.retry} variant="secondary" onClick={() => window.location.reload()} />
+        </section>
+      )
+    }
+    return this.props.children
+  }
 }
 
 function Overview({ messages }: { readonly messages: MessageCatalog }) {
