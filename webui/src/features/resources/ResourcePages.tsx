@@ -84,8 +84,7 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
   const handoffExport = () => {
     if (!album?.accountId) return
     saveExportHandoff({ selection: { kind: 'album', albumId: album.id }, label: messages.exports.selection.albumLabel(album.id) })
-    window.history.pushState({}, '', '/exports')
-    window.dispatchEvent(new PopStateEvent('popstate'))
+    navigateTo('/exports')
   }
   const updateFilter = (set: (value: string) => void) => (value: string) => {
     set(value)
