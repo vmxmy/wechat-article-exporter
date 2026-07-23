@@ -42,6 +42,9 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		server.apiError(writer, http.StatusUnauthorized, "authentication_required", "workspace session is required")
 		return
 	}
+	if server.maintenanceRead(writer, request) {
+		return
+	}
 
 	switch request.URL.Path {
 	case "/api/v1/runtime":

@@ -13,6 +13,9 @@ import (
 // application-owned Workspace facade; handlers never receive profile runtime,
 // filesystem, database, cookie, or secret-store capabilities.
 func (server *Server) apiControl(writer http.ResponseWriter, request *http.Request) bool {
+	if server.maintenanceControl(writer, request) {
+		return true
+	}
 	switch request.URL.Path {
 	case "/api/v1/export-directories/authorize":
 		server.exportDirectoryAuthorize(writer, request)

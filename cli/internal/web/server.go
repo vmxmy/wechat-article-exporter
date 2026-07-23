@@ -33,22 +33,26 @@ const (
 // Listener address selection is not configurable: browser workspaces are
 // always a random IPv4 loopback listener.
 type Options struct {
-	Application     application.Application
-	Exports         application.WorkspaceExportService
-	SessionTTL      time.Duration
-	ShutdownTimeout time.Duration
-	Now             func() time.Time
+	Application        application.Application
+	Exports            application.WorkspaceExportService
+	Maintenance        *application.MaintenanceService
+	StorageMaintenance *application.MaintenanceStorageService
+	SessionTTL         time.Duration
+	ShutdownTimeout    time.Duration
+	Now                func() time.Time
 }
 
 // Server owns one in-memory bootstrap token and its browser sessions.
 // It never persists or logs either credential.
 type Server struct {
-	application     application.Application
-	workspace       *application.Workspace
-	exports         application.WorkspaceExportService
-	sessionTTL      time.Duration
-	shutdownTimeout time.Duration
-	now             func() time.Time
+	application        application.Application
+	workspace          *application.Workspace
+	exports            application.WorkspaceExportService
+	maintenance        *application.MaintenanceService
+	storageMaintenance *application.MaintenanceStorageService
+	sessionTTL         time.Duration
+	shutdownTimeout    time.Duration
+	now                func() time.Time
 
 	bootstrapToken string
 
@@ -89,7 +93,7 @@ func New(options Options) (*Server, error) {
 		return nil, fmt.Errorf("generate local browser bootstrap credential: %w", err)
 	}
 	return &Server{
-		application: options.Application, exports: options.Exports, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
+		application: options.Application, exports: options.Exports, maintenance: options.Maintenance, storageMaintenance: options.StorageMaintenance, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
 		workspace: application.NewWorkspace(options.Application), now: options.Now, bootstrapToken: bootstrap,
 		sessions: make(map[string]session), serveCompleted: make(chan struct{}),
 	}, nil
