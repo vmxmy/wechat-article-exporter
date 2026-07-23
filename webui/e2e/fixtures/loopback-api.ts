@@ -14,6 +14,7 @@ export interface LoopbackFixture {
   readonly preferencePatches: readonly unknown[]
   readonly diagnosticBundleRequests: readonly unknown[]
   readonly credentialRemovals: readonly unknown[]
+  readonly credentialValidations: readonly unknown[]
   readonly proxyRemovals: readonly unknown[]
   readonly resourceDownloads: readonly unknown[]
   readonly albumTraversals: readonly unknown[]
@@ -30,6 +31,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
   const preferencePatches: unknown[] = []
   const diagnosticBundleRequests: unknown[] = []
   const credentialRemovals: unknown[] = []
+  const credentialValidations: unknown[] = []
   const proxyRemovals: unknown[] = []
   const resourceDownloads: unknown[] = []
   const albumTraversals: unknown[] = []
@@ -65,6 +67,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       preferencePatches,
       diagnosticBundleRequests,
       credentialRemovals,
+      credentialValidations,
       proxyRemovals,
       resourceDownloads,
       albumTraversals,
@@ -76,7 +79,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       ,onSavedQueries: (next) => { savedQueries = next }
     })
   })
-  return { requests, controls, accountDeletions, savedAccounts, accountSyncs, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, proxyRemovals, resourceDownloads, albumTraversals }
+  return { requests, controls, accountDeletions, savedAccounts, accountSyncs, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, credentialValidations, proxyRemovals, resourceDownloads, albumTraversals }
 }
 
 export async function expectOnlyLoopbackRequests(page: Page) {
@@ -104,6 +107,7 @@ interface State {
   readonly preferencePatches: unknown[]
   readonly diagnosticBundleRequests: unknown[]
   readonly credentialRemovals: unknown[]
+  readonly credentialValidations: unknown[]
   readonly proxyRemovals: unknown[]
   readonly resourceDownloads: unknown[]
   readonly albumTraversals: unknown[]
@@ -171,8 +175,8 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
     state.onSavedQueries(state.savedQueries.filter((item) => item.name !== name))
     return route.fulfill({ status: 204, body: '' })
   }
-  if (url.pathname === '/api/v1/jobs') return page(route, [{ id: 'job-fixture-1', kind: 'export', state: 'running', profile: 'fixture-profile', createdAt: now, updatedAt: now, counts: { completed: 1, total: 2 } }])
-  if (url.pathname === '/api/v1/jobs/job-fixture-1/detail') return json(route, { job: { id: 'job-fixture-1', kind: 'export', state: 'running', profile: 'fixture-profile', createdAt: now, updatedAt: now, counts: { completed: 1, total: 2 } }, items: [{ id: 'item-fixture-1', state: 'completed', attemptCount: 1, createdAt: now, updatedAt: now }, { id: 'item-fixture-2', state: 'running', attemptCount: 2, errorClass: 'network', createdAt: now, updatedAt: now }], itemsTotal: 2, itemsLimited: false, logs: [{ id: 1, itemId: 'item-fixture-2', level: 'info', message: 'Sanitized local progress', createdAt: now }], lease: { active: true, expiresAt: '2026-07-24T09:35:00.000Z' }, refreshedAt: now })
+  if (url.pathname === '/api/v1/jobs') return page(route, [{ id: 'job-fixture-1', kind: 'export', state: 'running', profile: 'fixture-profile', createdAt: now, updatedAt: now, counts: { completed: 1, total: 2 }, permittedActions: ['pause', 'cancel'] }])
+  if (url.pathname === '/api/v1/jobs/job-fixture-1/detail') return json(route, { job: { id: 'job-fixture-1', kind: 'export', state: 'running', profile: 'fixture-profile', createdAt: now, updatedAt: now, counts: { completed: 1, total: 2 }, permittedActions: ['pause', 'cancel'] }, items: [{ id: 'item-fixture-1', state: 'completed', attemptCount: 1, createdAt: now, updatedAt: now }, { id: 'item-fixture-2', state: 'running', attemptCount: 2, errorClass: 'network', createdAt: now, updatedAt: now }], itemsTotal: 2, itemsLimited: false, logs: [{ id: 1, itemId: 'item-fixture-2', level: 'info', message: 'Sanitized local progress', createdAt: now }], lease: { active: true, expiresAt: '2026-07-24T09:35:00.000Z' }, refreshedAt: now })
   if (/^\/api\/v1\/jobs\/job-fixture-1\/(pause|resume|retry|cancel)$/.test(url.pathname)) {
     const action = url.pathname.split('/').at(-1)
     if (action !== 'resume' && body?.confirm !== `${action}-job:job-fixture-1`) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Confirmation required' } }) })
@@ -188,6 +192,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/exports/export-fixture-1/verify') return json(route, { exportId: 'export-fixture-1', valid: true, verifiedOutputs: 1, issues: [] })
 
   if (url.pathname === '/api/v1/settings/credentials' && method === 'GET') return json(route, [{ id: 'credential-fixture', accountId: 'account-fixture', kind: 'cookie', status: 'valid', createdAt: now, updatedAt: now }])
+  if (url.pathname === '/api/v1/settings/credentials/validate' && method === 'POST') { state.credentialValidations.push(body); return json(route, { valid: true, status: 'valid' }) }
   if (url.pathname === '/api/v1/settings/credentials/remove') {
     if (body?.id !== 'credential-fixture' || body?.confirm !== 'remove-credential:credential-fixture') return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Confirmation required' } }) })
     state.credentialRemovals.push(body)

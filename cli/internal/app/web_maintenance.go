@@ -66,6 +66,25 @@ func (adapter *webMaintenanceAdapter) ListCredentialMetadata(ctx context.Context
 	return result, nil
 }
 
+func (adapter *webMaintenanceAdapter) ValidateCredential(ctx context.Context, request application.CredentialImportRequest) (application.CredentialValidation, error) {
+	service, err := adapter.credentialService()
+	if err != nil {
+		return application.CredentialValidation{}, err
+	}
+	err = service.ValidateRecord(ctx, credentials.Record{
+		Nickname: request.Nickname, Biz: request.Biz, UIN: request.UIN, Key: request.Key,
+		PassTicket: request.PassTicket, WapSID2: request.WapSID2, AppMsgToken: request.AppMsgToken,
+		Cookie: request.Cookie, ExpiresAt: request.ExpiresAt,
+	})
+	if err != nil {
+		// Validation is intentionally a safe, non-persistent probe. The browser
+		// receives no upstream response, credential field, session detail, or
+		// local runtime information.
+		return application.CredentialValidation{Valid: false, Status: string(credentials.StatusInvalid)}, nil
+	}
+	return application.CredentialValidation{Valid: true, Status: string(credentials.StatusValid)}, nil
+}
+
 func (adapter *webMaintenanceAdapter) ImportCredential(ctx context.Context, request application.CredentialImportRequest) (application.CredentialMetadata, error) {
 	service, err := adapter.credentialService()
 	if err != nil {

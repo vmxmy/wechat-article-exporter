@@ -331,6 +331,27 @@ test('sanitized settings and storage maintenance flows do not reveal secrets', a
   await expectOnlyLoopbackRequests(page)
 })
 
+test('credential validation checks write-only values before allowing import', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/settings')
+  await page.getByRole('textbox', { name: 'Business ID (write-only)' }).fill('biz-secret')
+  await page.getByRole('textbox', { name: 'UIN (write-only)' }).fill('uin-secret')
+  await page.getByRole('textbox', { name: 'Key (write-only)' }).fill('key-secret')
+  await page.getByRole('textbox', { name: 'Pass ticket (write-only)' }).fill('ticket-secret')
+  await page.getByRole('textbox', { name: 'WAP SID2 (write-only)' }).fill('sid-secret')
+  await page.getByRole('textbox', { name: 'App message token (write-only)' }).fill('token-secret')
+  const importButton = page.getByRole('button', { name: 'Import credential' })
+  await expect(importButton).toBeDisabled()
+  const validationRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/settings/credentials/validate'))
+  await page.getByRole('button', { name: 'Validate credential' }).click()
+  expect((await validationRequest).postDataJSON()).toMatchObject({ biz: 'biz-secret', uin: 'uin-secret', key: 'key-secret', passTicket: 'ticket-secret', wapSid2: 'sid-secret', appMsgToken: 'token-secret' })
+  await expect(page.getByText('Credential validation passed. You can import these entered values.')).toBeVisible()
+  await expect(importButton).toBeEnabled()
+  expect(fixture.credentialValidations).toHaveLength(1)
+  await expect(page.locator('body')).not.toContainText('/Users/')
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('saving Chinese display language updates the UI immediately and persists the profile preference', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/settings')

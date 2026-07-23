@@ -10,7 +10,8 @@ import {
   getDiagnosticBundleDownloadURL,
   getExportArtifactDownloadURL,
   getRuntimeStatus,
-  logout
+  logout,
+  validateCredential
 } from '../src/lib/api'
 
 const fetchMock = vi.fn()
@@ -152,6 +153,18 @@ describe('browser API client', () => {
     }))
     expect(getExportArtifactDownloadURL('export / one', 'artifact?two')).toBe('/api/v1/exports/export%20%2F%20one/artifact?artifactId=artifact%3Ftwo')
     expect(getDiagnosticBundleDownloadURL('bundle / one')).toBe('/api/v1/maintenance/diagnostic-bundles/bundle%20%2F%20one')
+  })
+
+  it('submits write-only credential validation and returns only safe metadata', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { valid: true, status: 'valid' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(validateCredential({ biz: 'biz-secret', uin: 'uin-secret', key: 'key-secret', passTicket: 'ticket-secret', wapSid2: 'sid-secret', appMsgToken: 'token-secret', cookie: 'cookie-secret' })).resolves.toEqual({ valid: true, status: 'valid' })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/settings/credentials/validate', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ biz: 'biz-secret', uin: 'uin-secret', key: 'key-secret', passTicket: 'ticket-secret', wapSid2: 'sid-secret', appMsgToken: 'token-secret', cookie: 'cookie-secret' })
+    }))
   })
 })
 

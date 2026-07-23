@@ -14,7 +14,7 @@ import {
   getStorageStatus,
   getWorkspaceSnapshot,
   authorizeDefaultExportDirectory, beginLogin, completeLogin, controlJob, createExportDirectory, deleteAccounts, ingestURL, logout, openExportOutput, pollLogin, saveAccount, searchAccounts, startExport, syncAccount, updateAccount, verifyExport,
-  addProxy, applyGarbageCollection, commitRestore, createBackup, createDiagnosticBundle, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importAccountManifest, importCredential, patchPreferences, planGarbageCollection, prepareRestore, removeCredential, removeProxy, setProxyEnabled, testProxy, uploadAccountManifest, uploadCredentialFile, uploadRestoreArchive, verifyBackup,
+  addProxy, applyGarbageCollection, commitRestore, createBackup, createDiagnosticBundle, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importAccountManifest, importCredential, patchPreferences, planGarbageCollection, prepareRestore, removeCredential, removeProxy, setProxyEnabled, testProxy, uploadAccountManifest, uploadCredentialFile, uploadRestoreArchive, validateCredential, verifyBackup,
   deleteSavedQuery, downloadArticles, saveSavedQuery, traverseAlbum,
   type AccountInput,
   type AlbumPageParams,
@@ -149,6 +149,7 @@ export function useWorkspaceMutations() {
     startExport: useMutation({ mutationFn: startExport, onSuccess: refresh }),
     verifyExport: useMutation({ mutationFn: verifyExport, onSuccess: refresh }),
     openExportOutput: useMutation({ mutationFn: ({ id, confirmation }: { id: string; confirmation: string }) => openExportOutput(id, confirmation) })
+    ,validateCredential: useMutation({ mutationFn: validateCredential })
     ,importCredential: useMutation({ mutationFn: importCredential, onSuccess: refresh })
     ,uploadCredentialFile: useMutation({ mutationFn: uploadCredentialFile, onSuccess: refresh })
     ,removeCredential: useMutation({ mutationFn: ({ id, confirmation }: { id: string; confirmation: string }) => removeCredential(id, confirmation), onSuccess: refresh })

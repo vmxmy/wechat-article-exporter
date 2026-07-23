@@ -350,6 +350,23 @@ func (service *Service) Validate(ctx context.Context, id string) (Metadata, erro
 	return updated, err
 }
 
+// ValidateRecord checks a write-only credential before it is imported. It uses
+// the same expiration and upstream validation semantics as Validate, but never
+// stores the record, creates metadata, or changes an existing credential.
+func (service *Service) ValidateRecord(ctx context.Context, record Record) error {
+	if service.validator == nil {
+		return errors.New("credential validator is not configured")
+	}
+	validated, err := ValidateRecord(record)
+	if err != nil {
+		return err
+	}
+	if !validated.ExpiresAt.IsZero() && !service.now().Before(validated.ExpiresAt) {
+		return ErrCredentialExpired
+	}
+	return service.validator.ValidateCredential(ctx, validated)
+}
+
 func (service *Service) Remove(ctx context.Context, id string) error {
 	if service.repository == nil || service.secrets == nil {
 		return errors.New("credential service dependencies are incomplete")

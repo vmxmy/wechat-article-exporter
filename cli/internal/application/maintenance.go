@@ -64,12 +64,28 @@ type CredentialImportRequest struct {
 	ExpiresAt   time.Time `json:"-"`
 }
 
+// CredentialValidation is deliberately limited to the outcome of a
+// write-only validation attempt. It cannot expose credential material, a
+// source filename, local paths, session state, or an upstream error body.
+type CredentialValidation struct {
+	Valid  bool   `json:"valid"`
+	Status string `json:"status"`
+}
+
 // CredentialMaintenance is intentionally smaller than the credential domain
 // service. In particular, it cannot load or validate secret records.
 type CredentialMaintenance interface {
 	ListCredentialMetadata(context.Context) ([]CredentialMetadata, error)
+	ValidateCredential(context.Context, CredentialImportRequest) (CredentialValidation, error)
 	ImportCredential(context.Context, CredentialImportRequest) (CredentialMetadata, error)
 	RemoveCredential(context.Context, string) error
+}
+
+func (service *MaintenanceService) ValidateCredential(ctx context.Context, request CredentialImportRequest) (CredentialValidation, error) {
+	if service.credentials == nil {
+		return CredentialValidation{}, fmt.Errorf("validate credential: %w", ErrUnavailable)
+	}
+	return service.credentials.ValidateCredential(ctx, request)
 }
 
 func (service *MaintenanceService) Credentials(ctx context.Context) ([]CredentialMetadata, error) {

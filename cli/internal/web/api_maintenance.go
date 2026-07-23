@@ -85,6 +85,8 @@ func (server *Server) maintenanceControl(writer http.ResponseWriter, request *ht
 		return false
 	}
 	switch request.URL.Path {
+	case "/api/v1/settings/credentials/validate":
+		server.credentialValidate(writer, request)
 	case "/api/v1/settings/credentials/import":
 		server.credentialImport(writer, request)
 	case "/api/v1/settings/credentials/remove":
@@ -128,6 +130,23 @@ func (server *Server) maintenanceControl(writer http.ResponseWriter, request *ht
 	return true
 }
 
+func (server *Server) credentialValidate(writer http.ResponseWriter, request *http.Request) {
+	if !server.maintenanceMutation(writer, request, http.MethodPost) {
+		return
+	}
+	var input credentialImportInput
+	if err := decodeControl(request, &input); err != nil || !validCredentialImport(input) {
+		server.invalidMaintenanceInput(writer)
+		return
+	}
+	value, err := server.maintenanceService(writer).ValidateCredential(request.Context(), credentialImportRequest(input))
+	if err != nil {
+		server.maintenanceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusOK, value)
+}
+
 func (server *Server) credentialImport(writer http.ResponseWriter, request *http.Request) {
 	if !server.maintenanceMutation(writer, request, http.MethodPost) {
 		return
@@ -137,7 +156,7 @@ func (server *Server) credentialImport(writer http.ResponseWriter, request *http
 		server.invalidMaintenanceInput(writer)
 		return
 	}
-	value, err := server.maintenanceService(writer).ImportCredential(request.Context(), application.CredentialImportRequest{Nickname: input.Nickname, Biz: input.Biz, UIN: input.UIN, Key: input.Key, PassTicket: input.PassTicket, WapSID2: input.WapSID2, AppMsgToken: input.AppMsgToken, Cookie: input.Cookie, ExpiresAt: timeValue(input.ExpiresAt)})
+	value, err := server.maintenanceService(writer).ImportCredential(request.Context(), credentialImportRequest(input))
 	if err != nil {
 		server.maintenanceError(writer, err)
 		return
@@ -212,6 +231,10 @@ type credentialImportInput struct {
 	AppMsgToken string     `json:"appMsgToken"`
 	Cookie      string     `json:"cookie"`
 	ExpiresAt   *time.Time `json:"expiresAt"`
+}
+
+func credentialImportRequest(input credentialImportInput) application.CredentialImportRequest {
+	return application.CredentialImportRequest{Nickname: input.Nickname, Biz: input.Biz, UIN: input.UIN, Key: input.Key, PassTicket: input.PassTicket, WapSID2: input.WapSID2, AppMsgToken: input.AppMsgToken, Cookie: input.Cookie, ExpiresAt: timeValue(input.ExpiresAt)}
 }
 
 type proxyAddInput struct {

@@ -12,9 +12,15 @@ import (
 
 type fakeCredentialMaintenance struct {
 	items      []CredentialMetadata
+	validation CredentialValidation
 	imported   CredentialImportRequest
 	removedID  string
 	importedTo CredentialMetadata
+}
+
+func (fake *fakeCredentialMaintenance) ValidateCredential(_ context.Context, request CredentialImportRequest) (CredentialValidation, error) {
+	fake.imported = request
+	return fake.validation, nil
 }
 
 func (fake *fakeCredentialMaintenance) ListCredentialMetadata(context.Context) ([]CredentialMetadata, error) {

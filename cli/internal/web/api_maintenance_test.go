@@ -120,6 +120,39 @@ func TestMaintenanceAPIUsesFacadesAndNeverEchoesSecretsOrPaths(t *testing.T) {
 	}
 }
 
+func TestMaintenanceAPICredentialValidationIsWriteOnlyAndNonPersistent(t *testing.T) {
+	credentials := &webCredentialMaintenance{validation: application.CredentialValidation{Valid: true, Status: "valid"}}
+	server, client := startMaintenanceServer(t, application.NewMaintenance(application.MaintenanceOptions{Credentials: credentials}), nil)
+	base := authorizeAPI(t, client, server.URL())
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+
+	response := doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/credentials/validate", `{"biz":"biz-secret","uin":"uin-secret","key":"key-secret","passTicket":"ticket-secret","wapSid2":"sid-secret","appMsgToken":"token-secret","cookie":"cookie-secret"}`, csrf))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("credential validation status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	body := readResponse(t, response)
+	for _, forbidden := range []string{"biz-secret", "uin-secret", "key-secret", "ticket-secret", "sid-secret", "token-secret", "cookie-secret", "/private"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("credential validation leaked %q: %s", forbidden, body)
+		}
+	}
+	if credentials.validated.AppMsgToken != "token-secret" || credentials.validated.Cookie != "cookie-secret" {
+		t.Fatal("credential validation did not receive write-only input")
+	}
+	if credentials.request != (application.CredentialImportRequest{}) {
+		t.Fatalf("credential validation imported a record: %#v", credentials.request)
+	}
+
+	credentials.validation = application.CredentialValidation{Valid: false, Status: "invalid"}
+	response = doMaintenance(t, client, maintenanceRequest(t, http.MethodPost, base+"/api/v1/settings/credentials/validate", `{"biz":"biz-secret","uin":"uin-secret","key":"key-secret","passTicket":"ticket-secret","wapSid2":"sid-secret","appMsgToken":"token-secret"}`, csrf))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("invalid credential validation status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	if body := readResponse(t, response); !strings.Contains(body, `"valid":false`) || strings.Contains(body, "secret") {
+		t.Fatalf("invalid credential validation response=%s", body)
+	}
+}
+
 func TestMaintenanceAPIStrictMutationProtectionBoundedInputAndConfirmation(t *testing.T) {
 	storage := &webStorageMaintenance{plan: application.GarbageCollectionPlan{ID: "gc-plan-1", Confirmation: "gc-proof-1", ExpiresAt: time.Now().Add(time.Minute)}}
 	server, client := startMaintenanceServer(t, application.NewMaintenance(application.MaintenanceOptions{}), application.NewMaintenanceStorage(application.MaintenanceStorageOptions{Garbage: storage}))
@@ -311,10 +344,17 @@ func doMaintenance(t *testing.T, client *http.Client, request *http.Request) *ht
 }
 
 type webCredentialMaintenance struct {
-	items     []application.CredentialMetadata
-	imported  application.CredentialMetadata
-	request   application.CredentialImportRequest
-	removedID string
+	items      []application.CredentialMetadata
+	validation application.CredentialValidation
+	validated  application.CredentialImportRequest
+	imported   application.CredentialMetadata
+	request    application.CredentialImportRequest
+	removedID  string
+}
+
+func (fake *webCredentialMaintenance) ValidateCredential(_ context.Context, request application.CredentialImportRequest) (application.CredentialValidation, error) {
+	fake.validated = request
+	return fake.validation, nil
 }
 
 func (fake *webCredentialMaintenance) ListCredentialMetadata(context.Context) ([]application.CredentialMetadata, error) {

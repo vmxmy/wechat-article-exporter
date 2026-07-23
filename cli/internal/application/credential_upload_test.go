@@ -38,6 +38,9 @@ type credentialUploadMaintenance struct {
 func (*credentialUploadMaintenance) ListCredentialMetadata(context.Context) ([]CredentialMetadata, error) {
 	return nil, nil
 }
+func (*credentialUploadMaintenance) ValidateCredential(context.Context, CredentialImportRequest) (CredentialValidation, error) {
+	return CredentialValidation{}, nil
+}
 func (maintenance *credentialUploadMaintenance) ImportCredential(_ context.Context, request CredentialImportRequest) (CredentialMetadata, error) {
 	maintenance.calls++
 	maintenance.request = request
