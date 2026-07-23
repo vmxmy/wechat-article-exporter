@@ -28,14 +28,21 @@ func openIsolatedRoot(path string) (*isolatedRoot, error) {
 	}
 	defer parentFile.Close()
 	parentFD := int(parentFile.Fd())
+	if err := validateIsolatedRootParent(parentFD); err != nil {
+		return nil, err
+	}
 	fd, err := unix.Openat(parentFD, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_DIRECTORY, 0)
 	if errors.Is(err, unix.ENOENT) {
-		if err := unix.Mkdirat(parentFD, name, 0o700); err != nil {
-			return nil, err
+		if mkdirErr := unix.Mkdirat(parentFD, name, 0o700); mkdirErr != nil && !errors.Is(mkdirErr, unix.EEXIST) {
+			return nil, mkdirErr
 		}
 		fd, err = unix.Openat(parentFD, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_DIRECTORY, 0)
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := validateIsolatedRootDirectory(fd); err != nil {
+		_ = unix.Close(fd)
 		return nil, err
 	}
 	if err := unix.Fchmod(fd, 0o700); err != nil {
@@ -43,6 +50,34 @@ func openIsolatedRoot(path string) (*isolatedRoot, error) {
 		return nil, err
 	}
 	return &isolatedRoot{fd: fd}, nil
+}
+
+func validateIsolatedRootParent(fd int) error {
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return err
+	}
+	if stat.Uid != uint32(unix.Geteuid()) {
+		return errors.New("isolated root parent is not owned by the current user")
+	}
+	if stat.Mode&0o022 != 0 {
+		return errors.New("isolated root parent must not be group or world writable")
+	}
+	return nil
+}
+
+func validateIsolatedRootDirectory(fd int) error {
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return err
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFDIR {
+		return errors.New("isolated root is not a directory")
+	}
+	if stat.Uid != uint32(unix.Geteuid()) {
+		return errors.New("isolated root is not owned by the current user")
+	}
+	return nil
 }
 
 func openDirectoryNoFollow(path string) (*os.File, os.FileInfo, error) {

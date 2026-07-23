@@ -11,7 +11,12 @@ func isolatedRootComponents(relative string) ([]string, error) {
 	if relative == "" || filepath.IsAbs(relative) || filepath.VolumeName(relative) != "" || isForeignVolumePath(relative) {
 		return nil, errors.New("directory path must be a relative path within the isolated root")
 	}
-	components := strings.FieldsFunc(relative, func(value rune) bool { return value == '/' || value == '\\' })
+	isSeparator := func(value rune) bool { return value == '/' || value == '\\' }
+	if strings.HasSuffix(relative, "/") || strings.HasSuffix(relative, `\`) || strings.Contains(relative, "//") || strings.Contains(relative, `\\`) ||
+		strings.Contains(relative, `/\`) || strings.Contains(relative, `\/`) {
+		return nil, errors.New("directory path must not contain empty components")
+	}
+	components := strings.FieldsFunc(relative, isSeparator)
 	if len(components) == 0 {
 		return nil, errors.New("directory path must name a child of the isolated root")
 	}

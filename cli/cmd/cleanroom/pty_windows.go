@@ -16,19 +16,20 @@ import (
 )
 
 type windowsCandidatePTY struct {
-	hpc        windows.Handle
-	input      *os.File
-	output     *os.File
-	process    *os.Process
-	job        windows.Handle
-	attrs      *windows.ProcThreadAttributeListContainer
-	cancelStop func() bool
-	cancelMu   sync.Mutex
-	context    context.Context
-	closed     bool
-	canceled   bool
-	closeOnce  sync.Once
-	closeErr   error
+	hpc         windows.Handle
+	input       *os.File
+	output      *os.File
+	process     *os.Process
+	job         windows.Handle
+	attrs       *windows.ProcThreadAttributeListContainer
+	cancelStop  func() bool
+	lifecycleMu sync.Mutex
+	cancelMu    sync.Mutex
+	context     context.Context
+	closed      bool
+	canceled    bool
+	closeOnce   sync.Once
+	closeErr    error
 }
 
 func newCandidatePTYHarness(width, height int) (candidatePTYHarness, error) {
@@ -56,6 +57,14 @@ func newCandidatePTYHarness(width, height int) (candidatePTYHarness, error) {
 }
 
 func (harness *windowsCandidatePTY) start(ctx context.Context, binary string, environment []string) error {
+	harness.lifecycleMu.Lock()
+	defer harness.lifecycleMu.Unlock()
+	harness.cancelMu.Lock()
+	alreadyClosed := harness.closed
+	harness.cancelMu.Unlock()
+	if alreadyClosed {
+		return errors.New("candidate PTY was closed before start")
+	}
 	attrs, err := windows.NewProcThreadAttributeList(1)
 	if err != nil {
 		return err
@@ -125,11 +134,7 @@ func (harness *windowsCandidatePTY) start(ctx context.Context, binary string, en
 	harness.cancelMu.Lock()
 	harness.cancelStop = stop
 	harness.context = ctx
-	alreadyClosed := harness.closed
 	harness.cancelMu.Unlock()
-	if alreadyClosed {
-		stop()
-	}
 	return nil
 }
 
@@ -165,6 +170,8 @@ func (harness *windowsCandidatePTY) cancel() error {
 
 func (harness *windowsCandidatePTY) shutdown(canceled bool) error {
 	harness.closeOnce.Do(func() {
+		harness.lifecycleMu.Lock()
+		defer harness.lifecycleMu.Unlock()
 		harness.cancelMu.Lock()
 		harness.closed = true
 		harness.canceled = harness.canceled || canceled || (harness.context != nil && harness.context.Err() != nil)

@@ -94,7 +94,10 @@ func normalizedPortableRootPath(value string) (string, error) {
 	volume := filepath.VolumeName(absolute)
 	rest := strings.TrimPrefix(absolute, volume)
 	current := volume + string(filepath.Separator)
-	for _, component := range strings.FieldsFunc(rest, func(value rune) bool { return value == '/' || value == '\\' }) {
+	for _, component := range strings.Split(strings.TrimPrefix(rest, string(filepath.Separator)), string(filepath.Separator)) {
+		if component == "" {
+			continue
+		}
 		current = filepath.Join(current, component)
 		info, err := os.Lstat(current)
 		if errors.Is(err, os.ErrNotExist) {
@@ -112,9 +115,12 @@ func normalizedPortableRootPath(value string) (string, error) {
 			if resolveErr != nil {
 				return "", resolveErr
 			}
-			absolute = filepath.Join(append([]string{resolved}, strings.FieldsFunc(strings.TrimPrefix(absolute, current), func(value rune) bool {
-				return value == '/' || value == '\\'
-			})...)...)
+			remaining := strings.TrimPrefix(strings.TrimPrefix(absolute, current), string(filepath.Separator))
+			if remaining == "" {
+				absolute = resolved
+			} else {
+				absolute = filepath.Join(resolved, remaining)
+			}
 			info, err = os.Stat(resolved)
 			if err != nil {
 				return "", err

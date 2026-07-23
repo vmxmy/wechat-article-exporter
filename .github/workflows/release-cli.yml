@@ -764,8 +764,9 @@ jobs:
             exit 1
           fi
           test "$(jq -r '.workflow_id' "$run_json")" = "$EXPECTED_CONTROLLED_LIVE_WORKFLOW_ID"
-          receipt_set="$(find "$RUNNER_TEMP/controlled-live" -type f -name 'release-receipt-set.json' -print -quit)"
-          test -n "$receipt_set"
+          mapfile -t receipt_sets < <(find "$RUNNER_TEMP/controlled-live" -type f -name 'release-receipt-set.json' -print | sort)
+          test "${#receipt_sets[@]}" -eq 1
+          receipt_set="${receipt_sets[0]}"
           test "$(jq -r '.release.repository' "$receipt_set")" = "$EXPECTED_REPOSITORY"
           test "$(jq -r '.release.commit' "$receipt_set")" = "$EXPECTED_COMMIT"
           test "$(jq -r '.release.version' "$receipt_set")" = "$EXPECTED_VERSION"

@@ -5,7 +5,7 @@ import (
 )
 
 func TestIsolatedRootComponentsRejectsTraversalAndRootedPaths(t *testing.T) {
-	for _, path := range []string{"", ".", "..", "../escape", "nested/../escape", "/absolute", `C:\absolute`, `\\server\share`} {
+	for _, path := range []string{"", ".", "..", "../escape", "nested/../escape", "/absolute", `C:\absolute`, `\\server\share`, "nested//child", `nested\\child`, `nested/\child`, `nested\/child`, "nested/", `nested\`} {
 		if _, err := isolatedRootComponents(path); err == nil {
 			t.Fatalf("isolatedRootComponents(%q) accepted unsafe path", path)
 		}

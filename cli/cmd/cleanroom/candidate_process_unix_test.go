@@ -73,3 +73,33 @@ func TestUnixCandidateProcessTreeCloseToleratesExitedProcess(t *testing.T) {
 		t.Fatalf("Close after exit = %v", err)
 	}
 }
+
+func TestUnixCandidateProcessTreeCloseTerminatesBackgroundChildAfterLeaderExit(t *testing.T) {
+	command := exec.Command("sh", "-c", "sleep 30 & exit 0")
+	configureCandidateProcess(command)
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := attachCandidateProcessTree(command.Process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	tree.MarkExited()
+	if err := tree.Close(); err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		err := syscall.Kill(-command.Process.Pid, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("background process group remains after Close: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

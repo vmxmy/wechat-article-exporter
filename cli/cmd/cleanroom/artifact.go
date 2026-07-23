@@ -52,7 +52,11 @@ func inspectCandidateArtifact(options runOptions, destination string) (candidate
 	if err := os.Mkdir(staging, 0o700); err != nil {
 		return candidateArtifact{}, err
 	}
-	stagedArchive, err := stageRegularFile(options.Archive, staging, "candidate-archive"+releaseArchiveSuffix(options.Archive), maximumArchiveInputBytes)
+	archiveSuffix := releaseArchiveSuffix(options.Archive)
+	if archiveSuffix == "" {
+		return candidateArtifact{}, errors.New("release archive must be .tar.gz or .zip")
+	}
+	stagedArchive, err := stageRegularFile(options.Archive, staging, "candidate-archive"+archiveSuffix, maximumArchiveInputBytes)
 	if err != nil {
 		return candidateArtifact{}, err
 	}
@@ -87,8 +91,8 @@ func inspectCandidateArtifact(options runOptions, destination string) (candidate
 	if err != nil {
 		return candidateArtifact{}, err
 	}
-	rootName := strings.TrimSuffix(filepath.Base(options.Archive), ".tar.gz")
-	rootName = strings.TrimSuffix(rootName, ".zip")
+	archiveBase := filepath.Base(options.Archive)
+	rootName := archiveBase[:len(archiveBase)-len(archiveSuffix)]
 	binaryName := "wechat-article"
 	if runtime.GOOS == "windows" {
 		binaryName += ".exe"
@@ -226,9 +230,6 @@ func extractZIPArchive(path, destination string) (map[string]string, error) {
 		return nil, err
 	}
 	defer archive.Close()
-	if len(archive.File) > maximumArchiveMembers {
-		return nil, fmt.Errorf("archive exceeds %d members", maximumArchiveMembers)
-	}
 	members := make(map[string]string)
 	var totalBytes uint64
 	for _, member := range archive.File {

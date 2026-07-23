@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build unix
 
 package main
 
@@ -64,6 +64,14 @@ func (harness *unixCandidatePTY) wait() error {
 }
 func (harness *unixCandidatePTY) close() error {
 	harness.closeOnce.Do(func() {
+		// Wait only reaps the direct Bubble Tea process. It does not prove a
+		// candidate-spawned background child left the session, so always clear
+		// the PTY session/process group before releasing its descriptors.
+		if harness.c != nil && harness.c.Process != nil {
+			if err := syscall.Kill(-harness.c.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+				harness.closeErr = errors.Join(harness.closeErr, err)
+			}
+		}
 		if harness.p != nil {
 			if err := harness.p.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 				harness.closeErr = errors.Join(harness.closeErr, err)

@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"sync"
@@ -78,10 +79,13 @@ func resumeCandidateProcessThreads(processID uint32) error {
 			if openErr != nil {
 				return openErr
 			}
-			_, resumeErr := resumeThreadHandle(thread)
+			previousCount, resumeErr := resumeThreadHandle(thread)
 			closeErr := windows.CloseHandle(thread)
 			if resumeErr != nil || closeErr != nil {
 				return errors.Join(resumeErr, closeErr)
+			}
+			if previousCount != 1 {
+				return fmt.Errorf("candidate thread %d had unexpected suspend count %d", entry.ThreadID, previousCount)
 			}
 			resumed++
 		}

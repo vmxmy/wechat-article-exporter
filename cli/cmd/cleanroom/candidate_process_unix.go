@@ -14,7 +14,6 @@ type unixCandidateProcessTree struct {
 	process   *os.Process
 	mu        sync.Mutex
 	requested bool
-	exited    bool
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -29,7 +28,7 @@ func attachCandidateProcessTree(process *os.Process) (candidateProcessTree, erro
 
 func (tree *unixCandidateProcessTree) Kill() error {
 	tree.mu.Lock()
-	if tree.requested || tree.exited {
+	if tree.requested {
 		tree.mu.Unlock()
 		return nil
 	}
@@ -45,11 +44,10 @@ func (tree *unixCandidateProcessTree) Kill() error {
 	return err
 }
 
-func (tree *unixCandidateProcessTree) MarkExited() {
-	tree.mu.Lock()
-	tree.exited = true
-	tree.mu.Unlock()
-}
+// MarkExited records that the direct child was reaped. It deliberately does
+// not suppress Close: a process-group leader can exit while background
+// descendants in the same group continue to run.
+func (tree *unixCandidateProcessTree) MarkExited() {}
 
 func (tree *unixCandidateProcessTree) Close() error {
 	tree.closeOnce.Do(func() { tree.closeErr = tree.Kill() })
