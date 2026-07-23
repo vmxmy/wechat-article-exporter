@@ -3,9 +3,14 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/cookiejar"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
+	localweb "github.com/wechat-article/wechat-article-exporter/cli/internal/web"
 )
 
 func TestWebCommandPrintsOnlyLocalURLAndHonorsNoOpen(t *testing.T) {
@@ -74,6 +79,61 @@ func TestWebCommandRequiresTheActiveExportLibrary(t *testing.T) {
 	err := applicationAdapter.Execute(context.Background(), []string{"web", "--no-open"})
 	if err == nil || !strings.Contains(err.Error(), "active export workspace is unavailable") {
 		t.Fatalf("web command error = %v", err)
+	}
+}
+
+func TestWebCommandInjectsMaintenanceFacades(t *testing.T) {
+	applicationAdapter, _, _ := newTestApp(t)
+	maintenance, storageMaintenance := newWebMaintenance(applicationAdapter)
+	local, err := localweb.New(localweb.Options{
+		Application: applicationAdapter.core,
+		Exports:     application.NewWorkspaceExports(applicationAdapter.core, applicationAdapter.active.Library),
+		Maintenance: maintenance, StorageMaintenance: storageMaintenance,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	if err := local.Start(); err != nil {
+		t.Fatal(err)
+	}
+	serveCtx, cancelServe := context.WithCancel(context.Background())
+	defer cancelServe()
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- local.Serve(serveCtx) }()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+	response, err := client.Get(local.URL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("bootstrap status = %d", response.StatusCode)
+	}
+	base := strings.TrimSuffix(strings.Split(local.URL(), "?")[0], "/")
+	for _, path := range []string{
+		"/api/v1/settings/credentials",
+		"/api/v1/settings/proxies",
+		"/api/v1/settings/preferences",
+		"/api/v1/maintenance/integrity",
+		"/api/v1/maintenance/diagnostics",
+	} {
+		response, err := client.Get(base + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		response.Body.Close()
+		if response.StatusCode == http.StatusServiceUnavailable {
+			t.Fatalf("GET %s returned unavailable; maintenance facade was not injected", path)
+		}
+	}
+	cancelServe()
+	if err := <-serveDone; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("serve: %v", err)
 	}
 }
 

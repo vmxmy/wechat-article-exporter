@@ -28,7 +28,12 @@ func (a *App) webCommand() *cobra.Command {
 				return errors.New("active export workspace is unavailable")
 			}
 			exports := application.NewWorkspaceExports(a.core, a.active.Library)
-			server, err := localweb.New(localweb.Options{Application: a.core, Exports: exports})
+			preview := newWorkspaceExtensions(a).(application.WorkspaceArticlePreviewRenderer)
+			maintenance, storageMaintenance := newWebMaintenance(a)
+			server, err := localweb.New(localweb.Options{
+				Application: a.core, Exports: exports, Preview: preview,
+				Maintenance: maintenance, StorageMaintenance: storageMaintenance,
+			})
 			if err != nil {
 				return err
 			}
