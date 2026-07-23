@@ -103,6 +103,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/login/begin') return json(route, { sessionId: 'login-fixture', qrCode: 'c2FuaXRpemVkLXFy', expiresAt: now })
   if (url.pathname === '/api/v1/login/poll') { state.onLoginState('scanned'); return json(route, { state: 'scanned', accountCount: 1 }) }
   if (url.pathname === '/api/v1/login/complete') { state.onLoginState('authenticated'); return json(route, { state: 'authenticated', accountId: 'account-fixture', accountName: 'Fixture Account' }) }
+  if (url.pathname === '/api/v1/session/logout') { state.onLoginState('unauthenticated'); return route.fulfill({ status: 204, body: '' }) }
 
   if (url.pathname === '/api/v1/accounts' || url.pathname === '/api/v1/accounts/search') return page(route, [{ id: 'account-fixture', name: 'Fixture Account', alias: 'fixture', articleCount: 2, lastSyncAt: now, syncCompleted: true }])
   if (url.pathname === '/api/v1/accounts/manifest') return route.fulfill({ contentType: 'application/json', headers: { 'content-disposition': 'attachment; filename="wechat-article-accounts-manifest.json"' }, body: '{"schemaVersion":1,"accounts":[]}' })

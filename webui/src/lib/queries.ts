@@ -12,7 +12,7 @@ import {
   getSessionStatus,
   getStorageStatus,
   getWorkspaceSnapshot,
-  authorizeDefaultExportDirectory, beginLogin, completeLogin, controlJob, createExportDirectory, deleteAccounts, ingestURL, openExportOutput, pollLogin, saveAccount, searchAccounts, startExport, syncAccount, updateAccount, verifyExport,
+  authorizeDefaultExportDirectory, beginLogin, completeLogin, controlJob, createExportDirectory, deleteAccounts, ingestURL, logout, openExportOutput, pollLogin, saveAccount, searchAccounts, startExport, syncAccount, updateAccount, verifyExport,
   addProxy, applyGarbageCollection, commitRestore, createBackup, createDiagnosticBundle, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importAccountManifest, importCredential, patchPreferences, planGarbageCollection, prepareRestore, removeCredential, removeProxy, setProxyEnabled, testProxy, uploadAccountManifest, uploadCredentialFile, uploadRestoreArchive, verifyBackup,
   deleteSavedQuery, downloadArticles, saveSavedQuery, traverseAlbum,
   type AccountInput,
@@ -102,10 +102,23 @@ export function useDiagnostics() { return useQuery({ queryKey: queryKeys.diagnos
 export function useWorkspaceMutations() {
   const client = useQueryClient()
   const refresh = () => client.invalidateQueries()
+  const refreshAfterLogout = async () => {
+    await client.cancelQueries()
+    client.removeQueries({
+      type: 'inactive',
+      predicate: (query) => query.queryKey[0] !== queryKeys.session[0]
+    })
+    client.setQueryData(queryKeys.session, { state: 'unauthenticated' })
+    await client.invalidateQueries({
+      predicate: (query) => query.queryKey[0] === queryKeys.runtime[0] || query.queryKey[0] === queryKeys.snapshot[0],
+      refetchType: 'active'
+    })
+  }
   return {
     beginLogin: useMutation({ mutationFn: beginLogin }),
     pollLogin: useMutation({ mutationFn: pollLogin }),
     completeLogin: useMutation({ mutationFn: completeLogin, onSuccess: refresh }),
+    logout: useMutation({ mutationFn: logout, onSuccess: refreshAfterLogout }),
     saveAccount: useMutation({ mutationFn: (input: AccountInput) => saveAccount(input), onSuccess: refresh }),
     updateAccount: useMutation({ mutationFn: ({ id, input }: { id: string; input: AccountInput }) => updateAccount(id, input), onSuccess: refresh }),
     deleteAccounts: useMutation({ mutationFn: (ids: readonly string[]) => deleteAccounts(ids), onSuccess: refresh }),

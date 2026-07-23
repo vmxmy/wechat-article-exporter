@@ -65,6 +65,9 @@ export const zhCN = {
     start: '开始二维码登录',
     poll: '轮询登录状态',
     complete: '完成登录',
+    logout: '退出登录',
+    logoutComplete: '已退出本地会话。',
+    logoutUnavailable: '无法退出本地会话。',
     states: { authenticated: '已登录', unauthenticated: '未登录', waiting: '等待扫码', scanned: '已扫码', confirmed: '已确认', expired: '已过期', completed: '已完成' }
   },
   import: {

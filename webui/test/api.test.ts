@@ -5,7 +5,8 @@ import {
   getAccountPage,
   getDiagnosticBundleDownloadURL,
   getExportArtifactDownloadURL,
-  getRuntimeStatus
+  getRuntimeStatus,
+  logout
 } from '../src/lib/api'
 
 const fetchMock = vi.fn()
@@ -65,6 +66,25 @@ describe('browser API client', () => {
         'X-CSRF-Token': 'csrf-fixture'
       },
       body: JSON.stringify({ name: 'draft / query', confirm: 'delete-saved-query:draft / query' })
+    })
+  })
+
+  it('revokes the local session with the CSRF proof and accepts an empty response', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(logout()).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/session/logout', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': 'csrf-fixture'
+      },
+      body: '{}'
     })
   })
 

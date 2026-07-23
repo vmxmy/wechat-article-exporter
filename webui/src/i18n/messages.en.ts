@@ -65,6 +65,9 @@ export const en = {
     start: 'Start QR login',
     poll: 'Poll login status',
     complete: 'Complete login',
+    logout: 'Log out',
+    logoutComplete: 'Signed out of the local session.',
+    logoutUnavailable: 'The local session could not be signed out.',
     states: { authenticated: 'Authenticated', unauthenticated: 'Not signed in', waiting: 'Waiting for scan', scanned: 'Scanned', confirmed: 'Confirmed', expired: 'Expired', completed: 'Completed' }
   },
   import: {

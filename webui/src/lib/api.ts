@@ -423,6 +423,7 @@ export async function getCSRFToken(): Promise<string> {
 export async function beginLogin(sessionId: string): Promise<LoginFlow> { return mutate<LoginFlow>('login/begin', 'POST', { sessionId }) }
 export async function pollLogin(): Promise<LoginPollResult> { return mutate<LoginPollResult>('login/poll', 'POST', {}) }
 export async function completeLogin(): Promise<SessionStatus> { return mutate<SessionStatus>('login/complete', 'POST', {}) }
+export async function logout(): Promise<void> { await mutate<void>('session/logout', 'POST', {}) }
 export async function searchAccounts(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<AccountRecord>> { return getPage<AccountRecord>('accounts/search', params, signal) }
 export async function saveAccount(input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>('accounts', 'POST', input) }
 export async function updateAccount(id: string, input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>(`accounts/${encodeURIComponent(id)}`, 'PATCH', input) }
@@ -712,6 +713,8 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   if (!response.ok) {
     throw new ApiError(response.status, await readErrorMessage(response))
   }
+
+  if (response.status === 204) return undefined as T
 
   const body = await response.json() as T | ApiEnvelope<T>
   return isApiEnvelope(body) ? body.data : body

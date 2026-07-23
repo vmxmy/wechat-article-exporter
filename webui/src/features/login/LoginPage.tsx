@@ -10,6 +10,7 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
   const [qrCode, setQRCode] = useState<string>()
   const [loginState, setLoginState] = useState<string>()
   const [error, setError] = useState<string>()
+  const [notice, setNotice] = useState<string>()
 
   const poll = useCallback(() => mutations.pollLogin.mutate(undefined, {
     onSuccess: (result) => { setError(undefined); setLoginState(result.state) },
@@ -27,15 +28,19 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
   }, [active, loginSessionId, mutations.pollLogin.isPending, poll, qrCode])
 
   const start = () => {
-    setError(undefined); setQRCode(undefined); setLoginState(undefined)
+    setError(undefined); setNotice(undefined); setQRCode(undefined); setLoginState(undefined)
     mutations.beginLogin.mutate(loginSessionId, {
     onSuccess: (flow) => { setLoginSessionId(flow.sessionId); setQRCode(flow.qrCode); setLoginState('waiting') },
       onError: (reason) => setError(reason instanceof Error ? reason.message : messages.login.unavailable)
     })
   }
   const complete = () => mutations.completeLogin.mutate(undefined, {
-    onSuccess: () => { setError(undefined); setLoginState('completed'); void session.refetch() },
+    onSuccess: () => { setError(undefined); setNotice(undefined); setLoginState('completed'); void session.refetch() },
     onError: (reason) => setError(reason instanceof Error ? reason.message : messages.login.unavailable)
+  })
+  const logout = () => mutations.logout.mutate(undefined, {
+    onSuccess: () => { setError(undefined); setNotice(messages.login.logoutComplete); setQRCode(undefined); setLoginState(undefined) },
+    onError: (reason) => setError(reason instanceof Error ? reason.message : messages.login.logoutUnavailable)
   })
   return (
     <section aria-labelledby="login-title">
@@ -52,12 +57,14 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
           {session.isLoading ? <p role="status">{messages.login.checking}</p> : null}
           {session.isError ? <p role="alert">{messages.login.unavailable}</p> : null}
           {session.data ? <dl className="facts-list"><div><dt>{messages.login.account}</dt><dd>{session.data.accountName ?? '—'}</dd></div><div><dt>{messages.login.state}</dt><dd>{messages.login.states[session.data.state] ?? session.data.state}</dd></div></dl> : null}
+          {session.data?.state === 'authenticated' ? <div className="action-button-group"><Button label={messages.login.logout} variant="destructive" isLoading={mutations.logout.isPending} onClick={logout} /></div> : null}
         </section>
         <section className="workspace-panel login-flow" aria-labelledby="qr-login-title">
           <h2 id="qr-login-title">{messages.login.qrTitle}</h2>
           <p>{messages.login.qrDescription}</p>
           {qrCode ? <img className="qr-code" src={`data:image/png;base64,${qrCode}`} alt={messages.login.qrTitle} /> : null}
           {loginState ? <p role="status">{messages.login.states[loginState] ?? loginState}</p> : null}
+          {notice ? <p role="status">{notice}</p> : null}
           {error ? <p role="alert">{error}</p> : null}
           <div className="action-button-group">
             <Button label={messages.login.start} variant="primary" isLoading={mutations.beginLogin.isPending} isDisabled={active || mutations.pollLogin.isPending || mutations.completeLogin.isPending} onClick={start} />

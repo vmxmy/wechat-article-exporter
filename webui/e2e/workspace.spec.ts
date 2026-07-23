@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { expectOnlyLoopbackRequests, installExportArtifactFixture, installLoopbackFixture } from './fixtures/loopback-api'
 
-test('sanitized loopback fixture covers QR login UI', async ({ page }) => {
-  await installLoopbackFixture(page)
+test('sanitized loopback fixture covers QR login and logout UI', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
   await page.goto('/login')
   await expect(page.getByRole('heading', { name: 'WeChat login' })).toBeVisible()
   await page.getByRole('button', { name: 'Start QR login' }).click()
@@ -11,6 +11,10 @@ test('sanitized loopback fixture covers QR login UI', async ({ page }) => {
   await expect(page.getByText('Scanned', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Complete login' }).click()
   await expect(page.getByText('Authenticated', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Log out' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Signed out of the local session.' })).toBeVisible()
+  await expect(page.getByText('Not signed in', { exact: true })).toBeVisible()
+  expect(fixture.requests).toContain('POST /api/v1/session/logout')
   await expectOnlyLoopbackRequests(page)
 })
 
