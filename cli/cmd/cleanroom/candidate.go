@@ -24,8 +24,10 @@ type candidateCommandResult struct {
 }
 
 type candidateRunner struct {
-	binary string
-	env    []string
+	binary          string
+	env             []string
+	observerCommand string
+	requireObserver bool
 }
 
 func (runner candidateRunner) command(arguments ...string) *exec.Cmd {
@@ -33,7 +35,13 @@ func (runner candidateRunner) command(arguments ...string) *exec.Cmd {
 }
 
 func (runner candidateRunner) configuredCommand(arguments ...string) (*exec.Cmd, error) {
-	command := runner.command(arguments...)
+	command, err := candidateCommandWithObserver(runner.binary, runner.observerCommand, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	if runner.requireObserver && strings.TrimSpace(runner.observerCommand) == "" {
+		return nil, errors.New("controlled live candidate execution requires a process-tree observer")
+	}
 	environment, err := candidateEnvironment(runner.env)
 	if err != nil {
 		return nil, err

@@ -10,6 +10,21 @@ Task 17.9 is satisfied only by candidate-binary evidence from all five supported
 
 The repository fixture runner is deliberately incapable of producing live evidence. Its `run` command accepts only `--mode fixture`; `--mode live` and `--require-live` fail before any workflow starts. The five account-dependent workflows—QR login, restart persistence, account synchronization, article download, and resource download—must be collected by a separately authorized controlled-account runner and validated with `--require-live`.
 
+## Controlled live runner
+
+The separate manual workflow is [controlled-live-clean-room.yml](../../.github/workflows/controlled-live-clean-room.yml). It runs only after an approved successful release-candidate run and always downloads that run's exact native archive and checksum artifact. Both its platform and aggregation jobs use the protected `controlled-live` GitHub Environment; repository administrators must configure it with required reviewers and the controlled account secrets. It has one native matrix job for every supported tuple, then produces the sole `controlled-live-release-receipts` artifact consumed by the stable release gate.
+
+It is intentionally not an ordinary public-hosted CI job. Before dispatch, the organization-owned native runner image must provide all of the following for every matrix host:
+
+- a controlled WeChat account authorization and the account's bounded migration input, supplied only as protected secrets/artifacts;
+- a protected vault passphrase file, native Chromium-family browser, native PTY, and the OS credential persistence facilities required by the approved test profile;
+- `controlled-network-observer`, which captures DNS and connect activity for the complete candidate process tree, including Chromium descendants, and fails on any retired-domain contact;
+- `controlled-offline-guard`, which applies an OS-level deny-all egress policy while executing the supplied offline candidate workflow, fails on every DNS query or connection attempt, and restores its policy even on cancellation.
+
+The network observer is launched as the parent of every non-PTY candidate command and must make its final `--verify` invocation fail unless the whole candidate/browser tree was tracked for the run. It must cover the native PTY process through its runner-level capture service as well. The two observer programs must emit their short success attestations only after examining protected capture state; a shell wrapper that merely prints these strings is not valid evidence. Raw captures, QR images, secrets, account identifiers, article bodies, portable roots, databases, and exports must stay on the controlled runner and must not be uploaded. If any prerequisite is absent, the workflow must fail or emit a diagnostic non-passing receipt; it must never publish a live receipt.
+
+The runner's `cleanroom live` command is additionally guarded by `WECHAT_ARTICLE_CONTROLLED_LIVE_RUNNER=1`, rejects loopback fixture-origin variables, requires an archive/SBOM/checksum provenance match, requires a versioned legacy-Web archive, and validates `mode=live` with `--require-live` before upload. It receives only sanitized receipt fields; the account fakeid, selected article ID, QR image, passphrase, command output, and network captures are never serialized.
+
 ## Fixture receipt
 
 Provide the candidate archive, its per-target SBOM, and the release checksum manifest. The runner extracts the archive into its own clean root, verifies the archive layout and target metadata, checks both the archive and SBOM against `checksums.txt`, and executes the extracted candidate binary. Optional `--binary` and `--build-info` inputs are accepted only when their digests match the corresponding archive members.

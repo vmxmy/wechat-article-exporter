@@ -1,0 +1,255 @@
+name: Controlled live clean-room evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: Completed Release Go CLI run containing the exact candidate artifacts
+        required: true
+        type: string
+      version:
+        description: Exact release version, without the wechat-article-v prefix
+        required: true
+        type: string
+      commit:
+        description: Exact source commit built by release_run_id
+        required: true
+        type: string
+      legacy_archive_artifact:
+        description: Approved sanitized legacy-Web archive artifact name from the controlled evidence store
+        required: true
+        type: string
+      legacy_source_run_id:
+        description: Approved controlled-evidence run that produced legacy_archive_artifact
+        required: true
+        type: string
+      legacy_archive_sha256:
+        description: SHA-256 of the approved sanitized legacy-Web archive
+        required: true
+        type: string
+      observer_sha256:
+        description: SHA-256 of the admin-provisioned native network observer
+        required: true
+        type: string
+      offline_guard_sha256:
+        description: SHA-256 of the admin-provisioned OS deny-all guard
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: controlled-live-clean-room-${{ inputs.release_run_id }}-${{ inputs.commit }}
+  cancel-in-progress: false
+
+jobs:
+  live-platform:
+    environment: controlled-live
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            goos: darwin
+            goarch: arm64
+            archive_ext: tar.gz
+            binary: wechat-article
+          - os: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            archive_ext: tar.gz
+            binary: wechat-article
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            archive_ext: tar.gz
+            binary: wechat-article
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            archive_ext: tar.gz
+            binary: wechat-article
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            archive_ext: zip
+            binary: wechat-article.exe
+    runs-on: [self-hosted, controlled-live, "${{ matrix.goos }}", "${{ matrix.goarch }}"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/wechat-article-v${{ inputs.version }}
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Verify approved release run provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          EXPECTED_COMMIT: ${{ inputs.commit }}
+          EXPECTED_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID" > "$RUNNER_TEMP/release-run.json"
+          test "$(jq -r '.repository.full_name' "$RUNNER_TEMP/release-run.json")" = "$GITHUB_REPOSITORY"
+          test "$(jq -r '.head_sha' "$RUNNER_TEMP/release-run.json")" = "$EXPECTED_COMMIT"
+          test "$(jq -r '.status' "$RUNNER_TEMP/release-run.json")" = completed
+          test "$(jq -r '.conclusion' "$RUNNER_TEMP/release-run.json")" = success
+          test "$(jq -r '.event' "$RUNNER_TEMP/release-run.json")" = push
+          test "$(jq -r '.path' "$RUNNER_TEMP/release-run.json")" = .github/workflows/release-cli.yml
+          test "$(jq -r '.head_branch' "$RUNNER_TEMP/release-run.json")" = "wechat-article-v$EXPECTED_VERSION"
+          test "$(git rev-parse "refs/tags/wechat-article-v$EXPECTED_VERSION^{}")" = "$EXPECTED_COMMIT"
+
+      - name: Download exact release artifact and checksum manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release-artifact" "$RUNNER_TEMP/checksums"
+          gh run download "$RELEASE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "wechat-article-${{ matrix.goos }}-${{ matrix.goarch }}" --dir "$RUNNER_TEMP/release-artifact"
+          gh run download "$RELEASE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name wechat-article-checksums --dir "$RUNNER_TEMP/checksums"
+
+      - name: Download approved sanitized migration input
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEGACY_SOURCE_RUN_ID: ${{ inputs.legacy_source_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/legacy"
+          gh run download "$LEGACY_SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "${{ inputs.legacy_archive_artifact }}" --dir "$RUNNER_TEMP/legacy"
+          legacy="$(find "$RUNNER_TEMP/legacy" -type f -name '*.zip' -print -quit)"
+          test -n "$legacy"
+          test "$(sha256sum "$legacy" | cut -d ' ' -f1)" = "${{ inputs.legacy_archive_sha256 }}"
+
+      - name: Prepare controlled runner prerequisites
+        shell: bash
+        env:
+          CONTROLLED_VAULT_PASSPHRASE: ${{ secrets.CONTROLLED_LIVE_VAULT_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "$CONTROLLED_VAULT_PASSPHRASE"
+          umask 077
+          printf '%s\n' "$CONTROLLED_VAULT_PASSPHRASE" > "$RUNNER_TEMP/live-vault-passphrase"
+          chmod 600 "$RUNNER_TEMP/live-vault-passphrase"
+          case "$RUNNER_OS" in
+            Linux) command -v chromium ;; 
+            macOS) command -v google-chrome || command -v chromium || command -v "Google Chrome" ;;
+            Windows) powershell -NoProfile -Command "$c = Get-Command chrome.exe -ErrorAction SilentlyContinue; if ($null -eq $c) { exit 1 }" ;;
+          esac
+
+      - name: Run controlled live evidence under platform-native observer
+        working-directory: cli
+        shell: bash
+        env:
+          ACCOUNT_FAKEID: ${{ secrets.CONTROLLED_LIVE_ACCOUNT_FAKEID }}
+          ACCOUNT_NAME: ${{ secrets.CONTROLLED_LIVE_ACCOUNT_NAME }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          test -n "$ACCOUNT_FAKEID"
+          test -n "$ACCOUNT_NAME"
+          artifact="$(find "$RUNNER_TEMP/release-artifact" -maxdepth 1 -type f -name "*.${{ matrix.archive_ext }}" -print -quit)"
+          sbom="$(find "$RUNNER_TEMP/release-artifact" -maxdepth 1 -type f -name '*.sbom.cdx.json' -print -quit)"
+          legacy="$(find "$RUNNER_TEMP/legacy" -type f -name '*.zip' -print -quit)"
+          test -n "$artifact" && test -n "$sbom" && test -n "$legacy"
+          work_root="$RUNNER_TEMP/controlled-live-root"
+          mkdir -p "$work_root"
+          receipt="$RUNNER_TEMP/controlled-live-${{ matrix.goos }}-${{ matrix.goarch }}.json"
+          # These tools live on the hardened, administrator-owned runner image, not in
+          # the repository or runner temp directory. Their pinned digests are dispatch inputs.
+          observer="/opt/wechat-article/controlled-network-observer"
+          offline_guard="/opt/wechat-article/controlled-offline-guard"
+          test -x "$observer" && test -x "$offline_guard"
+          test "$(sha256sum "$observer" | cut -d ' ' -f1)" = "${{ inputs.observer_sha256 }}"
+          test "$(sha256sum "$offline_guard" | cut -d ' ' -f1)" = "${{ inputs.offline_guard_sha256 }}"
+          # The runner adapters must be installed from the controlled image. The
+          # implementation fails closed until they compose native PTY and OS-level
+          # deny-all execution with the per-command observer protocol.
+          test -x /opt/wechat-article/controlled-live-ready
+          go run ./cmd/cleanroom live \
+            --archive "$artifact" --sbom "$sbom" --checksums "$RUNNER_TEMP/checksums/checksums.txt" \
+            --output "$receipt" --work-root "$work_root" --commit "$RELEASE_COMMIT" --version "$RELEASE_VERSION" \
+            --repository "$GITHUB_REPOSITORY" --legacy-archive "$legacy" \
+            --vault-passphrase-file "$RUNNER_TEMP/live-vault-passphrase" --account-fakeid "$ACCOUNT_FAKEID" \
+            --account-name "$ACCOUNT_NAME" --observer-command "$observer" --offline-guard "$offline_guard"
+          go run ./cmd/cleanroom verify --receipt "$receipt" --require-live
+          cp "$receipt" "$GITHUB_WORKSPACE/controlled-live-${{ matrix.goos }}-${{ matrix.goarch }}.json"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: controlled-live-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: controlled-live-${{ matrix.goos }}-${{ matrix.goarch }}.json
+          if-no-files-found: error
+
+  aggregate:
+    needs: live-platform
+    runs-on: ubuntu-latest
+    environment: controlled-live
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.commit }}
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: controlled-live-*
+          path: receipts
+          merge-multiple: true
+
+      - name: Download and hash release checksum manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$RELEASE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name wechat-article-checksums --dir checksums
+          checksum_digest="$(sha256sum checksums/checksums.txt | cut -d ' ' -f1)"
+          echo "CHECKSUM_DIGEST=$checksum_digest" >> "$GITHUB_ENV"
+
+      - name: Assemble and verify exact five-target live receipt set
+        working-directory: cli
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          mkdir -p ../controlled-live-release-receipts
+          cp ../receipts/*.json ../controlled-live-release-receipts/
+          go run ./cmd/cleanroom assemble-set \
+            --output ../controlled-live-release-receipts/release-receipt-set.json \
+            --repository "$GITHUB_REPOSITORY" --tag "wechat-article-v$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" --version "$RELEASE_VERSION" \
+            --checksum-manifest-sha256 "$CHECKSUM_DIGEST" \
+            --receipt ../controlled-live-release-receipts/controlled-live-darwin-arm64.json \
+            --receipt ../controlled-live-release-receipts/controlled-live-darwin-amd64.json \
+            --receipt ../controlled-live-release-receipts/controlled-live-linux-arm64.json \
+            --receipt ../controlled-live-release-receipts/controlled-live-linux-amd64.json \
+            --receipt ../controlled-live-release-receipts/controlled-live-windows-amd64.json
+          go run ./cmd/cleanroom verify-set --receipt-set ../controlled-live-release-receipts/release-receipt-set.json \
+            --repository "$GITHUB_REPOSITORY" --tag "wechat-article-v$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" --version "$RELEASE_VERSION" --checksum-manifest-sha256 "$CHECKSUM_DIGEST"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: controlled-live-release-receipts
+          path: controlled-live-release-receipts
+          if-no-files-found: error

@@ -36,6 +36,13 @@ type runOptions struct {
 	Mode             string
 	SkipTUI          bool
 	RequireLive      bool
+	LegacyArchive    string
+	VaultPassphrase  string
+	AccountFakeID    string
+	AccountName      string
+	QROutput         string
+	ObserverCommand  string
+	OfflineGuard     string
 }
 
 type commandEnvelope struct {
@@ -57,12 +64,16 @@ type jobEnvelopeData struct {
 
 func main() {
 	if len(os.Args) < 2 {
-		fatalf("usage: go run ./cmd/cleanroom <run|verify|verify-set> [flags]")
+		fatalf("usage: go run ./cmd/cleanroom <run|live|verify|verify-set|assemble-set> [flags]")
 	}
 	switch os.Args[1] {
 	case "run":
 		if err := runCommand(os.Args[2:]); err != nil {
 			fatalf("clean-room run: %v", err)
+		}
+	case "live":
+		if err := liveCommand(os.Args[2:]); err != nil {
+			fatalf("controlled live clean-room run: %v", err)
 		}
 	case "verify":
 		if err := verifyCommand(os.Args[2:]); err != nil {
@@ -71,6 +82,10 @@ func main() {
 	case "verify-set":
 		if err := verifySetCommand(os.Args[2:]); err != nil {
 			fatalf("clean-room receipt set verify: %v", err)
+		}
+	case "assemble-set":
+		if err := assembleSetCommand(os.Args[2:]); err != nil {
+			fatalf("clean-room receipt-set assembly: %v", err)
 		}
 	default:
 		fatalf("unknown clean-room command %q", os.Args[1])

@@ -1,0 +1,7 @@
+self-hosted-runner:
+  labels:
+    - controlled-live
+    - darwin
+    - linux
+    - windows
+    - amd64

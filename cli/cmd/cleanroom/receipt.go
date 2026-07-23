@@ -455,6 +455,14 @@ func validateWorkflowEvidence(contract workflowContract, values map[string]strin
 }
 
 func writeReceipt(path string, receipt Receipt) error {
+	body, err := json.MarshalIndent(receipt, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomicPrivateJSON(path, append(body, '\n'))
+}
+
+func writeAtomicPrivateJSON(path string, body []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -473,9 +481,7 @@ func writeReceipt(path string, receipt Receipt) error {
 		_ = temporary.Close()
 		return err
 	}
-	encoder := json.NewEncoder(temporary)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(receipt); err != nil {
+	if _, err := temporary.Write(body); err != nil {
 		_ = temporary.Close()
 		return err
 	}

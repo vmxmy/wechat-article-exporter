@@ -91,7 +91,7 @@ jobs:
           GOBIN="$RUNNER_TEMP/validation-tools" go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_COMMIT}"
 
       - name: Workflow syntax
-        run: $RUNNER_TEMP/validation-tools/actionlint .github/workflows/release-cli.yml
+        run: $RUNNER_TEMP/validation-tools/actionlint -config-file actionlint.yaml .github/workflows/release-cli.yml .github/workflows/controlled-live-clean-room.yml
 
       - name: Verify retired production sources remain absent
         shell: bash
