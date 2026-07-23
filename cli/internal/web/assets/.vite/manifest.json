@@ -18,7 +18,7 @@
     ]
   },
   "index.html": {
-    "file": "assets/index-B1CBYF2G.js",
+    "file": "assets/index-CxPzXpdz.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -43,7 +43,7 @@
     ]
   },
   "src/features/articles/ArticleTable.tsx": {
-    "file": "assets/ArticleTable-BEaA-g-O.js",
+    "file": "assets/ArticleTable-B5nHbBoA.js",
     "name": "ArticleTable",
     "src": "src/features/articles/ArticleTable.tsx",
     "isDynamicEntry": true,
@@ -55,7 +55,7 @@
     ]
   },
   "src/features/exports/ExportPage.tsx": {
-    "file": "assets/ExportPage-DPyb8twJ.js",
+    "file": "assets/ExportPage-DeSmtb-i.js",
     "name": "ExportPage",
     "src": "src/features/exports/ExportPage.tsx",
     "isDynamicEntry": true,
@@ -67,7 +67,7 @@
     ]
   },
   "src/features/import/ImportPage.tsx": {
-    "file": "assets/ImportPage-n7LxhKd-.js",
+    "file": "assets/ImportPage-DPFKcu0S.js",
     "name": "ImportPage",
     "src": "src/features/import/ImportPage.tsx",
     "isDynamicEntry": true,
@@ -79,7 +79,7 @@
     ]
   },
   "src/features/login/LoginPage.tsx": {
-    "file": "assets/LoginPage-C38F3aGj.js",
+    "file": "assets/LoginPage-FbJS28AH.js",
     "name": "LoginPage",
     "src": "src/features/login/LoginPage.tsx",
     "isDynamicEntry": true,
@@ -91,7 +91,7 @@
     ]
   },
   "src/features/resources/ResourcePages.tsx": {
-    "file": "assets/ResourcePages-CAORJuBA.js",
+    "file": "assets/ResourcePages-IhwznA3K.js",
     "name": "ResourcePages",
     "src": "src/features/resources/ResourcePages.tsx",
     "isDynamicEntry": true,
@@ -103,7 +103,7 @@
     ]
   },
   "src/features/settings/SettingsPage.tsx": {
-    "file": "assets/SettingsPage-TaZtIL63.js",
+    "file": "assets/SettingsPage-Cbr-_Ev6.js",
     "name": "SettingsPage",
     "src": "src/features/settings/SettingsPage.tsx",
     "isDynamicEntry": true,
