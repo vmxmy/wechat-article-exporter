@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { consumeExportHandoff, getExportArtifactDownloadURL, openExportOutput, parseArticleQuery, type ExportFormat, type ExportManifest, type ExportRecord, type ExportSelection, type ExportVerification } from '../../lib/api'
+import { handoffCreatedJob } from '../../lib/jobHandoff'
 import { useExportManifest, useExportPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 
 const pageSize = 25
@@ -116,7 +117,10 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
         }
       }
     }, {
-      onSuccess: (result) => setNotice(copy.queued(result.jobId)),
+      onSuccess: (result) => {
+        setNotice(copy.queued(result.jobId))
+        handoffCreatedJob({ id: result.jobId })
+      },
       onError: () => setNotice(copy.actionFailed)
     })
   }

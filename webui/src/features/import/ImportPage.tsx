@@ -2,6 +2,7 @@ import { Button } from '@astryxdesign/core/Button'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { useState } from 'react'
 import type { MessageCatalog } from '../../i18n'
+import { handoffCreatedJob } from '../../lib/jobHandoff'
 import { useWorkspaceMutations } from '../../lib/queries'
 
 export function ImportPage({ messages }: { readonly messages: MessageCatalog }) {
@@ -13,7 +14,13 @@ export function ImportPage({ messages }: { readonly messages: MessageCatalog }) 
     event.preventDefault()
     const trimmedURL = url.trim()
     if (!trimmedURL || mutations.ingestURL.isPending) return
-    mutations.ingestURL.mutate({ url: trimmedURL, force }, { onSuccess: (job) => setResult(messages.import.queued(job.id)), onError: (reason) => setResult(reason instanceof Error ? reason.message : messages.import.failed) })
+    mutations.ingestURL.mutate({ url: trimmedURL, force }, {
+      onSuccess: (job) => {
+        setResult(messages.import.queued(job.id))
+        handoffCreatedJob(job)
+      },
+      onError: (reason) => setResult(reason instanceof Error ? reason.message : messages.import.failed)
+    })
   }
   return (
     <section aria-labelledby="import-title">

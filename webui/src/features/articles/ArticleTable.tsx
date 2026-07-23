@@ -6,6 +6,7 @@ import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type Sortin
 import { useEffect, useMemo, useState } from 'react'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { getArticlePreview, parseArticleQuery, saveArticleQueryHandoff, saveExportHandoff, type ArticleQuery, type ArticleRecord, type ArticleSort } from '../../lib/api'
+import { handoffCreatedJob } from '../../lib/jobHandoff'
 import { useArticlePage, useArticleResourceSummary } from '../../lib/queries'
 import { useWorkspaceMutations } from '../../lib/queries'
 import { navigateTo } from '../../app/navigation'
@@ -118,7 +119,10 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   const startDownload = (kind: 'article' | 'metadata' | 'comments' | 'resources', force = false) => {
     if (selectedIDs.length === 0) return
     mutations.downloadArticles.mutate({ articleIds: selectedIDs, kind, force }, {
-      onSuccess: (job) => setNotice(`${kind}: ${job.id}`),
+      onSuccess: (job) => {
+        setNotice(`${kind}: ${job.id}`)
+        handoffCreatedJob(job)
+      },
       onError: () => setNotice(messages.articles.actions.failed)
     })
   }
