@@ -38,14 +38,24 @@ The system SHALL protect every workspace and API request with a cryptographicall
 - **WHEN** a state-changing API request has a missing or non-loopback same-origin Origin/CSRF proof
 - **THEN** the server SHALL reject the request before invoking an application operation
 
-### Requirement: Embedded, self-contained browser assets
+### Requirement: Embedded React browser workspace assets
 
-The browser workspace SHALL be delivered from static assets embedded in the released Go binary. Normal use SHALL NOT require Node.js, a front-end dev server, a CDN, external fonts, a project-operated Web service, or an additional database installation.
+The browser workspace SHALL be delivered from a React + TypeScript + Vite application embedded in the released Go binary. It SHALL use Astryx for design-system primitives and accessible theme infrastructure, and TanStack Query/Table for local API state and server-paginated grids. Normal use SHALL NOT require Node.js, a front-end dev server, a CDN, external fonts, a project-operated Web service, or an additional database installation.
 
 #### Scenario: Run from a release archive without front-end tooling
 
 - **WHEN** a user runs a released `wechat-article` binary on a supported platform without Node.js installed
 - **THEN** `wechat-article web` SHALL serve its initial document, scripts, styles, and icons locally from that binary
+
+#### Scenario: Render an accessible themed application
+
+- **WHEN** an authenticated browser loads the workspace
+- **THEN** the React application SHALL initialize Astryx theme and link providers before rendering navigable workspace content
+
+#### Scenario: Page a large local article library
+
+- **WHEN** a browser user views, sorts, filters, changes visible columns, or selects articles in a large library
+- **THEN** TanStack Query/Table SHALL request bounded server-side pages and SHALL NOT require the browser to load the entire library
 
 #### Scenario: Serve an unknown browser route
 

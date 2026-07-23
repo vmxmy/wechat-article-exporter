@@ -24,6 +24,6 @@
 ## Impact
 
 - Go：`cli/internal/app/` 增加 `web` 命令和 server 生命周期；新增 `cli/internal/web/` 或等价的仅展示层包；复用 `application`、`library`、`jobs`、`profiles`、`secrets` 既有模块。
-- 前端：新增一个嵌入式静态 SPA 及其可重复构建、资源指纹和 `go:embed` 流程；最终发布物仍是单个 `wechat-article` 二进制。
+- 前端：采用 React + TypeScript + Vite + Astryx + TanStack Query/Table，构建嵌入式静态 SPA、资源指纹和 `go:embed` 流程；最终发布物仍是单个 `wechat-article` 二进制。
 - 安全：新增 loopback listener、每启动实例随机高熵令牌、Origin/Host/CSRF 策略、响应安全头、敏感日志脱敏、路径授权及关闭时令牌失效。
 - 测试与发布：增加 handler/协议/浏览器 E2E、跨适配器契约、安全负例和 native release receipt 证据；预计二进制体积增加约 1–4 MB（取决于前端资源）。

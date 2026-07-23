@@ -55,11 +55,13 @@ API 对不带有效会话的请求返回 401；所有 state-changing 请求还�
 
 命令默认自动调用已有本地浏览器打开能力，可提供 `--no-open`；stdout 只输出可复制的 URL，运行日志走 stderr。`SIGINT`、context 取消、server error 和命令退出都执行有界 `Shutdown` 并使令牌失效。第一期不提供 host/port 自定义 flag。
 
-### 3. 前端构建并嵌入 Go
+### 3. 前端构建并嵌入 Go：React + Vite + Astryx + TanStack Query/Table
 
-使用独立 `webui/` 源目录和锁定包管理器的构建脚本生成 hashed 静态资源；Go 使用 `//go:embed` 服务资源。选择轻量 SPA（React/Vite 或等价方案在实施前锁定）来管理复杂表格、表单、路由和状态；最终用户只获取 Go release archive。构建任务必须在干净 checkout 中可重现，且 CI 校验嵌入资源与源构建一致。
+前端栈已确定为 **React + TypeScript + Vite + Astryx + TanStack Query + TanStack Table**。`webui/` 使用锁定包管理器与可重复构建脚本生成 hashed 静态资源，Go 使用 `//go:embed` 服务资源；最终用户只获取 Go release archive，不需要 Node 或任何前端运行时。
 
-先实现设计系统、API client、错误/任务 feedback 和无障碍键盘路径，之后按纵向工作流交付。不得复制已退役 Nuxt 源，也不得复用线上依赖、analytics 或远端字体/CDN。
+Astryx 负责设计 token、主题、可访问基础组件和一致的管理工作台视觉。应用入口必须配置 `ThemeProvider`、`LinkProvider`，并按 `reset → astryx → theme` 的 CSS layer 顺序导入其预构建 CSS。TanStack Query 管理本地 API 的缓存、轮询、变更失效和任务状态；TanStack Table 管理服务端分页、排序、列显示和多选，但不得把整库文章加载到浏览器。React Router 或等价轻量客户端路由仅管理本地 SPA 路由。
+
+实施时必须先通过 Astryx CLI 查询模板及每个实际使用组件的 dense contract；优先复用组件，只有现有组件无法满足时才 swizzle。不得复制已退役 Nuxt 源，也不得复用线上依赖、analytics 或远端字体/CDN。
 
 ### 4. API 形态和任务观察
 
@@ -89,7 +91,7 @@ API 版本为 `/api/v1`。读取请求使用明确分页、限制、过滤和稳
 - [浏览器文件系统权限与 TUI 不同] → server-side directory token/staging/streaming，所有最终路径仍走现有授权。
 - [HTTP API 与三个既有 adapter 漂移] → application-first endpoint、契约测试和能力矩阵；禁止 handler 内复制业务规则。
 - [大文章库/任务日志导致 UI 慢] → SQLite 分页、严格请求上限、虚拟列表、SSE 只推增量提示、完整详情按需加载。
-- [前端依赖令二进制膨胀或供应链复杂] → 最小依赖、锁文件、构建可重现性、资源预算和嵌入产物检查。
+- [React/Astryx/TanStack 令二进制膨胀或供应链复杂] → 锁定依赖、最小导入、禁用远端资源、构建可重现性、资源预算和嵌入产物检查；组件必须由 Astryx contract 驱动而非随意引入。
 - [QR 和 session 等敏感状态泄漏到网页历史/日志] → 首跳 token cookie 化并清 URL、禁 referrer、敏感字段从 JSON/log 中剔除、专门负例测试。
 - [完整范围被低估] → 明确 P0/P1/P2 门槛；任何未实现的工作流不得宣传为完整替代。
 
@@ -103,7 +105,6 @@ API 版本为 `/api/v1`。读取请求使用明确分页、限制、过滤和稳
 
 ## Open Questions
 
-- 首版前端选 React/Vite 还是更小的框架，需按可访问性、团队熟悉度、最终 gzip/二进制预算作一次 ADR 决定。
 - 目录选择器是否需要 OS native dialog helper，还是先限定预设根与手工创建的安全子目录；默认采用后者。
 - SSE 是否在首版承载 QR/任务刷新，或仅做轮询后再增量引入；默认先保证 1 秒轮询正确，再增加 SSE。
 - 是否允许同一用户启动多个 `web` 实例；默认允许独立只读/控制会话，但数据库、job lease 和 profile lock 是唯一事实来源。

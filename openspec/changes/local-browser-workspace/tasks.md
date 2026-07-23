@@ -1,10 +1,11 @@
 ## 1. Architecture and delivery foundation
 
-- [ ] 1.1 Record an ADR selecting the browser SPA toolchain, accessibility baseline, package manager, source directory, asset-size budget, and reproducible build contract.
+- [ ] 1.1 Record the adopted React + TypeScript + Vite + Astryx + TanStack Query/Table architecture in an ADR, including accessibility baseline, package manager, source directory, asset-size budget, and reproducible build contract.
 - [ ] 1.2 Add a `web` Cobra command and a testable server lifecycle seam without changing default TUI startup behavior.
 - [ ] 1.3 Create the `internal/web` presentation package and document its allowed dependencies on application/profile runtime seams.
 - [ ] 1.4 Add deterministic front-end build, hashed asset manifest, `go:embed` packaging, stale-generated-asset CI check, and release build integration.
 - [ ] 1.5 Establish versioned `/api/v1` response/error/pagination schemas and API compatibility rules.
+- [ ] 1.6 Bootstrap Astryx integration with `ThemeProvider`, `LinkProvider`, strict `reset → astryx → theme` CSS layers, generated theme, and `astryx doctor` CI verification.
 
 ## 2. Loopback security and lifecycle
 
@@ -35,7 +36,8 @@
 
 ## 5. Browser workspace user experience
 
-- [ ] 5.1 Build app shell, local connection/error states, profile/session home, navigation, layout responsiveness, and English/Simplified Chinese resource system.
+- [ ] 5.1 Build the React/Astryx app shell, local connection/error states, profile/session home, local SPA navigation, layout responsiveness, and English/Simplified Chinese resource system.
+- [ ] 5.1a Configure TanStack Query cache/polling/invalidation and TanStack Table server-side pagination, sorting, columns, and multi-selection without whole-library client loading.
 - [ ] 5.2 Implement QR login/status/logout, account discovery/import/export/manage, and account synchronization views.
 - [ ] 5.3 Implement paginated article grid, compound filters, saved queries, columns, multi-selection, single-URL ingestion, safe preview, local HTML handoff, downloads, comments, metrics, and resource completeness actions.
 - [ ] 5.4 Implement album browsing, ordering/traversal, batch download, and export workflows.
