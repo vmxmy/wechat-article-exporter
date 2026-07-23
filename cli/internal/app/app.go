@@ -40,6 +40,7 @@ type App struct {
 	debug   bool
 
 	workspaceRunner func(context.Context, tui.WorkspaceOptions) error
+	webOpenBrowser  func(context.Context, string) error
 	forceWorkspace  bool
 	startupArgs     []string
 }
@@ -344,6 +345,7 @@ func (a *App) rootCommand() *cobra.Command {
 		a.diagnosticsCommand(),
 		a.vaultCommand(),
 		a.mcpCommand(),
+		a.webCommand(),
 		a.completionCommand(root),
 	)
 	return root
