@@ -239,7 +239,7 @@ jobs:
           cache-dependency-path: cli/go.sum
 
       - name: Unit and integration tests
-        run: go test ./...
+        run: go test -count=1 ./...
 
       - name: Native keyring integration receipt
         shell: bash
@@ -263,10 +263,9 @@ jobs:
           fi
 
       - name: Race tests
-        if: runner.os != 'Windows'
         env:
           CGO_ENABLED: '1'
-        run: go test -race ./...
+        run: go test -count=1 -race ./...
 
       - name: Native pseudo-terminal workspace smoke
         if: runner.os != 'macOS' || runner.arch == 'X64'
