@@ -51,7 +51,7 @@ test('article selections persist across server pages and hand off all selected s
   await expectOnlyLoopbackRequests(page)
 })
 
-test('discovery candidates populate the explicit account save form before sync is available', async ({ page }) => {
+test('discovery candidates populate the explicit account save form and choose a synchronization mode', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/accounts')
 
@@ -70,8 +70,16 @@ test('discovery candidates populate the explicit account save form before sync i
   await expect.poll(() => fixture.savedAccounts).toEqual([{ fakeid: 'fixture-discovered', name: 'Discovered Fixture Account', alias: 'discovered' }])
   await expect(page.getByText('Saved Discovered Fixture Account. You can now start synchronization.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Sync selected account' })).toBeEnabled()
+  await expect(page.getByText('Uses the latest local sync state to refresh new and changed article-list records.')).toBeVisible()
   await page.getByRole('button', { name: 'Sync selected account' }).click()
-  await expect.poll(() => fixture.accountSyncs).toEqual(['/api/v1/accounts/account-discovered/sync'])
+  await expect.poll(() => fixture.accountSyncs).toEqual([{ path: '/api/v1/accounts/account-discovered/sync', incremental: true }])
+  await page.getByRole('combobox', { name: 'Synchronization mode' }).selectOption('full')
+  await expect(page.getByText('Fetches the available article list without relying on the local sync boundary.')).toBeVisible()
+  await page.getByRole('button', { name: 'Sync selected account' }).click()
+  await expect.poll(() => fixture.accountSyncs).toEqual([
+    { path: '/api/v1/accounts/account-discovered/sync', incremental: true },
+    { path: '/api/v1/accounts/account-discovered/sync', incremental: false }
+  ])
   await expectOnlyLoopbackRequests(page)
 })
 

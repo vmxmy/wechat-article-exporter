@@ -63,6 +63,6 @@ wechat-article profile list
 
 ## 当前浏览器范围
 
-工作区已经覆盖本地 session、账号/文章/专辑的分页查询、账号搜索与同步、账户 manifest 下载及上传导入、单 URL 导入、保存的文章查询、受限本地预览、带边界的作业详情与允许的控制、受控目录导出、从文章筛选或所选专辑交接的导出、导出 manifest/verification、opaque artifact 下载、精确确认后的输出目录打开、凭据/代理/安全偏好和 Credential JSON 上传、备份创建/验证/一次性 ZIP 下载、单归档恢复上传/staging/prepare/commit、完整性、GC 和诊断（包括 opaque diagnostic bundle 下载）。完整逐项对照见 [能力矩阵](../release/browser-capability-matrix.md)。
+工作区已经覆盖本地 session、账号/文章/专辑的分页查询、账号搜索与同步、账户 manifest 下载及上传导入、单 URL 导入、保存的文章查询、受限本地预览、带边界的作业详情与允许的控制、受控目录导出、从文章筛选或所选专辑交接的导出、导出 manifest/verification、opaque artifact 下载、精确确认后的输出目录打开、凭据/代理/安全偏好和 Credential JSON 上传、备份创建/验证/一次性 ZIP 下载、单归档恢复上传/staging/prepare/commit、完整性、GC 和诊断（包括 opaque diagnostic bundle 下载）。账号同步默认使用增量模式（由本地同步状态确定边界）；在 Accounts 中可明确改为全量同步，它不会沿用该边界。完整逐项对照见 [能力矩阵](../release/browser-capability-matrix.md)。
 
 未交付的浏览器能力不会被标记为 parity：通用的任意文件上传和超出已选专辑交接范围的批量导出工作流仍使用 Cobra 或 TUI。即使 manifest、Credential JSON 和恢复归档可由浏览器选择并上传，浏览器仍没有任意主机路径或通用文件访问 API；上传受单文件、大小和格式限制，staged archive、backup ZIP 和 artifact 下载/输出目录打开都受到 opaque capability 与精确确认的约束。文章预览及文章/元数据/评论/资源下载、单专辑遍历和批量下载会复用同一套持久作业；stdio MCP 则有意不提供 GUI、浏览器 session 或网络监听，只通过 stdio 和 profile policy 面向自动化。

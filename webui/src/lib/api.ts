@@ -84,6 +84,8 @@ export interface AccountRecord {
   readonly syncCompleted?: boolean
 }
 
+export type AccountSyncMode = 'incremental' | 'full'
+
 export interface ArticleRecord {
   readonly id: string
   readonly title: string
@@ -486,7 +488,9 @@ export async function uploadAccountManifest(manifest: File): Promise<RestoreUplo
 export async function importAccountManifest(uploadHandle: string): Promise<AccountManifestImportResult> {
   return mutate<AccountManifestImportResult>('accounts/manifest/import', 'POST', { uploadHandle })
 }
-export async function syncAccount(id: string): Promise<JobRecord> { return mutate<JobRecord>(`accounts/${encodeURIComponent(id)}/sync`, 'POST', { incremental: true }) }
+export async function syncAccount(id: string, mode: AccountSyncMode = 'incremental'): Promise<JobRecord> {
+  return mutate<JobRecord>(`accounts/${encodeURIComponent(id)}/sync`, 'POST', { incremental: mode === 'incremental' })
+}
 export async function ingestURL(url: string, force = false): Promise<JobRecord> { return mutate<JobRecord>('ingest/url', 'POST', { url, force }) }
 export async function downloadArticles(articleIds: readonly string[], kind: ArticleDownloadKind, force = false): Promise<JobRecord> {
   const resource = kind === 'article' ? 'articles/download' : `articles/${kind}`

@@ -83,6 +83,8 @@
   .action-button-group, .import-form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--spacing-3); }
   .account-action-form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--spacing-3); }
   .account-action-form .astryx-text-input { min-width: 12rem; flex: 1 1 12rem; }
+  .account-sync-mode { display: grid; flex: 1 1 14rem; gap: var(--spacing-1); font-weight: 600; }
+  .account-sync-mode select { min-width: 0; padding: var(--spacing-2); border: 1px solid var(--color-border-emphasized); border-radius: var(--radius-control); color: var(--color-text-primary); background: var(--color-background-surface); }
   .import-form { width: min(100%, 42rem); }
   .import-form .astryx-text-input { flex: 1 1 20rem; }
   .confirmation-note summary { cursor: pointer; }

@@ -12,6 +12,7 @@ import {
   getExportArtifactDownloadURL,
   getRuntimeStatus,
   logout,
+  syncAccount,
   validateCredential
 } from '../src/lib/api'
 
@@ -135,6 +136,25 @@ describe('browser API client', () => {
     await controlJob('job / one', 'resume')
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/jobs/job%20%2F%20one/pause', expect.objectContaining({ body: JSON.stringify({ confirm: 'user-pause-proof' }) }))
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/jobs/job%20%2F%20one/resume', expect.objectContaining({ body: '{}' }))
+  })
+
+  it('sends the selected account synchronization mode without exposing local state', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { id: 'job-account-sync' } }))
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { id: 'job-account-sync' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await syncAccount('account / one')
+    await syncAccount('account / one', 'full')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/accounts/account%20%2F%20one/sync', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ incremental: true })
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/accounts/account%20%2F%20one/sync', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ incremental: false })
+    }))
   })
 
   it('revokes the local session with the CSRF proof and accepts an empty response', async () => {

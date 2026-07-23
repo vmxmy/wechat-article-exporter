@@ -330,10 +330,21 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 	if app.loginSessionID != "browser-session" || app.syncRequest.AccountID != "account-1" || app.albumRequest.AccountID != "account-1" || app.albumRequest.AlbumID != "album-1" || app.albumRequest.Order != wechat.AlbumReverse || !app.albumBatch || len(app.downloadRequests) != 5 {
 		t.Fatalf("control inputs were not routed through application: login=%q sync=%#v album=%#v batch=%t downloads=%#v", app.loginSessionID, app.syncRequest, app.albumRequest, app.albumBatch, app.downloadRequests)
 	}
+	if !app.syncRequest.Incremental || app.syncRequest.PageSize != 20 {
+		t.Fatalf("incremental account sync request = %#v", app.syncRequest)
+	}
+	response := mutate("/api/v1/accounts/account-1/sync", `{"incremental":false}`)
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("full account sync status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertStableJobResponse(t, response, "/api/v1/accounts/account-1/sync", jobID)
+	if app.syncRequest.Incremental {
+		t.Fatalf("full account sync request = %#v", app.syncRequest)
+	}
 	if app.downloadRequests[0].URLs[0] != "https://mp.weixin.qq.com/s/fixture" || app.downloadRequests[1].Kind != "article" || app.downloadRequests[2].Kind != "metadata" || app.downloadRequests[3].Kind != "comments" || app.downloadRequests[4].Kind != "resources" || !app.downloadRequests[4].Force {
 		t.Fatalf("download jobs = %#v", app.downloadRequests)
 	}
-	response := mutate("/api/v1/jobs/"+jobID+"/cancel", `{}`)
+	response = mutate("/api/v1/jobs/"+jobID+"/cancel", `{}`)
 	if response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("missing confirmation status=%d body=%s", response.StatusCode, readResponse(t, response))
 	}

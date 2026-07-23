@@ -8,7 +8,7 @@ export interface LoopbackFixture {
   readonly controls: readonly { readonly path: string; readonly confirmation?: string }[]
   readonly accountDeletions: readonly unknown[]
   readonly savedAccounts: readonly unknown[]
-  readonly accountSyncs: readonly string[]
+  readonly accountSyncs: readonly { readonly path: string; readonly incremental: boolean }[]
   readonly exports: readonly string[]
   readonly accountManifestImports: readonly unknown[]
   readonly preferencePatches: readonly unknown[]
@@ -25,7 +25,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
   const controls: Array<{ path: string; confirmation?: string }> = []
   const accountDeletions: unknown[] = []
   const savedAccounts: unknown[] = []
-  const accountSyncs: string[] = []
+  const accountSyncs: Array<{ path: string; incremental: boolean }> = []
   const exports: string[] = []
   const accountManifestImports: unknown[] = []
   const preferencePatches: unknown[] = []
@@ -101,7 +101,7 @@ interface State {
   readonly controls: Array<{ path: string; confirmation?: string }>
   readonly accountDeletions: unknown[]
   readonly savedAccounts: unknown[]
-  readonly accountSyncs: string[]
+  readonly accountSyncs: Array<{ path: string; incremental: boolean }>
   readonly exports: string[]
   readonly accountManifestImports: unknown[]
   readonly preferencePatches: unknown[]
@@ -147,7 +147,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
     return json(route, { id: 'account-discovered', fakeid: body?.fakeid, name: body?.name, alias: body?.alias, articleCount: 0, syncCompleted: false })
   }
   if (url.pathname === '/api/v1/accounts/account-discovered/sync' && method === 'POST') {
-    state.accountSyncs.push(url.pathname)
+    state.accountSyncs.push({ path: url.pathname, incremental: body?.incremental === true })
     return json(route, { id: 'job-account-sync-fixture', kind: 'account_sync', state: 'queued', createdAt: now, updatedAt: now })
   }
   if (url.pathname === '/api/v1/accounts') return page(route, [{ id: 'account-fixture', fakeid: 'fixture-account', name: 'Fixture Account', alias: 'fixture', articleCount: 2, lastSyncAt: now, syncCompleted: true }])
