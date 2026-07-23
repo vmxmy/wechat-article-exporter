@@ -13,7 +13,7 @@ import {
   getStorageStatus,
   getWorkspaceSnapshot,
   authorizeDefaultExportDirectory, beginLogin, completeLogin, controlJob, createExportDirectory, deleteAccounts, ingestURL, openExportOutput, pollLogin, saveAccount, searchAccounts, startExport, syncAccount, updateAccount, verifyExport,
-  addProxy, applyGarbageCollection, commitRestore, createBackup, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importCredential, patchPreferences, planGarbageCollection, prepareRestore, removeCredential, removeProxy, setProxyEnabled, testProxy, uploadRestoreArchive, verifyBackup,
+  addProxy, applyGarbageCollection, commitRestore, createBackup, createDiagnosticBundle, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importCredential, patchPreferences, planGarbageCollection, prepareRestore, removeCredential, removeProxy, setProxyEnabled, testProxy, uploadRestoreArchive, verifyBackup,
   deleteSavedQuery, downloadArticles, saveSavedQuery, traverseAlbum,
   type AccountInput,
   type ArticleDownloadKind,
@@ -133,6 +133,7 @@ export function useWorkspaceMutations() {
     ,uploadRestoreArchive: useMutation({ mutationFn: uploadRestoreArchive })
     ,prepareRestore: useMutation({ mutationFn: ({ uploadHandle, conflictPolicy }: { uploadHandle: string; conflictPolicy: RestoreConflictPolicy }) => prepareRestore(uploadHandle, conflictPolicy) })
     ,commitRestore: useMutation({ mutationFn: ({ preparationId, confirmation }: { preparationId: string; confirmation: string }) => commitRestore(preparationId, confirmation) })
+    ,createDiagnosticBundle: useMutation({ mutationFn: createDiagnosticBundle })
     ,planGarbageCollection: useMutation({ mutationFn: planGarbageCollection })
     ,applyGarbageCollection: useMutation({ mutationFn: ({ planId, confirmation }: { planId: string; confirmation: string }) => applyGarbageCollection(planId, confirmation), onSuccess: refresh })
   }

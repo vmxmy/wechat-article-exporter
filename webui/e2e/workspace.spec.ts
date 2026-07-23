@@ -134,6 +134,24 @@ test('sanitized settings and storage maintenance flows do not reveal secrets', a
   await expectOnlyLoopbackRequests(page)
 })
 
+test('sanitized diagnostic bundle creation posts no paths and downloads through an opaque handle', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/settings')
+
+  const createRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/maintenance/diagnostic-bundles'))
+  await page.getByRole('button', { name: 'Create diagnostic bundle' }).click()
+  expect((await createRequest).postDataJSON()).toEqual({})
+  expect(fixture.diagnosticBundleRequests).toEqual([{}])
+  await expect(page.getByRole('status').filter({ hasText: 'Diagnostic bundle is ready to download.' })).toBeVisible()
+  await expect(page.locator('body')).not.toContainText('/Users/')
+
+  const downloadLink = page.getByRole('link', { name: 'Download diagnostic bundle' })
+  await expect(downloadLink).toHaveAttribute('href', '/api/v1/maintenance/diagnostic-bundles/diagnostic_sanitized-handle')
+  const download = await Promise.all([page.waitForEvent('download'), downloadLink.click()])
+  expect(download[0].suggestedFilename()).toBe('diagnostic-bundle.zip')
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('sanitized restore stages one archive, prepares explicit confirmation, and closes the workspace', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.goto('/settings')

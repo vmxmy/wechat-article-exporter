@@ -8,6 +8,7 @@ export interface LoopbackFixture {
   readonly controls: readonly string[]
   readonly exports: readonly string[]
   readonly preferencePatches: readonly unknown[]
+  readonly diagnosticBundleRequests: readonly unknown[]
 }
 
 export async function installLoopbackFixture(page: Page): Promise<LoopbackFixture> {
@@ -15,6 +16,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
   const controls: string[] = []
   const exports: string[] = []
   const preferencePatches: unknown[] = []
+  const diagnosticBundleRequests: unknown[] = []
   let loginState = 'unauthenticated'
   let directory = { token: 'dir-sanitized', label: 'Sanitized exports' }
   let backupID = ''
@@ -41,6 +43,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       controls,
       exports,
       preferencePatches,
+      diagnosticBundleRequests,
       onLoginState: (state) => { loginState = state },
       onDirectory: (next) => { directory = next },
       onBackupID: (id) => { backupID = id },
@@ -49,7 +52,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       ,onSavedQueries: (next) => { savedQueries = next }
     })
   })
-  return { requests, controls, exports, preferencePatches }
+  return { requests, controls, exports, preferencePatches, diagnosticBundleRequests }
 }
 
 export async function expectOnlyLoopbackRequests(page: Page) {
@@ -71,6 +74,7 @@ interface State {
   readonly controls: string[]
   readonly exports: string[]
   readonly preferencePatches: unknown[]
+  readonly diagnosticBundleRequests: unknown[]
   readonly onLoginState: (state: string) => void
   readonly onDirectory: (directory: { readonly token: string; readonly label: string }) => void
   readonly onBackupID: (id: string) => void
@@ -131,6 +135,8 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/settings/preferences' && method === 'PATCH') { state.preferencePatches.push(body); return json(route, body) }
   if (url.pathname === '/api/v1/maintenance/integrity') return json(route, { checkedAt: now, issues: [] })
   if (url.pathname === '/api/v1/maintenance/diagnostics') return json(route, { collectedAt: now, checks: [{ name: 'loopback', status: 'ok', summary: 'Sanitized local fixture' }] })
+  if (url.pathname === '/api/v1/maintenance/diagnostic-bundles' && method === 'POST') { state.diagnosticBundleRequests.push(body); return json(route, { handle: 'diagnostic_sanitized-handle', createdAt: now, expiresAt: '2026-07-24T09:45:00.000Z', sha256: 'd'.repeat(64), sizeBytes: 128 }) }
+  if (url.pathname === '/api/v1/maintenance/diagnostic-bundles/diagnostic_sanitized-handle' && method === 'GET') return route.fulfill({ contentType: 'application/zip', headers: { 'content-disposition': 'attachment; filename="diagnostic-bundle.zip"' }, body: 'sanitized diagnostic bundle' })
   if (url.pathname === '/api/v1/maintenance/backups') { state.onBackupID('backup-fixture'); return json(route, { id: 'backup-fixture', createdAt: now, sha256: 'b'.repeat(64), bytes: 64, objects: 1 }) }
   if (url.pathname === '/api/v1/maintenance/backups/verify') return json(route, { backupId: state.backupID || 'backup-fixture', valid: true })
   if (url.pathname === '/api/v1/maintenance/restore/upload') return json(route, { handle: 'restore-upload-fixture', sizeBytes: 24, sha256: 'c'.repeat(64), expiresAt: '2026-07-24T09:45:00.000Z' })

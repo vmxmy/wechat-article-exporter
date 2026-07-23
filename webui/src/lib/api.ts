@@ -342,6 +342,7 @@ export interface GarbageCollectionPlan { readonly id: string; readonly generated
 export interface GarbageCollectionResult { readonly deletedObjects: ReclaimableStorage; readonly deletedTemporaryFiles: ReclaimableStorage; readonly deletedDebugCaptures: ReclaimableStorage; readonly deletedCompletedJobLogs: ReclaimableStorage; readonly skipped: number }
 export interface DiagnosticCheck { readonly name: string; readonly status: string; readonly summary?: string }
 export interface DiagnosticsReport { readonly collectedAt: string; readonly checks: readonly DiagnosticCheck[] }
+export interface DiagnosticBundleReceipt { readonly handle: string; readonly createdAt: string; readonly expiresAt: string; readonly sha256: string; readonly sizeBytes: number }
 
 export interface ArticlePageParams extends PageParams {
   readonly search: string
@@ -494,6 +495,8 @@ export async function prepareRestore(uploadHandle: string, conflictPolicy: Resto
 export async function commitRestore(preparationId: string, confirmation: string): Promise<RestoreCompletion> { return mutate('maintenance/restore/commit', 'POST', { preparationId, confirmation }) }
 export async function getIntegrity(signal?: AbortSignal): Promise<IntegrityReport> { return request(`${apiBase}/maintenance/integrity`, { signal }) }
 export async function getDiagnostics(signal?: AbortSignal): Promise<DiagnosticsReport> { return request(`${apiBase}/maintenance/diagnostics`, { signal }) }
+export async function createDiagnosticBundle(): Promise<DiagnosticBundleReceipt> { return mutate('maintenance/diagnostic-bundles', 'POST', {}) }
+export function getDiagnosticBundleDownloadURL(handle: string): string { return `${apiBase}/maintenance/diagnostic-bundles/${encodeURIComponent(handle)}` }
 export async function planGarbageCollection(): Promise<GarbageCollectionPlan> { return mutate('maintenance/gc/plan', 'POST', {}) }
 export async function applyGarbageCollection(planId: string, confirmation: string): Promise<GarbageCollectionResult> { return mutate('maintenance/gc/apply', 'POST', { planId, confirmation }) }
 
