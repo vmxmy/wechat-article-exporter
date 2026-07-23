@@ -2,13 +2,16 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestWebCommandPrintsOnlyLocalURLAndHonorsNoOpen(t *testing.T) {
-	applicationAdapter, stdout, stderr := newTestApp(t)
+	applicationAdapter, _, stderr := newTestApp(t)
+	urlWritten := make(chan string, 1)
+	applicationAdapter.stdout = webURLWriter{urlWritten: urlWritten}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opened := false
@@ -18,7 +21,7 @@ func TestWebCommandPrintsOnlyLocalURLAndHonorsNoOpen(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- applicationAdapter.Execute(ctx, []string{"web", "--no-open"}) }()
-	url := waitForWebURL(t, stdout)
+	url := waitForWebURL(t, urlWritten)
 	if opened {
 		t.Fatal("--no-open launched a browser")
 	}
@@ -35,7 +38,9 @@ func TestWebCommandPrintsOnlyLocalURLAndHonorsNoOpen(t *testing.T) {
 }
 
 func TestWebCommandOpensBrowserWithoutNoOpen(t *testing.T) {
-	applicationAdapter, stdout, _ := newTestApp(t)
+	applicationAdapter, _, _ := newTestApp(t)
+	urlWritten := make(chan string, 1)
+	applicationAdapter.stdout = webURLWriter{urlWritten: urlWritten}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opened := make(chan string, 1)
@@ -45,7 +50,7 @@ func TestWebCommandOpensBrowserWithoutNoOpen(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- applicationAdapter.Execute(ctx, []string{"web"}) }()
-	url := waitForWebURL(t, stdout)
+	url := waitForWebURL(t, urlWritten)
 	if got := <-opened; got != url {
 		t.Fatalf("opened URL = %q; stdout URL = %q", got, url)
 	}
@@ -63,15 +68,30 @@ func TestWebCommandRejectsJSONOutput(t *testing.T) {
 	}
 }
 
-func waitForWebURL(t *testing.T, stdout interface{ String() string }) string {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if value := strings.TrimSpace(stdout.String()); value != "" {
-			return value
-		}
-		time.Sleep(time.Millisecond)
+type webURLWriter struct {
+	urlWritten chan<- string
+}
+
+func (w webURLWriter) Write(p []byte) (int, error) {
+	url := strings.TrimSpace(string(p))
+	if url == "" {
+		return 0, errors.New("local URL output is empty")
 	}
-	t.Fatal("web command did not print its local URL")
-	return ""
+	select {
+	case w.urlWritten <- url:
+		return len(p), nil
+	default:
+		return 0, errors.New("local URL was written more than once")
+	}
+}
+
+func waitForWebURL(t *testing.T, urlWritten <-chan string) string {
+	t.Helper()
+	select {
+	case url := <-urlWritten:
+		return url
+	case <-time.After(5 * time.Second):
+		t.Fatal("web command did not print its local URL")
+		return ""
+	}
 }
