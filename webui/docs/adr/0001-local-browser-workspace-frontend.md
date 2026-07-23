@@ -21,7 +21,7 @@ The app initializes Astryx `Theme` and `LinkProvider` before navigable content. 
 
 TanStack Query owns cache keys, polling, and invalidation for local API resources. TanStack Table controls column visibility, sorting intent, and multi-selection for bounded pages only; it never fetches an entire library. The client is intentionally an HTTP presentation adapter: it does not read SQLite, persist secrets, or implement domain rules.
 
-Vite emits a static `dist/` tree with hashed JS/CSS asset names and `dist/.vite/manifest.json`. Release integration must embed exactly this tree, reject a missing/stale manifest, and remain runnable without Node.js. The normal target is a gzip-compressed initial JavaScript payload below 250 KiB; a release-size check should fail on regression once Go embedding is introduced.
+Vite emits a static `dist/` tree with hashed JS/CSS asset names and `dist/.vite/manifest.json`. `pnpm run sync:go-assets` copies that exact output to the committed `cli/internal/web/assets/` tree, and `pnpm run verify:go-assets` rejects a missing or stale copy. Go validates the embedded manifest and every referenced asset without Node.js before serving the SPA shell, fingerprinted assets, or a client-side-route fallback. The normal target is a gzip-compressed initial JavaScript payload below 250 KiB; a release-size check should fail on regression once Go embedding is introduced.
 
 ## Accessibility baseline
 

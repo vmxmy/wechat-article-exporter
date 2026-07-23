@@ -10,9 +10,13 @@ pnpm run lint
 pnpm run typecheck
 pnpm run astryx:doctor
 pnpm run build
+pnpm run sync:go-assets
+pnpm run verify:go-assets
 ```
 
-`pnpm run build` writes fingerprinted files to `dist/assets/` and Vite's embed-facing manifest to `dist/.vite/manifest.json`. The Go integration is responsible for copying/embedding that output and failing stale-asset checks.
+`pnpm run build` writes fingerprinted files to `dist/assets/` and Vite's embed-facing manifest to `dist/.vite/manifest.json`. `pnpm run sync:go-assets` atomically copies that exact tree to the version-controlled `cli/internal/web/assets/` directory. `pnpm run verify:go-assets` fails when the checked-in embed tree is missing or differs from `dist`; run it after every frontend build before committing assets.
+
+Release builds compile only the committed Go asset tree with `//go:embed`; Node and pnpm are not required by an end user or release archive consumer. CI rebuilds the WebUI from the lockfile and rejects stale generated assets before it builds Go binaries.
 
 ## API boundary
 

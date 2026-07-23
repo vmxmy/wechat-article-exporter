@@ -43,6 +43,7 @@ type Options struct {
 // It never persists or logs either credential.
 type Server struct {
 	application     application.Application
+	workspace       application.WorkspaceReader
 	sessionTTL      time.Duration
 	shutdownTimeout time.Duration
 	now             func() time.Time
@@ -84,7 +85,8 @@ func New(options Options) (*Server, error) {
 	}
 	return &Server{
 		application: options.Application, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
-		now: options.Now, bootstrapToken: bootstrap, sessions: make(map[string]session), serveCompleted: make(chan struct{}),
+		workspace: application.NewWorkspace(options.Application), now: options.Now, bootstrapToken: bootstrap,
+		sessions: make(map[string]session), serveCompleted: make(chan struct{}),
 	}, nil
 }
 
@@ -221,6 +223,10 @@ func (server *Server) handler() http.Handler {
 			server.error(writer, http.StatusMisdirectedRequest)
 			return
 		}
+		if strings.HasPrefix(request.URL.Path, "/api/") && request.URL.Path != "/api/v1/session/logout" && request.URL.Path != "/api/v1/status" {
+			server.api(writer, request)
+			return
+		}
 		if request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodPatch || request.Method == http.MethodDelete {
 			if !server.validMutationShape(request) {
 				server.error(writer, http.StatusUnsupportedMediaType)
@@ -235,9 +241,17 @@ func (server *Server) handler() http.Handler {
 		case "/api/v1/session/logout":
 			server.logout(writer, request)
 		default:
-			server.error(writer, http.StatusNotFound)
+			server.workspaceAsset(writer, request)
 		}
 	})
+}
+
+func (server *Server) workspaceAsset(writer http.ResponseWriter, request *http.Request) {
+	if _, ok := server.authorize(request); !ok {
+		server.error(writer, http.StatusUnauthorized)
+		return
+	}
+	AssetHandler().ServeHTTP(writer, request)
 }
 
 func (server *Server) validRequestTarget(request *http.Request) bool {
@@ -296,33 +310,31 @@ func (server *Server) root(writer http.ResponseWriter, request *http.Request) {
 		server.error(writer, http.StatusUnauthorized)
 		return
 	}
-	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = writer.Write([]byte("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>WeChat Article Workspace</title></head><body><main><h1>WeChat Article Workspace</h1><p>Local browser workspace is starting.</p></main></body></html>"))
+	AssetHandler().ServeHTTP(writer, request)
 }
 
 func (server *Server) status(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
-		server.error(writer, http.StatusMethodNotAllowed)
+		writer.Header().Set("Allow", http.MethodGet)
+		server.apiError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "method is not allowed")
 		return
 	}
 	current, ok := server.authorize(request)
 	if !ok {
-		server.error(writer, http.StatusUnauthorized)
+		server.apiError(writer, http.StatusUnauthorized, "authentication_required", "workspace session is required")
 		return
 	}
-	runtimeStatus, err := server.application.RuntimeStatus(request.Context())
+	runtimeStatus, err := server.workspace.Runtime(request.Context())
 	if err != nil {
-		server.error(writer, http.StatusInternalServerError)
+		server.workspaceError(writer, err)
 		return
 	}
-	sessionStatus, err := server.application.SessionStatus(request.Context())
+	sessionStatus, err := server.workspace.Session(request.Context())
 	if err != nil {
-		server.error(writer, http.StatusInternalServerError)
+		server.workspaceError(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
-		"runtime": runtimeStatus, "session": sessionStatus, "csrfToken": current.csrf,
-	}})
+	writeAPI(writer, http.StatusOK, map[string]any{"runtime": runtimeStatus, "session": sessionStatus, "csrfToken": current.csrf})
 }
 
 func (server *Server) logout(writer http.ResponseWriter, request *http.Request) {

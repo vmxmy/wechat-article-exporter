@@ -18,6 +18,7 @@ on:
       - 'samples/**'
       - '.github/workflows/release-cli.yml'
       - '.github/workflows/controlled-live-clean-room.yml'
+      - 'webui/**'
       - 'actionlint.yaml'
   workflow_dispatch:
   push:
@@ -171,6 +172,34 @@ jobs:
       - name: Staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 -checks='SA*,S1*,QF*' ./...
 
+  webui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      - name: Enable pinned pnpm
+        run: corepack enable
+
+      - name: Install browser workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify browser workspace and checked-in Go assets
+        run: |
+          set -euo pipefail
+          pnpm run lint
+          pnpm run build
+          pnpm run verify:go-assets
+
   test:
     strategy:
       fail-fast: false
@@ -300,7 +329,7 @@ jobs:
           ./internal/library
 
   build:
-    needs: [release-metadata, parity-and-retirement, static, test, fixture-corpus, database-compatibility]
+    needs: [release-metadata, parity-and-retirement, static, webui, test, fixture-corpus, database-compatibility]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:

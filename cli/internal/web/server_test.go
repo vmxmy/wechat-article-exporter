@@ -48,7 +48,7 @@ func TestBootstrapTokenCreatesOneSessionAndClearsURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || strings.Contains(response.Request.URL.String(), "token=") || !strings.Contains(string(body), "Workspace") {
+	if response.StatusCode != http.StatusOK || strings.Contains(response.Request.URL.String(), "token=") || !strings.Contains(string(body), "id=\"root\"") {
 		t.Fatalf("bootstrap result status=%d url=%q body=%q", response.StatusCode, response.Request.URL, body)
 	}
 	if cookie := cookieFor(t, client, response.Request.URL, sessionCookieName); cookie.Value == "" {
@@ -56,6 +56,45 @@ func TestBootstrapTokenCreatesOneSessionAndClearsURL(t *testing.T) {
 	}
 	if got := get(t, client, bootstrapURL).StatusCode; got != http.StatusUnauthorized {
 		t.Fatalf("reused bootstrap token status = %d; want 401", got)
+	}
+}
+
+func TestAuthenticatedWorkspaceServesEmbeddedAssetsAndSPAFallback(t *testing.T) {
+	server, client := startTestServer(t, time.Now)
+	base := strings.TrimSuffix(strings.Split(server.URL(), "?")[0], "/")
+	manifest := mustEmbeddedManifest(t)
+	entrypoint := manifest["index.html"]
+
+	for _, target := range []string{"/", "/articles", "/" + entrypoint.File} {
+		if got := get(t, client, base+target).StatusCode; got != http.StatusUnauthorized {
+			t.Fatalf("unauthorized GET %s status = %d; want 401", target, got)
+		}
+	}
+
+	authorize(t, client, server.URL())
+	index := get(t, client, base+"/")
+	if index.StatusCode != http.StatusOK {
+		t.Fatalf("GET / status = %d; want 200", index.StatusCode)
+	}
+	indexBody := readResponse(t, index)
+	if !strings.Contains(indexBody, "/"+entrypoint.File) || !strings.Contains(indexBody, "/"+entrypoint.CSS[0]) {
+		t.Fatalf("embedded index did not reference manifest entrypoint")
+	}
+
+	asset := get(t, client, base+"/"+entrypoint.File)
+	if asset.StatusCode != http.StatusOK || !strings.HasPrefix(asset.Header.Get("Content-Type"), "text/javascript") {
+		t.Fatalf("GET entrypoint status=%d content-type=%q", asset.StatusCode, asset.Header.Get("Content-Type"))
+	}
+	if body := readResponse(t, asset); body == "" {
+		t.Fatal("embedded entrypoint was empty")
+	}
+
+	fallback := get(t, client, base+"/articles")
+	if fallback.StatusCode != http.StatusOK {
+		t.Fatalf("GET SPA route status = %d; want 200", fallback.StatusCode)
+	}
+	if body := readResponse(t, fallback); body != indexBody {
+		t.Fatal("SPA fallback did not serve the embedded application shell")
 	}
 }
 

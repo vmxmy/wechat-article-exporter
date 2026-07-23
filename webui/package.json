@@ -18,6 +18,8 @@
     "lint": "eslint . --max-warnings=0",
     "astryx:doctor": "astryx doctor",
     "verify:assets": "node scripts/verify-assets.mjs",
+    "sync:go-assets": "node scripts/sync-go-assets.mjs",
+    "verify:go-assets": "node scripts/sync-go-assets.mjs --check",
     "check": "pnpm run lint && pnpm run typecheck && pnpm run astryx:doctor"
   },
   "dependencies": {
