@@ -289,8 +289,8 @@ func TestServerNegotiatesUnsupportedProtocolVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := nonEmptyLines(stdout.String())
-	if len(lines) != 2 || !strings.Contains(lines[0], `"protocolVersion":"`+protocolVersion+`"`) ||
-		strings.Contains(lines[0], `"error"`) || !strings.Contains(lines[1], "requires protocolVersion") {
+	if len(lines) != 2 || !strings.Contains(lines[0], `"message":"unsupported protocolVersion"`) ||
+		!strings.Contains(lines[0], `"supported":"`+ProtocolVersion+`"`) || !strings.Contains(lines[1], "requires protocolVersion") {
 		t.Fatalf("initialize responses = %s", stdout.String())
 	}
 }

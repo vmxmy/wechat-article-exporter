@@ -83,13 +83,15 @@ COALESCE(a.appmsg_id, 0), COALESCE(a.item_index, 0), a.title, a.author, a.digest
 a.canonical_url, a.cover_url, a.published_at, a.updated_at_upstream, a.message_type, a.state,
 a.is_deleted, a.is_paid, a.is_original, a.is_single,
 CASE WHEN a.content_status='available' THEN 1 ELSE 0 END,
-CASE WHEN EXISTS (SELECT 1 FROM comments c WHERE c.article_id=a.id) THEN 1 ELSE 0 END,
+CASE WHEN EXISTS (SELECT 1 FROM comments c JOIN articles comment_owner ON comment_owner.id=c.article_id
+  WHERE c.article_id=a.id AND comment_owner.profile_id=?) THEN 1 ELSE 0 END,
 a.wecoin_count, a.media_duration_seconds,
 COALESCE(ms.read_count, 0), COALESCE(ms.old_like_count, 0), COALESCE(ms.share_count, 0),
 COALESCE(ms.like_count, 0), COALESCE(ms.comment_count, 0)
 FROM articles a LEFT JOIN metric_snapshots ms ON ms.id=(
-  SELECT id FROM metric_snapshots latest WHERE latest.article_id=a.id ORDER BY captured_at DESC, id DESC LIMIT 1
-) WHERE a.profile_id=? AND a.id=?`, database.profileID, articleID).Scan(
+  SELECT latest.id FROM metric_snapshots latest JOIN articles metric_owner ON metric_owner.id=latest.article_id
+  WHERE latest.article_id=a.id AND metric_owner.profile_id=? ORDER BY latest.captured_at DESC, latest.id DESC LIMIT 1
+) WHERE a.profile_id=? AND a.id=?`, database.profileID, database.profileID, database.profileID, articleID).Scan(
 		&snapshot.Article.ID, &snapshot.Article.AccountID, &snapshot.Article.Aid, &snapshot.Article.AppMsgID,
 		&snapshot.Article.ItemIndex, &snapshot.Article.Title, &snapshot.Article.Author, &snapshot.Article.Digest,
 		&snapshot.Article.CanonicalURL, &snapshot.Article.CoverURL, &published, &updated,

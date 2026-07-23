@@ -23,7 +23,7 @@ const (
 	defaultVersion         = "1.0.0"
 	DefaultMaxMessageBytes = 1 << 20
 	toolSuccessMessage     = "Tool completed successfully; use structuredContent for the result."
-	protocolVersion        = "2025-06-18"
+	ProtocolVersion        = "2025-06-18"
 	destructiveArgument    = "confirm"
 )
 

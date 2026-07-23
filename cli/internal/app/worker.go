@@ -20,20 +20,53 @@ type WorkerLauncher interface {
 type processWorkerLauncher struct{}
 
 func (processWorkerLauncher) Start(_ context.Context, executable string, args, environment []string) error {
-	if strings.TrimSpace(executable) == "" {
-		return errors.New("worker executable is unavailable")
+	command, err := newWorkerCommand(nil, executable, args, environment)
+	if err != nil {
+		return err
 	}
-	command := exec.Command(executable, args...)
-	command.Stdin = nil
-	command.Stdout = io.Discard
-	command.Stderr = io.Discard
-	command.Env = append(os.Environ(), environment...)
 	configureDetachedProcess(command)
 	if err := command.Start(); err != nil {
 		return fmt.Errorf("start detached job worker: %w", err)
 	}
 	if command.Process != nil {
 		_ = command.Process.Release()
+	}
+	return nil
+}
+
+func newWorkerCommand(ctx context.Context, executable string, args, environment []string) (*exec.Cmd, error) {
+	if strings.TrimSpace(executable) == "" {
+		return nil, errors.New("worker executable is unavailable")
+	}
+	var command *exec.Cmd
+	if ctx == nil {
+		command = exec.Command(executable, args...)
+	} else {
+		command = exec.CommandContext(ctx, executable, args...)
+	}
+	command.Stdin = nil
+	command.Stdout = io.Discard
+	command.Stderr = io.Discard
+	command.Env = append(os.Environ(), environment...)
+	return command, nil
+}
+
+// foregroundProcessWorker is enabled only by the controlled clean-room
+// executable mode. It executes a worker subprocess synchronously so a command
+// using --wait cannot race a detached process that is outside the harness's
+// lifetime and egress observation boundary.
+type foregroundProcessWorker struct{}
+
+func (foregroundProcessWorker) Start(ctx context.Context, executable string, args, environment []string) error {
+	command, err := newWorkerCommand(ctx, executable, args, environment)
+	if err != nil {
+		return err
+	}
+	if err := command.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("run foreground job worker: %w", ctx.Err())
+		}
+		return fmt.Errorf("run foreground job worker: %w", err)
 	}
 	return nil
 }

@@ -2,9 +2,7 @@ package library
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -12,6 +10,7 @@ import (
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/identity"
 )
 
 const AccountManifestVersion = 1
@@ -22,7 +21,7 @@ func (database *Database) SaveAccount(ctx context.Context, account domain.Accoun
 		return domain.Account{}, err
 	}
 	if account.ID == "" {
-		account.ID = localAccountID(account.FakeID)
+		account.ID = domain.AccountID(identity.AccountID(account.FakeID))
 	}
 	err = database.WithTx(ctx, func(transaction *sql.Tx) error {
 		existing, exists, err := accountByFakeIDTx(ctx, transaction, database.profileID, account.FakeID)
@@ -124,7 +123,7 @@ func (database *Database) ImportAccounts(ctx context.Context, manifest domain.Ac
 		}
 		seen[value.FakeID] = struct{}{}
 		if value.ID == "" {
-			value.ID = localAccountID(value.FakeID)
+			value.ID = domain.AccountID(identity.AccountID(value.FakeID))
 		}
 		validated[index] = value
 	}
@@ -385,9 +384,4 @@ func accountsEqual(left, right domain.Account) bool {
 	return left.ID == right.ID && left.FakeID == right.FakeID && left.Name == right.Name && left.Alias == right.Alias &&
 		left.Description == right.Description && left.AvatarURL == right.AvatarURL && left.ServiceType == right.ServiceType &&
 		left.ArticleCount == right.ArticleCount && left.LastSyncAt.Equal(right.LastSyncAt)
-}
-
-func localAccountID(fakeID string) domain.AccountID {
-	digest := sha256.Sum256([]byte(fakeID))
-	return domain.AccountID("account:" + hex.EncodeToString(digest[:16]))
 }

@@ -186,6 +186,56 @@ Native release archives remain the delivery mechanism. Release CI additionally r
 
 The database compatibility window and minimum supported version are release policy, not an accidental property of migrations.
 
+### 14. Clean-room evidence is artifact-bound and fail-closed
+
+Final release validation uses two versioned evidence documents:
+
+- a platform receipt for one native `GOOS/GOARCH` target;
+- a release receipt set that references exactly one passing platform receipt for every supported target.
+
+The platform receipt binds the release tag and source commit to the checksum manifest, archive, extracted binary, build metadata, and per-target SBOM. Every product workflow records the extracted release binary as its executor and repeats the same binary SHA-256. Source-level tests, `go run`, cross-compiled execution, containers that emulate another architecture, and in-process test harnesses remain useful development evidence but cannot satisfy the native clean-room gate.
+
+The receipt validator derives validity rather than trusting producer booleans. It rejects unknown or duplicate workflow IDs, missing required evidence, skipped workflows, inconsistent summary counts, target/provenance disagreement, incomplete network capture, non-release executors, malformed digests, and privacy leakage. Stable publication requires all five native platform receipts to pass against one release identity; a partial receipt set is always incomplete.
+
+The version 1 workflow registry and minimum proof are:
+
+| Workflow ID | Minimum stable evidence |
+| --- | --- |
+| `install.archive` | Checksum/SBOM/tag agreement, expected archive members, exact version, no external language/runtime dependency |
+| `storage.clean-roots` | Config/data/cache/state roots absent or empty before launch, created inside the isolated root, resolved paths and permissions verified |
+| `migration.legacy-web` | Versioned legacy archive fingerprint, inspect/import/verify reports, zero corrupt records or objects |
+| `migration.database-baselines` | Every promised schema baseline upgraded once to the current schema with data preserved and newer-schema writes refused |
+| `login.qr` | Real controlled-account QR decoded, authenticated state reached, QR artifact removed, no login payload retained |
+| `session.restart-persistence` | Candidate process restarted and secure backend reused the authenticated session without exposing secrets |
+| `sync.account` | Persistent job completed, bounded before/after counts recorded, expected local query succeeds |
+| `download.article` | Job completed, normalized content object exists and its digest validates, no response body retained in evidence |
+| `download.resources` | Job completed, expected mappings and object digests validate, missing/corrupt count is zero |
+| `export.html` | Completed provenance manifest, strict local resources, output verification, network-free local load |
+| `export.markdown` | Completed manifest, output count/bytes/checksum, structural verification |
+| `export.text` | Completed manifest, UTF-8 output count/bytes/checksum, structural verification |
+| `export.json` | Export schema version, record count, content option, provenance and checksum verification |
+| `export.xlsx` | OOXML ZIP validation, stable sheet/row counts, manifest verification |
+| `export.docx` | OOXML validation, media relationships, supported native-office open smoke where promised |
+| `export.pdf` | Candidate-discovered Chromium family/version, PDF signature/page count, manifest verification |
+| `automation.cobra` | Success/usage/runtime cases with exit codes `0`/`2`/`1`, exactly one v1 JSON document, progress confined to stderr |
+| `ui.tui` | Extracted binary in a native PTY, first launch, navigation, resize, cached view, one local operation, clean exit |
+| `automation.mcp` | Extracted binary stdio negotiation, tool schemas, Cobra parity, stdout purity, EOF shutdown, allowed-root and escape cases |
+| `storage.backup-restore` | Verified backup with secrets omitted, independent empty restore root, table/object/query/export digest agreement |
+| `offline.local-workflows` | OS-enforced deny-all egress while query, integrity, preview/export, TUI, MCP, backup and restore pass with zero network attempts |
+| `network.no-retired-domain` | Complete candidate/browser process-tree observation, zero retired-domain matches, only policy-allowed online hosts |
+| `security.no-receipt-leakage` | Receipt and bounded stream metadata scanned with zero secret, QR, session, body, HTML, URL-query, or absolute-path findings |
+| `secrets.platform-persistence` | Native keyring round trip where available or encrypted-vault fallback, restart reuse, logout secret removal with library retained |
+
+Workflow evidence is a closed, typed structure selected by workflow ID rather than an unrestricted string map. Captured streams are represented by bounded byte counts, SHA-256 digests, JSON-document counts, exit codes, and redaction results; raw live output is not embedded in a published receipt.
+
+### 15. Fixture and live evidence are separate lanes
+
+Deterministic loopback fixtures validate protocol shapes, failure modes, repeatability, and offline behavior without credentials. They can never be relabeled as live evidence. Final clean-room login, session restart, synchronization, article/resource download, and other account-dependent cases use a controlled real WeChat account on each supported native platform and record only bounded counts, classifications, and digests.
+
+The receipt contains no QR payload, cookies, tokens, account identifiers, article identifiers, article body, HTML body, raw upstream response, absolute user path, or secret digest. Online network observation covers the candidate process tree and any browser subprocess used for PDF. The offline phase closes the fixture/live source and enforces deny-all egress at the operating-system boundary; local query, integrity, cached preview/export, TUI, MCP, and backup/restore must continue to work with zero DNS and connection attempts.
+
+PDF evidence invokes an actually installed supported Chromium-family browser. TUI evidence launches the extracted candidate binary in a native PTY. Legacy migration evidence uses the versioned legacy Web archive, not the local backup format. Restore evidence targets an independently empty root and compares bounded metadata and object digests without serializing user content.
+
 ## Data Model
 
 The initial logical schema contains these groups; physical table names can evolve through migrations:
@@ -232,6 +282,8 @@ Major suites:
 - Secret redaction and SSRF/redirect policy tests.
 - Cross-adapter contract tests proving Cobra, TUI, and MCP share query/use-case semantics.
 - End-to-end smoke flows against a controlled test account only when explicitly configured; CI must not require live credentials.
+- Candidate-archive clean-room flows on all five native target tuples, with deterministic fixture receipts for continuous integration and separately authorized live receipts for the final stable-release gate.
+- Receipt validator tests for provenance mismatch, missing/duplicate/skipped workflows, fixture-as-live substitution, summary disagreement, incomplete egress observation, unsupported target tuples, and secret or article-body leakage.
 
 ## Risks / Trade-offs
 
@@ -245,6 +297,9 @@ Major suites:
 - **[Terminal UI cannot match every Web visualization]** → Preserve workflows and query power, provide compact tables and safe previews, and use local browser handoff for rich HTML when needed.
 - **[Multiple CLI processes race on jobs or migrations]** → Use database locks/leases, one migration coordinator, and observable read-only attachment.
 - **[Legacy browser data is hard to extract]** → Provide a final Web exporter and versioned package before retirement; document manual migration clearly.
+- **[A test harness can accidentally prove source code instead of the shipped artifact]** → Bind every mandatory workflow to the extracted binary digest and reject source/in-process executors in stable receipts.
+- **[Fixtures can be mistaken for real account validation]** → Encode fixture and live phases as distinct evidence types and require controlled-account receipts for every account-dependent stable workflow.
+- **[Cross-platform claims can be inferred from build metadata without native execution]** → Require one host/target-matched native receipt per supported tuple and an exact five-target aggregate receipt set.
 
 ## Migration Plan
 
@@ -299,3 +354,4 @@ Rollback before Phase 7 redeploys the archived online services. Rollback never d
 - The first database compatibility window is schema 1 through current schema 8. The floor can advance only under the documented bridge-release policy.
 - Mandatory parity is the signed 24-entry matrix. Hosted proxy monitoring, support/sponsor pages, embedded Web API docs, and development-only Web pages were intentionally retired.
 - MCP exports resolve an explicit or configured default output root and enforce profile allowed roots, including traversal and symlink-escape checks.
+- Clean-room evidence uses `wechat-article-clean-room-platform/v1` per native target and `wechat-article-clean-room-release-set/v1` for aggregate approval. Development fixture receipts may diagnose failures but cannot pass the stable gate.

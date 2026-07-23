@@ -41,6 +41,14 @@ type Dependencies struct {
 	Worker      WorkerLauncher
 	StartupArgs []string
 
+	// WeChatOrigin is a release-test seam for a loopback-controlled upstream.
+	// Production must leave it nil so only the approved WeChat origin is used.
+	WeChatOrigin *url.URL
+
+	// DownloadDestinationPolicy is a release-test seam for loopback article and
+	// resource fixtures. Production must leave it zero-valued.
+	DownloadDestinationPolicy network.DestinationPolicy
+
 	// ApplicationFactory is primarily a contract-test seam. Production leaves
 	// it nil so the full profile-isolated SQLite/object/session runtime is built.
 	ApplicationFactory func(*ProfileRuntime) application.Application
@@ -99,21 +107,24 @@ func (runtime *ProfileRuntime) Close() error {
 }
 
 type runtimeManager struct {
-	mu           sync.Mutex
-	version      string
-	paths        profiles.Paths
-	http         network.Doer
-	clock        runtimeenv.Clock
-	filesystem   runtimeenv.Filesystem
-	browser      runtimeenv.BrowserDiscovery
-	pdfRunner    exporter.ProcessRunner
-	signals      runtimeenv.SignalSource
-	secrets      secrets.Store
-	executable   string
-	worker       WorkerLauncher
-	factory      func(*ProfileRuntime) application.Application
-	active       *ProfileRuntime
-	databaseOpen func(context.Context, library.OpenOptions) (*library.Database, error)
+	mu              sync.Mutex
+	version         string
+	paths           profiles.Paths
+	http            network.Doer
+	clock           runtimeenv.Clock
+	filesystem      runtimeenv.Filesystem
+	browser         runtimeenv.BrowserDiscovery
+	browserExplicit bool
+	pdfRunner       exporter.ProcessRunner
+	signals         runtimeenv.SignalSource
+	secrets         secrets.Store
+	executable      string
+	worker          WorkerLauncher
+	factory         func(*ProfileRuntime) application.Application
+	wechatOrigin    *url.URL
+	downloadPolicy  network.DestinationPolicy
+	active          *ProfileRuntime
+	databaseOpen    func(context.Context, library.OpenOptions) (*library.Database, error)
 }
 
 func newRuntimeManager(version string, paths profiles.Paths, dependencies Dependencies) *runtimeManager {
@@ -154,10 +165,21 @@ func newRuntimeManager(version string, paths profiles.Paths, dependencies Depend
 	if worker == nil {
 		worker = processWorkerLauncher{}
 	}
+	browser := dependencies.Browser
+	browserExplicit := browser != nil
+	if browser == nil {
+		browser = localChromiumDiscovery{}
+	}
+	var wechatOrigin *url.URL
+	if dependencies.WeChatOrigin != nil {
+		clone := *dependencies.WeChatOrigin
+		wechatOrigin = &clone
+	}
 	return &runtimeManager{
 		version: version, paths: paths, http: httpDoer, clock: clock,
-		filesystem: filesystem, browser: dependencies.Browser, pdfRunner: dependencies.PDFRunner, signals: signals,
+		filesystem: filesystem, browser: browser, browserExplicit: browserExplicit, pdfRunner: dependencies.PDFRunner, signals: signals,
 		secrets: secretStore, executable: executable, worker: worker, factory: dependencies.ApplicationFactory,
+		wechatOrigin: wechatOrigin, downloadPolicy: dependencies.DownloadDestinationPolicy,
 		databaseOpen: library.Open,
 	}
 }
@@ -252,7 +274,18 @@ func (manager *runtimeManager) prepareProfileLocked(ctx context.Context, profile
 	if !ok {
 		httpClient = &http.Client{Transport: roundTripperFromDoer{doer: manager.http}}
 	}
-	wechatClient := wechat.NewClient(httpClient, manager.secrets, string(profile.ID))
+	var wechatClient *wechat.Client
+	if manager.wechatOrigin != nil {
+		var wechatErr error
+		wechatClient, wechatErr = wechat.NewClientForControlledOrigin(httpClient, manager.secrets, string(profile.ID), manager.wechatOrigin)
+		if wechatErr != nil {
+			_ = database.Close()
+			_ = runtimeLock.Close()
+			return nil, fmt.Errorf("configure controlled WeChat origin: %w", wechatErr)
+		}
+	} else {
+		wechatClient = wechat.NewClient(httpClient, manager.secrets, string(profile.ID))
+	}
 	jobsStore := library.NewJobStore(database)
 	jobsStore.SetAdmissionGuard(func(admissionCtx context.Context) (func() error, error) {
 		lock, lockErr := profiles.AcquireRuntimeGate(admissionCtx, profilePaths)
@@ -287,9 +320,15 @@ func (manager *runtimeManager) prepareProfileLocked(ctx context.Context, profile
 			PermitStore: library.NewSchedulerPermitStore(database),
 			Owner:       fmt.Sprintf("scheduler-%d-%p", os.Getpid(), database),
 		})
+		var contentBaseURL *url.URL
+		if manager.wechatOrigin != nil {
+			clone := *manager.wechatOrigin
+			contentBaseURL = &clone
+		}
 		downloads, downloadErr := newLocalDownloadRuntime(runtime, manager.secrets, manager.http, downloadRuntimeOptions{
 			Proxy: configuration.Preferences.Proxy, ProxyConfigured: true,
 			Concurrency: configuration.Preferences.Download.Concurrency, Scheduler: scheduler,
+			DestinationPolicy: manager.downloadPolicy, ContentBaseURL: contentBaseURL,
 		})
 		if downloadErr != nil {
 			_ = runtime.Close()

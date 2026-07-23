@@ -17,6 +17,7 @@ type Resolver interface {
 
 type DestinationPolicy struct {
 	AllowedHosts       map[string]struct{}
+	AllowedAuthorities map[string]struct{}
 	AllowSubdomains    bool
 	AllowLoopback      bool
 	AllowPrivate       bool
@@ -37,6 +38,9 @@ func (policy DestinationPolicy) Validate(ctx context.Context, target *url.URL) e
 	}
 	if len(policy.AllowedHosts) > 0 && !policy.hostAllowed(host) {
 		return fmt.Errorf("host %q is not allowed: %w", host, ErrDestinationPolicy)
+	}
+	if len(policy.AllowedAuthorities) > 0 && !policy.authorityAllowed(target.Host) {
+		return fmt.Errorf("authority %q is not allowed: %w", target.Host, ErrDestinationPolicy)
 	}
 	addresses := []net.IP{}
 	if parsed := net.ParseIP(host); parsed != nil {
@@ -60,6 +64,11 @@ func (policy DestinationPolicy) Validate(ctx context.Context, target *url.URL) e
 		}
 	}
 	return nil
+}
+
+func (policy DestinationPolicy) authorityAllowed(authority string) bool {
+	_, ok := policy.AllowedAuthorities[strings.ToLower(authority)]
+	return ok
 }
 
 func (policy DestinationPolicy) hostAllowed(host string) bool {

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/identity"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 )
 
@@ -320,7 +321,7 @@ func (client *Client) ListArticles(ctx context.Context, request ArticleListReque
 			return ArticlePage{}, fmt.Errorf("%w: publish_list[%d] lacks appmsgex", ErrDiscoveryProtocol, index)
 		}
 		for articleIndex, item := range info.AppMsgEx {
-			article, err := normalizeDiscoveredArticle(fakeID, item)
+			article, err := normalizeDiscoveredArticleForOrigin(fakeID, item, client.baseURL)
 			if err != nil {
 				return ArticlePage{}, fmt.Errorf("%w: publish_list[%d].appmsgex[%d]: %v", ErrDiscoveryProtocol, index, articleIndex, err)
 			}
@@ -369,8 +370,7 @@ func (client *Client) discoverySession(ctx context.Context) (Session, error) {
 func (client *Client) validateArticleURL(rawURL string) (*url.URL, error) {
 	value := strings.TrimSpace(rawURL)
 	parsed, err := url.Parse(value)
-	if err == nil && client.baseURL.Scheme == "http" && isLoopbackHost(client.baseURL.Hostname()) &&
-		parsed.Scheme == "http" && parsed.Host == client.baseURL.Host && parsed.User == nil {
+	if err == nil && matchesControlledArticleOrigin(parsed, client.baseURL) {
 		return parsed, nil
 	}
 	if err != nil || parsed.User != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.Port() != "" {
@@ -381,6 +381,10 @@ func (client *Client) validateArticleURL(rawURL string) (*url.URL, error) {
 		return nil, errors.New("article URL must use HTTPS and an allowed WeChat host")
 	}
 	return parsed, nil
+}
+
+func matchesControlledArticleOrigin(target, origin *url.URL) bool {
+	return matchesControlledAuthority(target, origin)
 }
 
 func discoveryPage(limit, offset, defaultLimit int) (int, int) {
@@ -519,21 +523,29 @@ func normalizeDiscoveredAccount(item searchAccountItem) (domain.Account, error) 
 	if fakeID == "" || name == "" {
 		return domain.Account{}, errors.New("fakeid and nickname are required")
 	}
-	return domain.Account{ID: stableAccountID(fakeID), FakeID: fakeID, Name: name, Alias: strings.TrimSpace(item.Alias),
+	return domain.Account{ID: domain.AccountID(identity.AccountID(fakeID)), FakeID: fakeID, Name: name, Alias: strings.TrimSpace(item.Alias),
 		Description: strings.TrimSpace(item.Signature), AvatarURL: strings.TrimSpace(item.RoundHeadImg), ServiceType: item.ServiceType}, nil
 }
 
 func normalizeDiscoveredArticle(fakeID string, item articleItem) (domain.Article, error) {
+	return normalizeDiscoveredArticleForOrigin(fakeID, item, nil)
+}
+
+func normalizeDiscoveredArticleForOrigin(fakeID string, item articleItem, controlledOrigin *url.URL) (domain.Article, error) {
 	link := strings.TrimSpace(html.UnescapeString(item.Link))
 	if item.Aid == "" || strings.TrimSpace(item.Title) == "" || link == "" {
 		return domain.Article{}, errors.New("aid, title, and link are required")
 	}
 	parsed, err := url.Parse(link)
-	if err != nil || parsed.Scheme != "https" || !strings.EqualFold(parsed.Hostname(), "mp.weixin.qq.com") {
+	if err != nil || parsed == nil || parsed.User != nil {
+		return domain.Article{}, errors.New("article link is not a canonical HTTPS WeChat URL")
+	}
+	if !matchesControlledArticleOrigin(parsed, controlledOrigin) &&
+		(parsed.Scheme != "https" || !strings.EqualFold(parsed.Hostname(), "mp.weixin.qq.com")) {
 		return domain.Article{}, errors.New("article link is not a canonical HTTPS WeChat URL")
 	}
 	article := domain.Article{
-		ID: stableArticleID(fakeID, item.Aid, link), AccountID: stableAccountID(fakeID), Aid: item.Aid,
+		ID: domain.ArticleID(identity.ArticleID(fakeID, item.Aid)), AccountID: domain.AccountID(identity.AccountID(fakeID)), Aid: item.Aid,
 		AppMsgID: item.AppMsgID, ItemIndex: item.ItemIndex, Title: strings.TrimSpace(item.Title),
 		Author: strings.TrimSpace(item.AuthorName), Digest: strings.TrimSpace(item.Digest), CanonicalURL: parsed.String(),
 		CoverURL: strings.TrimSpace(html.UnescapeString(item.Cover)), PublishedAt: unixSeconds(item.CreateTime),
@@ -593,14 +605,6 @@ func mediaDurationSeconds(value any) int {
 		}
 	}
 	return 0
-}
-
-func stableAccountID(fakeID string) domain.AccountID {
-	return domain.AccountID("account:" + stableDigest(fakeID))
-}
-
-func stableArticleID(fakeID, aid, _ string) domain.ArticleID {
-	return domain.ArticleID("article:" + stableDigest(fakeID+"\x00"+aid))
 }
 
 func stableDigest(value string) string {

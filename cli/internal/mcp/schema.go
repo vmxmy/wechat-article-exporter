@@ -92,7 +92,7 @@ func downloadSchema() map[string]any {
 func exportSchema() map[string]any {
 	return objectSchema(map[string]any{
 		"articleIds": stringArrayProperty("Local article identifiers"),
-		"format":     map[string]any{"type": "string", "enum": []string{"html", "markdown", "text", "json", "excel", "docx", "pdf"}},
+		"format":     map[string]any{"type": "string", "enum": []string{"html", "markdown", "text", "json", "xlsx", "docx", "pdf"}},
 		"outputRoot": stringProperty("Local output directory"),
 		"selection":  map[string]any{"type": "object"},
 		"options":    map[string]any{"type": "object"},

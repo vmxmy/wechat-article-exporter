@@ -137,6 +137,10 @@ jobs:
           OPENSPEC_TELEMETRY: '0'
         run: openspec validate replace-web-with-local-go-cli --strict
 
+      - name: Clean-room receipt validator tests
+        working-directory: cli
+        run: go test -count=1 ./cmd/cleanroom
+
   static:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -371,6 +375,31 @@ jobs:
           path: cli/dist/*
           if-no-files-found: error
 
+  checksum-manifest:
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          pattern: wechat-article-*
+          merge-multiple: true
+
+      - name: Create candidate checksum manifest
+        working-directory: artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -maxdepth 1 -type f ! -name 'checksums.txt' -printf '%f\n' | sort | xargs sha256sum > checksums.txt
+          sha256sum --check checksums.txt
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wechat-article-checksums
+          path: artifacts/checksums.txt
+          if-no-files-found: error
+
   archive-metadata:
     needs: [release-metadata, build]
     runs-on: ubuntu-latest
@@ -449,9 +478,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - os: macos-15
+            goos: darwin
+            goarch: arm64
+            archive_ext: tar.gz
+            binary: wechat-article
           - os: macos-15-intel
             goos: darwin
             goarch: amd64
+            archive_ext: tar.gz
+            binary: wechat-article
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
             archive_ext: tar.gz
             binary: wechat-article
           - os: ubuntu-latest
@@ -537,9 +576,160 @@ jobs:
           grep -Fq 'CGO_ENABLED=0' "$build_info"
           echo 'archive CGO policy verified'
 
+  clean-room-fixture:
+    needs: [release-metadata, build, checksum-manifest, database-compatibility]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            goos: darwin
+            goarch: arm64
+            archive_ext: tar.gz
+            binary: wechat-article
+          - os: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            archive_ext: tar.gz
+            binary: wechat-article
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            archive_ext: tar.gz
+            binary: wechat-article
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            archive_ext: tar.gz
+            binary: wechat-article
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            archive_ext: zip
+            binary: wechat-article.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: wechat-article-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: artifact
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: wechat-article-checksums
+          path: checksums
+
+      - name: Install native Chromium dependency
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends chromium
+
+      - name: Extract and run candidate-binary clean room
+        shell: bash
+        working-directory: cli
+        env:
+          ARCHIVE_EXT: ${{ matrix.archive_ext }}
+          BINARY_NAME: ${{ matrix.binary }}
+          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
+          EXPECTED_GOOS: ${{ matrix.goos }}
+          EXPECTED_GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          artifact_root="$GITHUB_WORKSPACE/artifact"
+          archive="$(find "$artifact_root" -maxdepth 1 -type f -name "*.${ARCHIVE_EXT}" -print -quit)"
+          sbom="$(find "$artifact_root" -maxdepth 1 -type f -name '*.sbom.cdx.json' -print -quit)"
+          checksums="$GITHUB_WORKSPACE/checksums/checksums.txt"
+          test -n "$archive"
+          test -n "$sbom"
+          test -f "$checksums"
+          extracted="$RUNNER_TEMP/wechat-article-clean-room-extracted"
+          mkdir -p "$extracted"
+          if [ "$ARCHIVE_EXT" = 'zip' ]; then unzip -q "$archive" -d "$extracted"; else tar -xzf "$archive" -C "$extracted"; fi
+          binary="$(find "$extracted" -type f -name "$BINARY_NAME" -print -quit)"
+          build_info="$(find "$extracted" -type f -name build-info.txt -print -quit)"
+          test -n "$binary"
+          test -n "$build_info"
+          receipt="$RUNNER_TEMP/clean-room-fixture-${EXPECTED_GOOS}-${EXPECTED_GOARCH}.json"
+          go run ./cmd/cleanroom run \
+            --archive "$archive" \
+            --binary "$binary" \
+            --build-info "$build_info" \
+            --sbom "$sbom" \
+            --checksums "$checksums" \
+            --output "$receipt" \
+            --commit "$GITHUB_SHA" \
+            --version "$RELEASE_VERSION" \
+            --repository "$GITHUB_REPOSITORY"
+          go run ./cmd/cleanroom verify --receipt "$receipt"
+          test "$(jq -r '.platform.goos' "$receipt")" = "$EXPECTED_GOOS"
+          test "$(jq -r '.platform.goarch' "$receipt")" = "$EXPECTED_GOARCH"
+          cp "$receipt" "$GITHUB_WORKSPACE/clean-room-fixture-${EXPECTED_GOOS}-${EXPECTED_GOARCH}.json"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: clean-room-fixture-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: clean-room-fixture-${{ matrix.goos }}-${{ matrix.goarch }}.json
+          if-no-files-found: error
+
+  controlled-live-receipts:
+    if: startsWith(github.ref, 'refs/tags/wechat-article-v')
+    needs: [release-metadata, build, clean-room-fixture]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Download authorized controlled-live receipt set
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RECEIPT_RUN_ID: ${{ vars.CONTROLLED_LIVE_RECEIPT_RUN_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/controlled-live"
+          if [ -z "$RECEIPT_RUN_ID" ]; then
+            echo 'Set CONTROLLED_LIVE_RECEIPT_RUN_ID to the authorized native receipt collection run.' >&2
+            exit 1
+          fi
+          if ! gh run download "$RECEIPT_RUN_ID" \
+            --name controlled-live-release-receipts \
+            --dir "$RUNNER_TEMP/controlled-live"; then
+            echo 'Stable publication requires an explicitly authorized controlled-live-release-receipts artifact.' >&2
+            exit 1
+          fi
+
+      - name: Verify five-target controlled-live gate
+        working-directory: cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt_set="$(find "$RUNNER_TEMP/controlled-live" -type f -name 'release-receipt-set.json' -print -quit)"
+          test -n "$receipt_set"
+          go run ./cmd/cleanroom verify-set --receipt-set "$receipt_set"
+
   release:
     if: startsWith(github.ref, 'refs/tags/wechat-article-v')
-    needs: [release-metadata, build, archive-metadata, smoke]
+    needs: [release-metadata, build, archive-metadata, smoke, clean-room-fixture, controlled-live-receipts]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

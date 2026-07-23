@@ -152,11 +152,15 @@ func (server *Server) handle(ctx context.Context, message []byte) (responseEnvel
 			response.Error = &rpcError{Code: -32602, Message: "initialize requires protocolVersion"}
 			break
 		}
-		response.Result = map[string]any{
-			"protocolVersion": protocolVersion,
-			"capabilities":    server.adapter.capabilities(),
-			"serverInfo":      server.adapter.implementation(),
-			"instructions":    "Local-only MCP over stdio. Long-running operations return persistent job IDs.",
+		if parameters.ProtocolVersion != ProtocolVersion {
+			response.Error = &rpcError{Code: -32602, Message: "unsupported protocolVersion", Data: map[string]any{"supported": ProtocolVersion}}
+			break
+		}
+		response.Result = InitializeResult{
+			ProtocolVersion: ProtocolVersion,
+			Capabilities:    server.adapter.capabilities(),
+			ServerInfo:      server.adapter.implementation(),
+			Instructions:    "Local-only MCP over stdio. Long-running operations return persistent job IDs.",
 		}
 	case "notifications/initialized", "notifications/cancelled":
 		return responseEnvelope{}, false

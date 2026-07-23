@@ -69,6 +69,22 @@ func TestDestinationPolicyBlocksIPv4IPv6PrivateLinkLocalAndMetadata(t *testing.T
 	}
 }
 
+func TestDestinationPolicyCanPinAnExactAuthority(t *testing.T) {
+	policy := DestinationPolicy{
+		AllowedHosts:       map[string]struct{}{"127.0.0.1": {}},
+		AllowedAuthorities: map[string]struct{}{"127.0.0.1:43125": {}},
+		AllowLoopback:      true,
+	}
+	allowed, _ := url.Parse("http://127.0.0.1:43125/s/article")
+	if err := policy.Validate(context.Background(), allowed); err != nil {
+		t.Fatalf("Validate allowed authority: %v", err)
+	}
+	otherPort, _ := url.Parse("http://127.0.0.1:43126/s/article")
+	if err := policy.Validate(context.Background(), otherPort); !errors.Is(err, ErrDestinationPolicy) {
+		t.Fatalf("Validate changed port error = %v", err)
+	}
+}
+
 func TestSensitiveRoutePolicy(t *testing.T) {
 	if err := ValidateRoute(Comments, false, TrustPublicOnly); !errors.Is(err, ErrSensitiveRouteRequired) {
 		t.Fatalf("ValidateRoute(untrusted) error = %v", err)

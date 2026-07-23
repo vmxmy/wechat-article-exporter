@@ -19,6 +19,7 @@ The project will consolidate the user-facing product into one local-first Go bin
 - Add backup, restore, garbage collection, integrity checking, legacy Web-data import, and machine-readable JSON output for automation.
 - Preserve the existing Web, Nitro, and remote MCP deployments during a compatibility window; remove them only after the local binary passes the parity gate and a release has provided an explicit migration path.
 - Replace the current release pipeline with cross-platform native binaries, checksums, release notes, database migration tests, and upgrade compatibility checks.
+- Add fail-closed native clean-room receipts that bind every installation, migration, live WeChat, download, export, TUI, Cobra, MCP, backup/restore, offline, network, and secret-persistence result to the exact extracted release binary on all five supported target platforms.
 
 ## Capabilities
 
@@ -35,7 +36,7 @@ The project will consolidate the user-facing product into one local-first Go bin
 - `terminal-workspace`: Bubble Tea navigation, tables, filters, selection, previews, job progress, settings, accessibility, and non-interactive fallback behavior.
 - `local-mcp`: Embedded stdio MCP discovery and tool calls backed by the same local application modules without OAuth or a remote service.
 - `web-retirement`: Parity gate, compatibility period, migration messaging, removal of Nuxt/Nitro/Cloudflare/MCP-Worker surfaces, and rollback/archive requirements.
-- `release-distribution`: Native artifact matrix, checksums, SBOM/provenance, upgrade compatibility, release gates, and clean-room installation receipts.
+- `release-distribution`: Native artifact matrix, checksums, SBOM/provenance, upgrade compatibility, release gates, per-platform clean-room receipts, live-evidence separation, and aggregate five-target approval.
 
 ### Modified Capabilities
 

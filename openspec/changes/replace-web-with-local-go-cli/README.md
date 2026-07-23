@@ -18,7 +18,7 @@ Replace the Nuxt web app and remote MCP/OAuth services with a local-first Go + C
 - `specs/*/spec.md`: normative requirements and acceptance scenarios for all 12 capabilities.
 - `tasks.md`: dependency-ordered implementation and retirement checklist.
 
-The change currently defines 12 capabilities, 93 normative requirements, 152 acceptance scenarios, and 129 implementation tasks. The capability count includes the release/distribution contract added after the original 11-capability draft.
+The change currently defines 12 capabilities. The exact normative-requirement, acceptance-scenario, and implementation-task counts are derived by the validation commands below so this index does not become stale as the contract is refined.
 
 ## Reading order
 
@@ -38,7 +38,7 @@ The target product is one native binary with three adapters—Cobra, Bubble Tea,
 - OpenSpec artifacts: complete (`proposal`, `design`, `specs`, and `tasks`).
 - Mandatory functional parity: signed 24/24 by the executable parity gate.
 - Repository Web/cloud retirement: complete through task 17.8.
-- Remaining external evidence: task 17.9 requires final clean-room installation, migration, login, synchronization, download, every export format, TUI, Cobra, MCP, backup/restore, and offline receipts on every supported native platform. It remains unchecked until those real-platform receipts exist; cross-compilation or unit tests alone do not satisfy it.
+- Remaining external evidence: task 17.9 requires artifact-bound receipts for final clean-room installation, real legacy migration, controlled live login/session restart, synchronization, download, every export format, native-PTY TUI, Cobra, stdio MCP, platform secret persistence, independent backup/restore, process-tree network exclusion, leakage scanning, and OS-enforced offline operation on every supported native platform. It remains unchecked until all five platform receipts and their aggregate release receipt set pass; fixture relabeling, source harnesses, cross-compilation, emulation, or unit tests do not satisfy it.
 
 ## Validation
 
@@ -46,4 +46,6 @@ The target product is one native binary with three adapters—Cobra, Bubble Tea,
 openspec validate replace-web-with-local-go-cli --strict
 openspec status --change replace-web-with-local-go-cli
 rg -n '^\s*- \[ \]' openspec/changes/replace-web-with-local-go-cli/tasks.md
+rg -c '^### Requirement:' openspec/changes/replace-web-with-local-go-cli/specs/*/spec.md
+rg -c '^#### Scenario:' openspec/changes/replace-web-with-local-go-cli/specs/*/spec.md
 ```

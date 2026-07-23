@@ -2,6 +2,7 @@ package wechat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -75,6 +76,21 @@ func TestTraverseAlbumResumesDeduplicatesAndPersistsCheckpoint(t *testing.T) {
 		result.Checkpoint.PagesCommitted != 2 || result.Checkpoint.ItemsCommitted != 3 ||
 		!reflect.DeepEqual(result.Checkpoint.SeenKeys, []string{"10002:1", "10003:1"}) || len(checkpoints) != 1 {
 		t.Fatalf("result=%#v checkpoints=%#v", result, checkpoints)
+	}
+}
+
+func TestNormalizeAlbumArticlesAllowsOnlyExactControlledOrigin(t *testing.T) {
+	origin, err := ParseControlledOrigin("http://127.0.0.1:43125")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := json.RawMessage(`[{"msgid":"10001","itemidx":"1","title":"Fixture","url":"http://127.0.0.1:43125/s/article"}]`)
+	items, _, err := normalizeAlbumArticles("fixture-account", origin, raw)
+	if err != nil || len(items) != 1 || items[0].CanonicalURL != "http://127.0.0.1:43125/s/article" {
+		t.Fatalf("controlled album items=%#v error=%v", items, err)
+	}
+	if _, _, err := normalizeAlbumArticles("fixture-account", origin, json.RawMessage(`[{"msgid":"10001","itemidx":"1","title":"Fixture","url":"http://127.0.0.1:43126/s/article"}]`)); err == nil {
+		t.Fatal("album normalization accepted a different controlled authority")
 	}
 }
 

@@ -32,6 +32,7 @@ import (
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/exporter"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/jobs"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/mcp"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/migration"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/network"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/processor"
@@ -2063,14 +2064,15 @@ func TestCompletionWritesShellScriptWithoutJSONEnvelope(t *testing.T) {
 
 func TestLocalMCPServeUsesStdioAndProfilePolicy(t *testing.T) {
 	applicationAdapter, stdout, stderr := newTestApp(t)
-	applicationAdapter.stdin = strings.NewReader("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}\n")
+	applicationAdapter.stdin = strings.NewReader(fmt.Sprintf("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":%q}}\n", mcp.ProtocolVersion))
 	if err := applicationAdapter.Execute(context.Background(), []string{"mcp", "serve", "--transport", "stdio"}); err != nil {
 		t.Fatal(err)
 	}
 	var response struct {
 		JSONRPC string `json:"jsonrpc"`
 		Result  struct {
-			Capabilities struct {
+			ProtocolVersion string `json:"protocolVersion"`
+			Capabilities    struct {
 				Experimental map[string]any `json:"experimental"`
 			} `json:"capabilities"`
 		} `json:"result"`
@@ -2078,7 +2080,7 @@ func TestLocalMCPServeUsesStdioAndProfilePolicy(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &response); err != nil {
 		t.Fatalf("MCP stdout is not one JSON-RPC response: %v\n%s", err, stdout.String())
 	}
-	if response.JSONRPC != "2.0" || response.Result.Capabilities.Experimental["localOnly"] != true ||
+	if response.JSONRPC != "2.0" || response.Result.ProtocolVersion != mcp.ProtocolVersion || response.Result.Capabilities.Experimental["localOnly"] != true ||
 		response.Result.Capabilities.Experimental["remoteOAuth"] != false {
 		t.Fatalf("MCP initialize response = %#v", response)
 	}

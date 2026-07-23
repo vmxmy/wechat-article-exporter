@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/identity"
 )
 
 const ProvisionalSingleFakeID = "SINGLE_ARTICLE_FAKEID"
@@ -128,7 +129,7 @@ func (database *Database) RepairSingleArticle(ctx context.Context, repair Single
 	}
 	var result domain.Article
 	err := database.WithTx(ctx, func(transaction *sql.Tx) error {
-		accountID := domain.AccountID("account:" + localStableDigest(fakeID))
+		accountID := domain.AccountID(identity.AccountID(fakeID))
 		accountName := strings.TrimSpace(repair.AccountName)
 		if accountName == "" {
 			accountName = fakeID

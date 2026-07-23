@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ type localDownloadRuntime struct {
 
 type downloadRuntimeOptions struct {
 	DestinationPolicy network.DestinationPolicy
+	ContentBaseURL    *url.URL
 	Proxy             profiles.ProxyPreferences
 	ProxyConfigured   bool
 	Concurrency       int
@@ -77,6 +79,9 @@ func newLocalDownloadRuntime(runtime *ProfileRuntime, secretStore secrets.Store,
 		return !errors.Is(err, network.ErrSensitiveRouteRequired)
 	}}
 	contentEndpoint := wechat.ContentEndpoint{Network: router}
+	if len(options) > 0 {
+		contentEndpoint.BaseURL = options[0].ContentBaseURL
+	}
 	credentialsService := credentials.NewService(credentials.ServiceOptions{
 		Profile: string(runtime.Profile.ID), Repository: runtime.Library, Accounts: runtime.Library, Secrets: secretStore,
 		Validator: credentials.ValidatorFunc(func(ctx context.Context, record credentials.Record) error {

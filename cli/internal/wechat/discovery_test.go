@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/identity"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 )
 
@@ -149,7 +150,7 @@ func TestArticleListUsesTopLevelTotalAndMessagePagination(t *testing.T) {
 	if page.Items[0].ID == page.Items[1].ID {
 		t.Fatalf("article IDs collided: %#v", page.Items)
 	}
-	if stableArticleID("fixture-account-a", page.Items[0].Aid, "https://mp.weixin.qq.com/s/changed-url") != page.Items[0].ID {
+	if domain.ArticleID(identity.ArticleID("fixture-account-a", page.Items[0].Aid)) != page.Items[0].ID {
 		t.Fatalf("stable article ID changed with URL: %#v", page.Items[0])
 	}
 }

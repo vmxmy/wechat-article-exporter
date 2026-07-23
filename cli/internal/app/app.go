@@ -52,27 +52,42 @@ func New(stdin io.Reader, stdout, stderr io.Writer) *App {
 // that will later be passed to Execute. Embedders should use New, which never
 // inspects or binds itself to the host process's os.Args.
 func NewForArgs(stdin io.Reader, stdout, stderr io.Writer, args []string) *App {
-	return newWithStartupArgs(stdin, stdout, stderr, args)
+	dependencies := Dependencies{StartupArgs: args}
+	configuration, enabled, configurationErr := controlledCleanRoomDependencies()
+	if configurationErr != nil {
+		return newInitializationFailure(stdin, stdout, stderr, dependencies.StartupArgs, configurationErr)
+	}
+	if enabled {
+		dependencies.WeChatOrigin = configuration.origin
+		dependencies.DownloadDestinationPolicy = configuration.policy
+		dependencies.Worker = foregroundProcessWorker{}
+	}
+	return newWithStartupArgsAndDependencies(stdin, stdout, stderr, dependencies)
 }
 
 func newWithStartupArgs(stdin io.Reader, stdout, stderr io.Writer, args []string) *App {
-	dependencies := Dependencies{StartupArgs: append([]string(nil), args...)}
+	return newWithStartupArgsAndDependencies(stdin, stdout, stderr, Dependencies{StartupArgs: args})
+}
+
+func newWithStartupArgsAndDependencies(stdin io.Reader, stdout, stderr io.Writer, dependencies Dependencies) *App {
 	appInstance, err := NewWithDependencies(context.Background(), stdin, stdout, stderr, dependencies)
 	if err != nil {
-		// Preserve the historical constructor signature for embedders. Runtime
-		// initialization errors are surfaced by status and local operations.
-		fallback := application.New(application.Options{Version: Version})
-		result := &App{stdin: stdin, stdout: stdout, stderr: stderr, core: fallback, secret: secrets.NewMemoryStore(), initErr: err}
-		result.startupArgs = append([]string(nil), dependencies.StartupArgs...)
-		if dependencies.PathOptions == (profiles.PathOptions{}) {
-			dependencies.PathOptions = pathOptionsFromEnvironment()
-		}
-		if paths, pathErr := defaultPaths(dependencies.PathOptions); pathErr == nil {
-			result.runtimes = &runtimeManager{paths: paths}
-		}
-		return result
+		return newInitializationFailure(stdin, stdout, stderr, dependencies.StartupArgs, err)
 	}
 	return appInstance
+}
+
+func newInitializationFailure(stdin io.Reader, stdout, stderr io.Writer, args []string, err error) *App {
+	// Preserve the historical constructor signature for embedders. Runtime
+	// initialization errors are surfaced by status and local operations. The
+	// fallback deliberately does not initialize network or storage adapters.
+	fallback := application.New(application.Options{Version: Version})
+	result := &App{stdin: stdin, stdout: stdout, stderr: stderr, core: fallback, secret: secrets.NewMemoryStore(), initErr: err}
+	result.startupArgs = append([]string(nil), args...)
+	if paths, pathErr := defaultPaths(pathOptionsFromEnvironment()); pathErr == nil {
+		result.runtimes = &runtimeManager{paths: paths}
+	}
+	return result
 }
 
 func NewWithDependencies(
@@ -673,7 +688,7 @@ func (a *App) localSessionCommand() *cobra.Command {
 }
 
 func (a *App) openBrowser(ctx context.Context, target string) error {
-	if a.runtimes != nil && a.runtimes.browser != nil {
+	if a.runtimes != nil && a.runtimes.browser != nil && a.runtimes.browserExplicit {
 		browser, err := a.runtimes.browser.FindChromium(ctx)
 		if err != nil {
 			return fmt.Errorf("discover local browser: %w", err)

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/identity"
 )
 
 type AlbumOrder string
@@ -106,7 +107,7 @@ func (client *Client) ListAlbumArticles(ctx context.Context, request AlbumListRe
 	if payload.Response == nil {
 		return AlbumPage{}, fmt.Errorf("%w: album response omitted getalbum_resp", ErrDiscoveryProtocol)
 	}
-	items, duplicates, err := normalizeAlbumArticles(fakeID, payload.Response.Articles)
+	items, duplicates, err := normalizeAlbumArticles(fakeID, client.baseURL, payload.Response.Articles)
 	if err != nil {
 		return AlbumPage{}, err
 	}
@@ -246,14 +247,14 @@ func normalizeAlbumMetadata(fakeID, albumID string, info albumBaseInfo, fallback
 	if accountName == "" {
 		accountName = strings.TrimSpace(info.Username)
 	}
-	account := domain.Account{ID: stableAccountID(fakeID), FakeID: fakeID, Name: accountName}
+	account := domain.Account{ID: domain.AccountID(identity.AccountID(fakeID)), FakeID: fakeID, Name: accountName}
 	album := domain.Album{ID: domain.AlbumID("album:" + stableDigest(albumID)), AccountID: account.ID,
 		UpstreamID: albumID, Name: strings.TrimSpace(info.Title), Description: strings.TrimSpace(info.Description),
 		ArticleCount: count, Paid: info.Paid == "1"}
 	return album, account, nil
 }
 
-func normalizeAlbumArticles(fakeID string, raw json.RawMessage) ([]AlbumArticle, []string, error) {
+func normalizeAlbumArticles(fakeID string, controlledOrigin *url.URL, raw json.RawMessage) ([]AlbumArticle, []string, error) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || trimmed == "null" || trimmed == "[]" {
 		return []AlbumArticle{}, nil, nil
@@ -280,7 +281,8 @@ func normalizeAlbumArticles(fakeID string, raw json.RawMessage) ([]AlbumArticle,
 			return nil, nil, fmt.Errorf("%w: album item %d lacks message ID, item index, title, or URL", ErrDiscoveryProtocol, index)
 		}
 		target, err := url.Parse(strings.TrimSpace(html.UnescapeString(payload.URL)))
-		if err != nil || target.User != nil || target.Scheme != "https" || !strings.EqualFold(target.Hostname(), "mp.weixin.qq.com") {
+		if err != nil || target.User != nil || (!matchesControlledArticleOrigin(target, controlledOrigin) &&
+			(target.Scheme != "https" || !strings.EqualFold(target.Hostname(), "mp.weixin.qq.com"))) {
 			return nil, nil, fmt.Errorf("%w: album item %d contains an invalid article URL", ErrDiscoveryProtocol, index)
 		}
 		key := messageID + ":" + itemIndex
@@ -292,7 +294,7 @@ func normalizeAlbumArticles(fakeID string, raw json.RawMessage) ([]AlbumArticle,
 		publishedUnix, _ := strconv.ParseInt(payload.PublishedAt, 10, 64)
 		messageType, _ := strconv.Atoi(payload.MessageType)
 		aid := key
-		article := domain.Article{ID: stableArticleID(fakeID, aid, target.String()), AccountID: stableAccountID(fakeID),
+		article := domain.Article{ID: domain.ArticleID(identity.ArticleID(fakeID, aid)), AccountID: domain.AccountID(identity.AccountID(fakeID)),
 			Aid: aid, Title: strings.TrimSpace(payload.Title), CanonicalURL: target.String(),
 			CoverURL: strings.TrimSpace(html.UnescapeString(payload.CoverURL)), PublishedAt: unixSeconds(publishedUnix),
 			MessageType: messageType, Paid: payload.Paid == "1"}

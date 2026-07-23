@@ -10,6 +10,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -160,6 +161,88 @@ type cookieKey struct {
 
 func NewClient(httpClient *http.Client, secretStore secrets.Store, profile string) *Client {
 	return newClient(httpClient, secretStore, profile, upstreamOrigin)
+}
+
+// ParseControlledOrigin validates the loopback-only release harness upstream.
+func ParseControlledOrigin(value string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || !validControlledOrigin(parsed) {
+		return nil, errors.New("controlled WeChat origin must be loopback HTTP without path, query, fragment, or user information")
+	}
+	return parsed, nil
+}
+
+func validControlledOrigin(origin *url.URL) bool {
+	if origin == nil || origin.User != nil || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" ||
+		origin.Path != "" || origin.RawPath != "" || origin.Opaque != "" || origin.Scheme != "http" || origin.Port() == "" {
+		return false
+	}
+	address := net.ParseIP(origin.Hostname())
+	if address == nil || !address.IsLoopback() {
+		return false
+	}
+	port, err := strconv.Atoi(origin.Port())
+	return err == nil && port > 0 && port <= 65535
+}
+
+// NewClientForControlledOrigin constructs a client for a loopback-only release
+// harness. It intentionally rejects public hosts so production callers cannot
+// use this seam to redirect credentials or article traffic.
+func NewClientForControlledOrigin(httpClient *http.Client, secretStore secrets.Store, profile string, origin *url.URL) (*Client, error) {
+	if !validControlledOrigin(origin) {
+		return nil, errors.New("controlled WeChat origin must be loopback HTTP without path, query, fragment, or user information")
+	}
+	clone := *origin
+	client := newClient(controlledOriginHTTPClient(httpClient, &clone), secretStore, profile, clone.String())
+	return client, nil
+}
+
+func controlledOriginHTTPClient(source *http.Client, origin *url.URL) *http.Client {
+	if source == nil {
+		source = &http.Client{Timeout: 30 * time.Second}
+	}
+	client := *source
+	transport := source.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	if direct, ok := transport.(*http.Transport); ok && direct != nil {
+		direct = direct.Clone()
+		direct.Proxy = nil
+		transport = direct
+	}
+	client.Transport = controlledOriginTransport{origin: origin, next: transport}
+	previousRedirectCheck := source.CheckRedirect
+	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if !matchesControlledAuthority(request.URL, origin) {
+			return errors.New("controlled WeChat redirect changed origin")
+		}
+		if previousRedirectCheck != nil {
+			return previousRedirectCheck(request, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &client
+}
+
+type controlledOriginTransport struct {
+	origin *url.URL
+	next   http.RoundTripper
+}
+
+func (transport controlledOriginTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request == nil || !matchesControlledAuthority(request.URL, transport.origin) {
+		return nil, errors.New("controlled WeChat request changed origin")
+	}
+	return transport.next.RoundTrip(request)
+}
+
+func matchesControlledAuthority(target, origin *url.URL) bool {
+	return validControlledOrigin(origin) && target != nil && target.User == nil && target.Scheme == origin.Scheme &&
+		strings.EqualFold(target.Host, origin.Host)
 }
 
 func newClient(httpClient *http.Client, secretStore secrets.Store, profile, baseURL string) *Client {
@@ -629,7 +712,8 @@ func (client *Client) validLoginRedirect(value string) (*url.URL, error) {
 }
 
 func isLoopbackHost(host string) bool {
-	return strings.EqualFold(host, "localhost") || host == "127.0.0.1" || host == "::1"
+	address := net.ParseIP(strings.TrimSpace(host))
+	return address != nil && address.IsLoopback()
 }
 
 func (client *Client) captureResponseCookies(response *http.Response, requestURL *url.URL) {
