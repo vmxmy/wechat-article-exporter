@@ -11,6 +11,7 @@ on:
       - 'RELEASE_NOTES.md'
       - 'docs/architecture/database-compatibility.md'
       - 'docs/architecture/sqlite-policy.md'
+      - 'docs/guides/**'
       - 'docs/archive/**'
       - 'docs/migration/**'
       - 'docs/operations/**'
@@ -199,6 +200,12 @@ jobs:
           pnpm run lint
           pnpm run build
           pnpm run verify:go-assets
+
+      - name: Install pinned Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Sanitized loopback browser E2E
+        run: pnpm run e2e
 
   test:
     strategy:

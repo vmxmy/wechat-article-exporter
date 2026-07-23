@@ -1,0 +1,120 @@
+import { expect, type Page, type Route } from '@playwright/test'
+
+const now = '2026-07-24T09:30:00.000Z'
+const csrfToken = 'sanitized-e2e-csrf-token'
+
+export interface LoopbackFixture {
+  readonly requests: readonly string[]
+  readonly controls: readonly string[]
+  readonly exports: readonly string[]
+  readonly preferencePatches: readonly unknown[]
+}
+
+export async function installLoopbackFixture(page: Page): Promise<LoopbackFixture> {
+  const requests: string[] = []
+  const controls: string[] = []
+  const exports: string[] = []
+  const preferencePatches: unknown[] = []
+  let loginState = 'unauthenticated'
+  let directory = { token: 'dir-sanitized', label: 'Sanitized exports' }
+  let backupID = ''
+  let gcPlan = false
+
+  await page.route('**/*', async (route) => {
+    const url = new URL(route.request().url())
+    if (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost') {
+      await route.abort('blockedbyclient')
+      return
+    }
+    if (!url.pathname.startsWith('/api/v1/')) {
+      await route.continue()
+      return
+    }
+
+    requests.push(`${route.request().method()} ${url.pathname}`)
+    await fulfillAPI(route, url, {
+      loginState,
+      directory,
+      backupID,
+      gcPlan,
+      controls,
+      exports,
+      preferencePatches,
+      onLoginState: (state) => { loginState = state },
+      onDirectory: (next) => { directory = next },
+      onBackupID: (id) => { backupID = id },
+      onGCPlan: (next) => { gcPlan = next }
+    })
+  })
+  return { requests, controls, exports, preferencePatches }
+}
+
+export async function expectOnlyLoopbackRequests(page: Page) {
+  const origins = await page.evaluate(() => performance.getEntriesByType('resource').map((entry) => new URL(entry.name).hostname))
+  expect(origins.every((hostname) => hostname === '127.0.0.1' || hostname === 'localhost')).toBeTruthy()
+}
+
+interface State {
+  readonly loginState: string
+  readonly directory: { readonly token: string; readonly label: string }
+  readonly backupID: string
+  readonly gcPlan: boolean
+  readonly controls: string[]
+  readonly exports: string[]
+  readonly preferencePatches: unknown[]
+  readonly onLoginState: (state: string) => void
+  readonly onDirectory: (directory: { readonly token: string; readonly label: string }) => void
+  readonly onBackupID: (id: string) => void
+  readonly onGCPlan: (value: boolean) => void
+}
+
+async function fulfillAPI(route: Route, url: URL, state: State) {
+  const method = route.request().method()
+  const body = method === 'GET' ? undefined : JSON.parse(route.request().postData() || '{}') as Record<string, unknown>
+  if (method !== 'GET' && url.pathname !== '/api/v1/status') {
+    expect(route.request().headers()['x-csrf-token']).toBe(csrfToken)
+  }
+
+  if (url.pathname === '/api/v1/status') return json(route, { csrfToken })
+  if (url.pathname === '/api/v1/runtime') return json(route, { version: 'e2e-sanitized', profileId: 'fixture-profile', session: state.loginState === 'authenticated' ? 'authenticated' : 'unauthenticated' })
+  if (url.pathname === '/api/v1/session') return json(route, { state: state.loginState, accountId: state.loginState === 'authenticated' ? 'account-fixture' : undefined, accountName: state.loginState === 'authenticated' ? 'Fixture Account' : undefined })
+  if (url.pathname === '/api/v1/storage') return json(route, storage())
+  if (url.pathname === '/api/v1/events/snapshot') return json(route, { runtime: { version: 'e2e-sanitized', profileId: 'fixture-profile' }, session: { state: state.loginState }, storage: storage(), checkedAt: now })
+
+  if (url.pathname === '/api/v1/login/begin') return json(route, { sessionId: 'login-fixture', qrCode: 'c2FuaXRpemVkLXFy', expiresAt: now })
+  if (url.pathname === '/api/v1/login/poll') { state.onLoginState('scanned'); return json(route, { state: 'scanned', accountCount: 1 }) }
+  if (url.pathname === '/api/v1/login/complete') { state.onLoginState('authenticated'); return json(route, { state: 'authenticated', accountId: 'account-fixture', accountName: 'Fixture Account' }) }
+
+  if (url.pathname === '/api/v1/accounts' || url.pathname === '/api/v1/accounts/search') return page(route, [{ id: 'account-fixture', name: 'Fixture Account', alias: 'fixture', articleCount: 2, lastSyncAt: now, syncCompleted: true }])
+  if (url.pathname === '/api/v1/articles') return page(route, [{ id: 'article-fixture-1', title: 'Sanitized article one', accountId: 'account-fixture', accountName: 'Fixture Account', author: 'Fixture Author', publishedAt: now, state: 'ready' }, { id: 'article-fixture-2', title: 'Sanitized article two', accountId: 'account-fixture', accountName: 'Fixture Account', author: 'Fixture Author', publishedAt: now, state: 'queued' }])
+  if (url.pathname === '/api/v1/albums') return page(route, [])
+  if (url.pathname === '/api/v1/saved-queries') return page(route, [])
+  if (url.pathname === '/api/v1/jobs') return page(route, [{ id: 'job-fixture-1', kind: 'export', state: 'running', profile: 'fixture-profile', createdAt: now, updatedAt: now, counts: { completed: 1, total: 2 } }])
+  if (/^\/api\/v1\/jobs\/job-fixture-1\/(pause|resume|retry|cancel)$/.test(url.pathname)) { state.controls.push(url.pathname); return json(route, { id: 'job-fixture-1', kind: 'export', state: url.pathname.endsWith('cancel') ? 'cancelled' : 'running', createdAt: now, updatedAt: now }) }
+
+  if (url.pathname === '/api/v1/export-directories/authorize') return json(route, state.directory)
+  if (url.pathname === '/api/v1/export-directories') { const name = String(body?.name || 'child'); const next = { token: `dir-${name}`, label: `Sanitized exports/${name}` }; state.onDirectory(next); return json(route, next) }
+  if (url.pathname === '/api/v1/exports/start') { state.exports.push(JSON.stringify(body)); return json(route, { jobId: 'job-export-fixture' }) }
+  if (url.pathname === '/api/v1/exports') return page(route, [{ id: 'export-fixture-1', jobId: 'job-fixture-1', format: 'markdown', state: 'completed', createdAt: now, completedAt: now, provenanceState: 'complete', provenanceGeneration: 1, outputDirectory: 'opaque-directory-token' }])
+  if (url.pathname === '/api/v1/exports/export-fixture-1/manifest') return json(route, { exportId: 'export-fixture-1', format: 'markdown', state: 'completed', provenanceState: 'complete', provenanceGeneration: 1, files: [{ articleId: 'article-fixture-1', path: 'sanitized-article.md', sizeBytes: 42, sha256: 'a'.repeat(64), status: 'written' }] })
+  if (url.pathname === '/api/v1/exports/export-fixture-1/verify') return json(route, { exportId: 'export-fixture-1', valid: true, verifiedOutputs: 1, issues: [] })
+
+  if (url.pathname === '/api/v1/settings/credentials') return json(route, [{ id: 'credential-fixture', accountId: 'account-fixture', kind: 'cookie', status: 'valid', createdAt: now, updatedAt: now }])
+  if (url.pathname === '/api/v1/settings/proxies') return json(route, [])
+  if (url.pathname === '/api/v1/settings/preferences' && method === 'GET') return json(route, preferences())
+  if (url.pathname === '/api/v1/settings/preferences' && method === 'PATCH') { state.preferencePatches.push(body); return json(route, body) }
+  if (url.pathname === '/api/v1/maintenance/integrity') return json(route, { checkedAt: now, issues: [] })
+  if (url.pathname === '/api/v1/maintenance/diagnostics') return json(route, { collectedAt: now, checks: [{ name: 'loopback', status: 'ok', summary: 'Sanitized local fixture' }] })
+  if (url.pathname === '/api/v1/maintenance/backups') { state.onBackupID('backup-fixture'); return json(route, { id: 'backup-fixture', createdAt: now, sha256: 'b'.repeat(64), bytes: 64, objects: 1 }) }
+  if (url.pathname === '/api/v1/maintenance/backups/verify') return json(route, { backupId: state.backupID || 'backup-fixture', valid: true })
+  if (url.pathname === '/api/v1/maintenance/gc/plan') { state.onGCPlan(true); return json(route, gc()) }
+  if (url.pathname === '/api/v1/maintenance/gc/apply') { state.onGCPlan(false); return json(route, { deletedObjects: { count: 1, bytes: 42 }, deletedTemporaryFiles: { count: 0, bytes: 0 }, deletedDebugCaptures: { count: 0, bytes: 0 }, deletedCompletedJobLogs: { count: 0, bytes: 0 }, skipped: 0 }) }
+
+  return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { message: `Unmocked sanitized route: ${method} ${url.pathname}` } }) })
+}
+
+function json(route: Route, body: unknown) { return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) }) }
+function page(route: Route, data: readonly unknown[]) { return json(route, { data, pagination: { page: 1, pageSize: 25, total: data.length } }) }
+function storage() { return { databaseAvailable: true, objectStoreReady: true, accounts: 1, articles: 2, albums: 0, jobs: 1, objects: 2, objectBytes: 84 } }
+function preferences() { return { sync: { range: 'all', pageDelay: 1, jitter: 0, pageSize: 20, incremental: true, unsafePacingSaved: false }, download: { concurrency: 2, forceContent: false, metadataOverridesContent: false }, export: { namingTemplate: '{title}', maximumNameBytes: 180, collisionPolicy: 'suffix', excelIncludeContent: true, jsonIncludeContent: true, jsonIncludeComments: false, htmlIncludeComments: false }, display: { noColor: false, ascii: false, plain: false, hideDeleted: false, language: 'en' }, proxy: { directFirst: true, fallbackEnabled: false } } }
+function gc() { return { id: 'gc-fixture', generatedAt: now, expiresAt: '2026-07-24T10:30:00.000Z', unreferencedObjects: { count: 1, bytes: 42 }, temporaryFiles: { count: 0, bytes: 0 }, expiredDebugCaptures: { count: 0, bytes: 0 }, completedJobLogs: { count: 0, bytes: 0 }, confirmation: 'apply-gc-fixture' } }

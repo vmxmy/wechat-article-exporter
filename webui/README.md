@@ -12,11 +12,15 @@ pnpm run astryx:doctor
 pnpm run build
 pnpm run sync:go-assets
 pnpm run verify:go-assets
+pnpm exec playwright install --with-deps chromium
+pnpm run e2e
 ```
 
 `pnpm run build` writes fingerprinted files to `dist/assets/` and Vite's embed-facing manifest to `dist/.vite/manifest.json`. `pnpm run sync:go-assets` atomically copies that exact tree to the version-controlled `cli/internal/web/assets/` directory. `pnpm run verify:go-assets` fails when the checked-in embed tree is missing or differs from `dist`; run it after every frontend build before committing assets.
 
 Release builds compile only the committed Go asset tree with `//go:embed`; Node and pnpm are not required by an end user or release archive consumer. CI rebuilds the WebUI from the lockfile and rejects stale generated assets before it builds Go binaries.
+
+`pnpm run e2e` serves the SPA only on `127.0.0.1` and intercepts every API call with deterministic sanitized fixtures. The fixture route blocks non-loopback requests, contains no real WeChat account, article, QR, cookie, or filesystem data, and verifies the login, account/article selection, job control, export, settings/storage, and failure-state journeys.
 
 ## API boundary
 

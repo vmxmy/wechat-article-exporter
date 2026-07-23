@@ -20,6 +20,8 @@ logs
 
 # Misc
 .DS_Store
+.playwright-report/
+.playwright-test-results/
 .fleet
 .idea
 debug
