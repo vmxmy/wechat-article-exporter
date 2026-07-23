@@ -92,6 +92,23 @@ test('advanced article query and export handoff preserve typed local selections'
   await expectOnlyLoopbackRequests(page)
 })
 
+test('selected album export handoff queues an opaque album selection', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/albums')
+  const exportButton = page.getByRole('button', { name: 'Export selected album' })
+  await expect(exportButton).toBeDisabled()
+  await page.getByRole('checkbox', { name: 'Select album-fixture-1' }).check()
+  await expect(exportButton).toBeEnabled()
+  await exportButton.click()
+  await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Selection: Album album-fixture-1' })).toBeVisible()
+  await page.getByRole('button', { name: 'Authorize default directory' }).click()
+  await page.getByRole('button', { name: 'Queue export' }).click()
+  await expect.poll(() => fixture.exports.length).toBe(1)
+  expect(JSON.parse(fixture.exports[0])).toMatchObject({ selection: { kind: 'album', albumId: 'album-fixture-1' } })
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('saved queries are created, updated, and deleted with scoped confirmation', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/saved-queries')
