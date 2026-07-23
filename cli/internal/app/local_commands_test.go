@@ -613,10 +613,27 @@ func TestResourceDownloadDiscoversStoredArticleResources(t *testing.T) {
 		t.Fatal(err)
 	}
 	job, err := runtime.Start(context.Background(), domain.DownloadRequest{
-		Kind: "resources", ArticleIDs: []domain.ArticleID{"article-a"},
+		Kind: "resources", ArticleIDs: []domain.ArticleID{"article-a"}, Force: true,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	items, err := applicationAdapter.active.Jobs.ListItems(context.Background(), job.ID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("resource job items=%#v err=%v", items, err)
+	}
+	var queued struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(items[0].Key), &queued); err != nil {
+		t.Fatal(err)
+	}
+	var resourceRequest download.ResourceRequest
+	if err := json.Unmarshal(queued.Payload, &resourceRequest); err != nil {
+		t.Fatal(err)
+	}
+	if !resourceRequest.Force {
+		t.Fatalf("discovered resource request lost force flag: %#v", resourceRequest)
 	}
 	final, err := runtime.Run(context.Background(), job.ID)
 	if err != nil || final.State != domain.JobCompleted {

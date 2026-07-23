@@ -95,6 +95,26 @@ func TestRecordDebugIncidentAndMissingResource(t *testing.T) {
 	}
 }
 
+func TestArticleResourceAvailabilityCountsPersistedMappings(t *testing.T) {
+	database := openContentDatabase(t)
+	seedContentArticle(t, database)
+	available := objects.Object{Digest: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", Size: 3, MediaType: "image/png"}
+	if _, err := database.CommitResource(context.Background(), "article-a", "https://mmbiz.qpic.cn/available.png", "image", 0, available); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.MarkResourceMissing(context.Background(), "article-a", "https://mmbiz.qpic.cn/missing.png", "image", 1); err != nil {
+		t.Fatal(err)
+	}
+
+	availability, err := database.ArticleResourceAvailability(context.Background(), "article-a")
+	if err != nil || availability.ArticleID != "article-a" || availability.Total != 2 || availability.Available != 1 {
+		t.Fatalf("ArticleResourceAvailability() = %#v, %v", availability, err)
+	}
+	if _, err := database.ArticleResourceAvailability(context.Background(), "unknown"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("unknown article error = %v", err)
+	}
+}
+
 func openContentDatabase(t *testing.T) *Database {
 	t.Helper()
 	database, err := Open(context.Background(), OpenOptions{

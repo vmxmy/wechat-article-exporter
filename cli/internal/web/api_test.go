@@ -12,6 +12,7 @@ import (
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
 
@@ -84,6 +85,36 @@ func TestJobDetailAPIUsesSafeBoundedWorkspaceDTO(t *testing.T) {
 	response = get(t, client, base+"/api/v1/jobs/"+jobID+"/detail?limit=1")
 	if response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("detail query status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "invalid_argument")
+}
+
+func TestArticleResourcesAPIProvidesOnlySafeCompletenessDTO(t *testing.T) {
+	app := &apiApplication{resourceAvailability: library.ArticleResourceAvailability{Total: 2, Available: 1}}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+
+	response := get(t, client, base+"/api/v1/articles/article-1/resources")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("resources status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	body := readResponse(t, response)
+	for _, forbidden := range []string{"resourceId", "sourceUrl", "originalUrl", "objectDigest", "digest", "mediaType", "https://"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("resources API leaked %q: %s", forbidden, body)
+		}
+	}
+	var value application.WorkspaceArticleResources
+	if err := json.Unmarshal([]byte(body), &value); err != nil || value != (application.WorkspaceArticleResources{ArticleID: "article-1", Total: 2, Available: 1, Missing: 1}) {
+		t.Fatalf("resources DTO=%#v err=%v", value, err)
+	}
+	if app.resourceArticleID != "article-1" {
+		t.Fatalf("resource lookup article ID=%q", app.resourceArticleID)
+	}
+
+	response = get(t, client, base+"/api/v1/articles/article-1/resources?unexpected=1")
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("resources query status=%d body=%s", response.StatusCode, readResponse(t, response))
 	}
 	assertAPIError(t, response, "invalid_argument")
 }
@@ -499,38 +530,40 @@ func assertAPIError(t *testing.T, response *http.Response, code string) {
 
 type apiApplication struct {
 	testApplication
-	runtime          domain.RuntimeStatus
-	session          wechat.Session
-	accounts         domain.Page[domain.Account]
-	articles         domain.Page[domain.Article]
-	albums           domain.Page[domain.Album]
-	jobs             domain.Page[domain.Job]
-	saved            []domain.SavedArticleQuery
-	job              domain.Job
-	jobDetail        application.WorkspaceJobDetail
-	article          domain.Article
-	accountsErr      error
-	accountQuery     domain.AccountQuery
-	articleQuery     domain.ArticleQuery
-	jobQuery         domain.JobQuery
-	loginFlow        wechat.LoginFlow
-	poll             wechat.PollResult
-	completed        wechat.Session
-	loginSessionID   string
-	account          domain.Account
-	searchAccounts   domain.Page[domain.Account]
-	searchQuery      domain.AccountQuery
-	savedAccount     domain.Account
-	updatedAccount   domain.Account
-	deletedAccounts  []domain.AccountID
-	syncRequest      domain.SynchronizeAccountRequest
-	downloadRequests []domain.DownloadRequest
-	albumRequest     application.WorkspaceAlbumTraversalRequest
-	albumBatch       bool
-	loggedOut        bool
-	savedName        string
-	savedQuery       domain.ArticleQuery
-	deletedSavedName string
+	runtime              domain.RuntimeStatus
+	session              wechat.Session
+	accounts             domain.Page[domain.Account]
+	articles             domain.Page[domain.Article]
+	albums               domain.Page[domain.Album]
+	jobs                 domain.Page[domain.Job]
+	saved                []domain.SavedArticleQuery
+	job                  domain.Job
+	jobDetail            application.WorkspaceJobDetail
+	article              domain.Article
+	resourceAvailability library.ArticleResourceAvailability
+	resourceArticleID    domain.ArticleID
+	accountsErr          error
+	accountQuery         domain.AccountQuery
+	articleQuery         domain.ArticleQuery
+	jobQuery             domain.JobQuery
+	loginFlow            wechat.LoginFlow
+	poll                 wechat.PollResult
+	completed            wechat.Session
+	loginSessionID       string
+	account              domain.Account
+	searchAccounts       domain.Page[domain.Account]
+	searchQuery          domain.AccountQuery
+	savedAccount         domain.Account
+	updatedAccount       domain.Account
+	deletedAccounts      []domain.AccountID
+	syncRequest          domain.SynchronizeAccountRequest
+	downloadRequests     []domain.DownloadRequest
+	albumRequest         application.WorkspaceAlbumTraversalRequest
+	albumBatch           bool
+	loggedOut            bool
+	savedName            string
+	savedQuery           domain.ArticleQuery
+	deletedSavedName     string
 }
 
 func (app *apiApplication) BeginLogin(_ context.Context, id string) (wechat.LoginFlow, error) {
@@ -617,6 +650,12 @@ func (app *apiApplication) QueryArticles(_ context.Context, query domain.Article
 }
 func (app *apiApplication) GetArticle(context.Context, domain.ArticleID) (domain.Article, error) {
 	return app.article, nil
+}
+func (app *apiApplication) ArticleResourceAvailability(_ context.Context, id domain.ArticleID) (library.ArticleResourceAvailability, error) {
+	app.resourceArticleID = id
+	availability := app.resourceAvailability
+	availability.ArticleID = id
+	return availability, nil
 }
 func (app *apiApplication) QueryAlbums(context.Context, domain.AlbumQuery) (domain.Page[domain.Album], error) {
 	return app.albums, nil

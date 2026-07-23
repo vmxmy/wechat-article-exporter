@@ -53,6 +53,16 @@ type ArticleResourceRecord struct {
 	OriginalURL string
 }
 
+// ArticleResourceAvailability is the aggregate resource state for one
+// article. It intentionally contains no resource identifiers, remote URLs,
+// object digests, or media types so application adapters can safely project
+// it into their own DTOs.
+type ArticleResourceAvailability struct {
+	ArticleID domain.ArticleID
+	Total     int
+	Available int
+}
+
 type ExportSnapshotRecord struct {
 	Article   domain.Article
 	Content   ContentVersion
@@ -351,6 +361,25 @@ WHERE a.profile_id=? AND ar.article_id=? ORDER BY ar.role, ar.ordinal, ar.resour
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// ArticleResourceAvailability returns the persisted resource counts for one
+// profile-scoped article. An absent article is distinguished from an article
+// that simply has no discovered resources.
+func (database *Database) ArticleResourceAvailability(ctx context.Context, articleID domain.ArticleID) (ArticleResourceAvailability, error) {
+	var exists int
+	if err := database.db.QueryRowContext(ctx, `SELECT 1 FROM articles WHERE profile_id=? AND id=?`, database.profileID, articleID).Scan(&exists); err != nil {
+		return ArticleResourceAvailability{}, err
+	}
+
+	availability := ArticleResourceAvailability{ArticleID: articleID}
+	err := database.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN r.status='available' THEN 1 ELSE 0 END), 0)
+FROM article_resources ar JOIN resources r ON r.id=ar.resource_id
+WHERE ar.article_id=? AND r.profile_id=?`, articleID, database.profileID).Scan(&availability.Total, &availability.Available)
+	if err != nil {
+		return ArticleResourceAvailability{}, err
+	}
+	return availability, nil
 }
 
 func (database *Database) CommitResource(

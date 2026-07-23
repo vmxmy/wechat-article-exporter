@@ -237,6 +237,24 @@ type WorkspaceArticleLookup interface {
 	GetArticle(context.Context, domain.ArticleID) (domain.Article, error)
 }
 
+// WorkspaceArticleResourceLookup is the narrow application capability used to
+// read resource-completeness aggregates without exposing individual resource
+// records to local presentation adapters.
+type WorkspaceArticleResourceLookup interface {
+	ArticleResourceAvailability(context.Context, domain.ArticleID) (library.ArticleResourceAvailability, error)
+}
+
+// WorkspaceArticleResources is the browser-safe aggregate resource state for
+// one article. It deliberately omits resource IDs, URLs, digests, and media
+// types.
+type WorkspaceArticleResources struct {
+	ArticleID domain.ArticleID `json:"articleId"`
+	Total     int              `json:"total"`
+	Available int              `json:"available"`
+	Missing   int              `json:"missing"`
+	Complete  bool             `json:"complete"`
+}
+
 // WorkspaceAlbumController is the typed application capability for the
 // persisted album workflow. Both variants return the durable album_sync job.
 type WorkspaceAlbumController interface {
@@ -256,6 +274,7 @@ type WorkspaceReader interface {
 	Jobs(context.Context, WorkspaceJobQuery) (WorkspacePage[domain.Job], error)
 	JobDetails(context.Context, domain.JobID) (WorkspaceJobDetail, error)
 	ArticlePreview(context.Context, domain.ArticleID) (WorkspaceArticlePreview, error)
+	ArticleResources(context.Context, domain.ArticleID) (WorkspaceArticleResources, error)
 }
 
 // WorkspaceSavedQueryController is the mutable saved-query contract exposed
@@ -473,6 +492,27 @@ func (workspace *Workspace) ArticlePreview(ctx context.Context, id domain.Articl
 		return WorkspaceArticlePreview{}, workspaceError(err)
 	}
 	return WorkspaceArticlePreview{ArticleID: article.ID, Title: article.Title, Available: article.HasContent}, nil
+}
+
+func (workspace *Workspace) ArticleResources(ctx context.Context, id domain.ArticleID) (WorkspaceArticleResources, error) {
+	id = domain.ArticleID(strings.TrimSpace(string(id)))
+	if id == "" {
+		return WorkspaceArticleResources{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "article identifier is required"}
+	}
+	resources, ok := workspace.application.(WorkspaceArticleResourceLookup)
+	if !ok {
+		return WorkspaceArticleResources{}, workspaceError(fmt.Errorf("article resources: %w", ErrUnavailable))
+	}
+	availability, err := resources.ArticleResourceAvailability(ctx, id)
+	if err != nil {
+		return WorkspaceArticleResources{}, workspaceError(err)
+	}
+	missing := availability.Total - availability.Available
+	if missing < 0 {
+		return WorkspaceArticleResources{}, workspaceError(fmt.Errorf("article resources: invalid availability aggregate"))
+	}
+	return WorkspaceArticleResources{ArticleID: id, Total: availability.Total, Available: availability.Available,
+		Missing: missing, Complete: availability.Total > 0 && availability.Available == availability.Total}, nil
 }
 
 func (workspace *Workspace) RenderArticlePreview(ctx context.Context, id domain.ArticleID) (WorkspaceRenderedArticlePreview, error) {

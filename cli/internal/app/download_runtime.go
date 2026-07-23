@@ -313,7 +313,7 @@ func (runtime *localDownloadRuntime) Start(ctx context.Context, request domain.D
 						Role: "resource", Ordinal: ordinal, Force: request.Force})
 				}
 			} else {
-				resources, discoverErr := runtime.discoverArticleResources(ctx, article)
+				resources, discoverErr := runtime.discoverArticleResources(ctx, article, request.Force)
 				if discoverErr != nil {
 					return domain.Job{}, discoverErr
 				}
@@ -346,6 +346,7 @@ func (runtime *localDownloadRuntime) Start(ctx context.Context, request domain.D
 func (runtime *localDownloadRuntime) discoverArticleResources(
 	ctx context.Context,
 	article domain.Article,
+	force bool,
 ) ([]download.ResourceRequest, error) {
 	content, err := runtime.library.CurrentContent(ctx, article.ID, "html")
 	if err != nil {
@@ -363,7 +364,7 @@ func (runtime *localDownloadRuntime) discoverArticleResources(
 	requests := make([]download.ResourceRequest, 0, len(result.Resources))
 	for ordinal, resource := range result.Resources {
 		requests = append(requests, download.ResourceRequest{
-			ArticleID: article.ID, URL: resource.URL, Role: string(resource.Kind), Ordinal: ordinal,
+			ArticleID: article.ID, URL: resource.URL, Role: string(resource.Kind), Ordinal: ordinal, Force: force,
 		})
 	}
 	if len(requests) == 0 {

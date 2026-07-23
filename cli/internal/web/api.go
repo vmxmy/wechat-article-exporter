@@ -85,6 +85,15 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		if server.exportRead(writer, request) {
 			return
 		}
+		if suffix, ok := strings.CutPrefix(request.URL.Path, "/api/v1/articles/"); ok {
+			articleID, endpoint, hasEndpoint := strings.Cut(suffix, "/")
+			if !hasEndpoint || endpoint != "resources" || articleID == "" || strings.Contains(articleID, "/") {
+				server.apiError(writer, http.StatusNotFound, "not_found", "workspace resource was not found")
+				return
+			}
+			server.articleResources(writer, request, domain.ArticleID(articleID))
+			return
+		}
 		if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/jobs/"); ok {
 			jobID, suffix, hasSuffix := strings.Cut(id, "/")
 			if hasSuffix && suffix != "detail" {
@@ -179,6 +188,19 @@ func (server *Server) articlePreview(writer http.ResponseWriter, request *http.R
 	}
 	if value.Available {
 		value.DocumentURL = "/api/v1/articles/preview/document?articleId=" + url.QueryEscape(string(value.ArticleID))
+	}
+	writeAPI(writer, http.StatusOK, value)
+}
+
+func (server *Server) articleResources(writer http.ResponseWriter, request *http.Request, articleID domain.ArticleID) {
+	if len(request.URL.Query()) != 0 {
+		server.apiError(writer, http.StatusBadRequest, "invalid_argument", "article resources does not accept query parameters")
+		return
+	}
+	value, err := server.workspace.ArticleResources(request.Context(), articleID)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
 	}
 	writeAPI(writer, http.StatusOK, value)
 }

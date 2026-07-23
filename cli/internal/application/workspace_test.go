@@ -17,15 +17,17 @@ import (
 )
 
 type workspaceLibrary struct {
-	accounts      domain.Page[domain.Account]
-	articles      domain.Page[domain.Article]
-	albums        domain.Page[domain.Album]
-	storage       domain.StorageStatus
-	saved         []domain.SavedArticleQuery
-	accountQuery  domain.AccountQuery
-	articleQuery  domain.ArticleQuery
-	albumQuery    domain.AlbumQuery
-	accountsError error
+	accounts        domain.Page[domain.Account]
+	articles        domain.Page[domain.Article]
+	albums          domain.Page[domain.Album]
+	storage         domain.StorageStatus
+	saved           []domain.SavedArticleQuery
+	accountQuery    domain.AccountQuery
+	articleQuery    domain.ArticleQuery
+	albumQuery      domain.AlbumQuery
+	accountsError   error
+	availability    library.ArticleResourceAvailability
+	availabilityErr error
 }
 
 func (library *workspaceLibrary) GetArticle(_ context.Context, id domain.ArticleID) (domain.Article, error) {
@@ -35,6 +37,12 @@ func (library *workspaceLibrary) GetArticle(_ context.Context, id domain.Article
 		}
 	}
 	return domain.Article{}, errors.New("article missing")
+}
+
+func (repository *workspaceLibrary) ArticleResourceAvailability(_ context.Context, id domain.ArticleID) (library.ArticleResourceAvailability, error) {
+	availability := repository.availability
+	availability.ArticleID = id
+	return availability, repository.availabilityErr
 }
 
 func (library *workspaceLibrary) QueryAccounts(_ context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
@@ -162,6 +170,34 @@ func TestWorkspaceReadFacadeUsesApplicationAndReturnsSafeDTOs(t *testing.T) {
 	jobsPage, err := workspace.Jobs(context.Background(), WorkspaceJobQuery{Kind: " export ", States: []domain.JobState{domain.JobRunning}, Page: WorkspacePageRequest{Limit: 20}})
 	if err != nil || jobsPage.Total != 1 || manager.query.Kind != "export" || !reflect.DeepEqual(manager.query.States, []domain.JobState{domain.JobRunning}) {
 		t.Fatalf("Jobs() = %#v, query=%#v, err=%v", jobsPage, manager.query, err)
+	}
+}
+
+func TestWorkspaceArticleResourcesReturnsSafeCompletenessAggregate(t *testing.T) {
+	service := New(Options{Library: &workspaceLibrary{availability: library.ArticleResourceAvailability{Total: 3, Available: 2}}})
+	workspace := NewWorkspace(service)
+
+	resources, err := workspace.ArticleResources(context.Background(), " article-1 ")
+	if err != nil || resources != (WorkspaceArticleResources{ArticleID: "article-1", Total: 3, Available: 2, Missing: 1}) {
+		t.Fatalf("ArticleResources() = %#v, %v", resources, err)
+	}
+
+	completeService := New(Options{Library: &workspaceLibrary{availability: library.ArticleResourceAvailability{Total: 2, Available: 2}}})
+	complete, err := NewWorkspace(completeService).ArticleResources(context.Background(), "article-1")
+	if err != nil || !complete.Complete {
+		t.Fatalf("complete ArticleResources() = %#v, %v", complete, err)
+	}
+
+	emptyService := New(Options{Library: &workspaceLibrary{availability: library.ArticleResourceAvailability{}}})
+	empty, err := NewWorkspace(emptyService).ArticleResources(context.Background(), "article-1")
+	if err != nil || empty.Complete || empty.Missing != 0 {
+		t.Fatalf("empty ArticleResources() = %#v, %v", empty, err)
+	}
+
+	_, err = workspace.ArticleResources(context.Background(), " ")
+	var workspaceErr *WorkspaceError
+	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInvalidArgument {
+		t.Fatalf("empty ArticleResources error = %v", err)
 	}
 }
 

@@ -317,6 +317,18 @@ func (service *Service) GetArticle(ctx context.Context, id domain.ArticleID) (do
 	return articles.GetArticle(ctx, id)
 }
 
+// ArticleResourceAvailability exposes only aggregate resource state. The
+// concrete library retains all resource URLs and object metadata.
+func (service *Service) ArticleResourceAvailability(ctx context.Context, id domain.ArticleID) (library.ArticleResourceAvailability, error) {
+	resources, ok := service.library.(interface {
+		ArticleResourceAvailability(context.Context, domain.ArticleID) (library.ArticleResourceAvailability, error)
+	})
+	if !ok {
+		return library.ArticleResourceAvailability{}, fmt.Errorf("article resource availability: %w", ErrUnavailable)
+	}
+	return resources.ArticleResourceAvailability(ctx, id)
+}
+
 func (service *Service) QueryAccounts(ctx context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
 	if service.library == nil {
 		return domain.Page[domain.Account]{Items: []domain.Account{}, Offset: query.Offset, Limit: query.Limit}, nil
