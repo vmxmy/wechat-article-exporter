@@ -80,12 +80,15 @@ func TestUploadStagingEnforcesLimitsAndExpiresWithoutLeakingBackendErrors(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The preceding oversize input was staged through the bounded reader and
+	// then cleaned up. Measure expiry cleanup independently.
+	backend.deleteCount = 0
 	now = now.Add(time.Minute)
 	if _, _, err := service.Consume(context.Background(), receipt.Handle); err == nil || !strings.Contains(err.Error(), "expired") {
 		t.Fatalf("expired Consume() error=%v", err)
 	}
-	if backend.deleteCount != 2 {
-		t.Fatalf("expired delete count=%d, want 2", backend.deleteCount)
+	if backend.deleteCount != 1 {
+		t.Fatalf("expired delete count=%d, want 1", backend.deleteCount)
 	}
 }
 
