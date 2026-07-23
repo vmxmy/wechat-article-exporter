@@ -80,6 +80,106 @@ func TestLocalBrowserWorkspaceSharesTemporaryProfileWithCobraAndTUI(t *testing.T
 	assertWorkspaceShowsAccount(t, instance.core, "Browser updated")
 }
 
+func TestLocalBrowserWorkspaceReadsAndCancelsJobCreatedThroughStdioMCP(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	var mcpInput, mcpOutput, mcpLogs bytes.Buffer
+	launcher := &recordingWorkerLauncher{}
+	instance, err := NewWithDependencies(ctx, &mcpInput, &mcpOutput, &mcpLogs, Dependencies{
+		PathOptions: profiles.PathOptions{Portable: true, PortableRoot: root},
+		Secrets:     secrets.NewMemoryStore(),
+		Worker:      launcher,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = instance.Close() })
+
+	account, err := instance.core.SaveAccount(ctx, domain.Account{FakeID: "mcp-fixture", Name: "MCP fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpInput.WriteString(strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"browser-parity","version":"1"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sync.account","arguments":{"accountId":` + mustJSON(t, string(account.ID)) + `}}}`,
+	}, "\n") + "\n")
+	if err := instance.Execute(ctx, []string{"mcp", "serve", "--transport", "stdio"}); err != nil {
+		t.Fatalf("MCP serve: %v logs=%s", err, mcpLogs.String())
+	}
+	jobID := mcpCreatedJobID(t, mcpOutput.String())
+	if launcher.calls != 1 || len(launcher.args) != 3 || launcher.args[0] != "job" || launcher.args[1] != "worker" || launcher.args[2] != jobID {
+		t.Fatalf("MCP job worker launch = calls=%d args=%#v", launcher.calls, launcher.args)
+	}
+
+	server, client, base := startLocalBrowserWorkspace(t, instance.core)
+	t.Cleanup(func() { _ = server.Close() })
+	jobs := decodeBrowserJobs(t, getLocalBrowser(t, client, base+"/api/v1/jobs?state=queued&limit=20"))
+	if len(jobs.Items) != 1 || string(jobs.Items[0].ID) != jobID || jobs.Items[0].Kind != "account_sync" || jobs.Items[0].State != domain.JobQueued {
+		t.Fatalf("browser jobs after MCP create = %#v", jobs)
+	}
+
+	csrf := localBrowserCSRF(t, client, base)
+	response := postLocalBrowserJSON(t, client, base+"/api/v1/jobs/"+jobID+"/cancel", csrf,
+		`{"confirm":"cancel-job:`+jobID+`"}`, http.MethodPost)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("browser job cancel status=%d body=%s", response.StatusCode, body)
+	}
+	var cancelled struct {
+		Data domain.Job `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&cancelled); err != nil {
+		t.Fatal(err)
+	}
+	if string(cancelled.Data.ID) != jobID || cancelled.Data.State != domain.JobCancelled {
+		t.Fatalf("browser cancellation = %#v", cancelled.Data)
+	}
+
+	job, err := instance.core.GetJob(ctx, domain.JobID(jobID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != domain.JobCancelled {
+		t.Fatalf("application job after browser cancellation = %#v", job)
+	}
+}
+
+func mustJSON(t *testing.T, value string) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
+}
+
+func mcpCreatedJobID(t *testing.T, output string) string {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		var response struct {
+			ID     int `json:"id"`
+			Result struct {
+				IsError           bool `json:"isError"`
+				StructuredContent struct {
+					JobID string `json:"jobId"`
+				} `json:"structuredContent"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(line), &response); err != nil {
+			t.Fatalf("decode MCP response %q: %v", line, err)
+		}
+		if response.ID == 2 {
+			if response.Result.IsError || response.Result.StructuredContent.JobID == "" {
+				t.Fatalf("MCP sync.account response = %s", line)
+			}
+			return response.Result.StructuredContent.JobID
+		}
+	}
+	t.Fatalf("MCP sync.account response missing from %s", output)
+	return ""
+}
+
 func decodeCobraAccount(t *testing.T, output []byte) domain.Account {
 	t.Helper()
 	var envelope struct {
@@ -157,6 +257,20 @@ func decodeBrowserAccounts(t *testing.T, body string) domain.Page[domain.Account
 		t.Fatal(err)
 	}
 	return domain.Page[domain.Account]{Items: payload.Items, Total: payload.Total, Offset: payload.Offset, Limit: payload.Limit}
+}
+
+func decodeBrowserJobs(t *testing.T, body string) domain.Page[domain.Job] {
+	t.Helper()
+	var payload struct {
+		Items  []domain.Job `json:"items"`
+		Total  int          `json:"total"`
+		Offset int          `json:"offset"`
+		Limit  int          `json:"limit"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatal(err)
+	}
+	return domain.Page[domain.Job]{Items: payload.Items, Total: payload.Total, Offset: payload.Offset, Limit: payload.Limit}
 }
 
 func localBrowserCSRF(t *testing.T, client *http.Client, base string) string {
