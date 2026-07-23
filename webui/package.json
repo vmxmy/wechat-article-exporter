@@ -16,7 +16,7 @@
     "build": "pnpm run theme:build && pnpm run typecheck && vite build && pnpm run verify:assets",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint . --max-warnings=0",
-    "theme:build": "astryx theme build src/theme/workspaceTheme.source.ts --out src/styles/theme.css",
+    "theme:build": "astryx theme build src/theme/workspaceTheme.source.ts --out src/styles/theme.css && node scripts/normalize-theme-build.mjs",
     "astryx:doctor": "astryx doctor",
     "verify:assets": "node scripts/verify-assets.mjs",
     "sync:go-assets": "node scripts/sync-go-assets.mjs",
