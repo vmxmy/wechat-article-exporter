@@ -63,10 +63,11 @@ type ExportPreferences struct {
 }
 
 type DisplayPreferences struct {
-	NoColor     bool `json:"noColor"`
-	ASCII       bool `json:"ascii"`
-	Plain       bool `json:"plain"`
-	HideDeleted bool `json:"hideDeleted"`
+	NoColor     bool   `json:"noColor"`
+	ASCII       bool   `json:"ascii"`
+	Plain       bool   `json:"plain"`
+	HideDeleted bool   `json:"hideDeleted"`
+	Language    string `json:"language,omitempty"`
 }
 
 type ProxyPreferences struct {
@@ -288,6 +289,9 @@ func validateConfig(configuration ProfileConfig) error {
 	}
 	if preferences.Export.MaximumNameBytes < 32 || preferences.Export.MaximumNameBytes > 255 {
 		return errors.New("export maximum name bytes must be between 32 and 255")
+	}
+	if preferences.Display.Language != "" && preferences.Display.Language != "en" && preferences.Display.Language != "zh-CN" {
+		return errors.New("display language must be en or zh-CN")
 	}
 	allowedCollision := map[string]struct{}{"fail": {}, "skip": {}, "replace": {}, "suffix": {}}
 	if _, ok := allowedCollision[preferences.Export.CollisionPolicy]; !ok {

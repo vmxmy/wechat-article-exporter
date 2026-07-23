@@ -718,6 +718,7 @@ func (a *App) runDashboard(ctx context.Context) error {
 		NoColor:     configuration.Preferences.Display.NoColor,
 		ASCII:       configuration.Preferences.Display.ASCII,
 		Plain:       configuration.Preferences.Display.Plain,
+		Language:    configuration.Preferences.Display.Language,
 		PageSize:    configuration.Preferences.Sync.PageSize,
 	}
 	runner := a.workspaceRunner

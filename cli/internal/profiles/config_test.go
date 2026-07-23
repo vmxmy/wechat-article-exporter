@@ -82,7 +82,7 @@ func TestConfigStoreRoundTripsAllRetainedPreferences(t *testing.T) {
 			CollisionPolicy: "suffix", ExcelIncludeContent: false, JSONIncludeContent: false,
 			JSONIncludeComments: false, HTMLIncludeComments: false,
 		},
-		Display: DisplayPreferences{NoColor: true, ASCII: true, Plain: true, HideDeleted: false},
+		Display: DisplayPreferences{NoColor: true, ASCII: true, Plain: true, HideDeleted: false, Language: "zh-CN"},
 		Proxy:   ProxyPreferences{DirectFirst: false, FallbackEnabled: true},
 	}
 	if err := store.Write(configuration); err != nil {
@@ -101,6 +101,15 @@ func TestConfigStoreRoundTripsAllRetainedPreferences(t *testing.T) {
 	}
 	if read.Preferences.DownloadConcurrency != 9 || read.Preferences.ExportRoot != "/tmp/exports" || !read.Preferences.NoColor {
 		t.Fatalf("compatibility preferences were not normalized: %#v", read.Preferences)
+	}
+}
+
+func TestConfigStoreRejectsUnsupportedDisplayLanguage(t *testing.T) {
+	store := NewConfigStore(filepath.Join(t.TempDir(), "config.json"))
+	configuration := DefaultConfig("profile-a")
+	configuration.Preferences.Display.Language = "fr"
+	if err := store.Write(configuration); err == nil {
+		t.Fatal("Write() accepted an unsupported display language")
 	}
 }
 

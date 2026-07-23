@@ -64,7 +64,7 @@ func TestNoSubcommandRoutesInteractiveStartupToFullWorkspaceWithSavedDisplayPref
 	applicationAdapter, _, _ := newTestApp(t)
 	configuration := profiles.DefaultConfig(string(applicationAdapter.active.Profile.ID))
 	configuration.Preferences.Sync.PageSize = 23
-	configuration.Preferences.Display = profiles.DisplayPreferences{NoColor: true, ASCII: true, Plain: true}
+	configuration.Preferences.Display = profiles.DisplayPreferences{NoColor: true, ASCII: true, Plain: true, Language: "zh-CN"}
 	if err := profiles.NewConfigStore(applicationAdapter.active.Profile.Paths.Config).Write(configuration); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestNoSubcommandRoutesInteractiveStartupToFullWorkspaceWithSavedDisplayPref
 		called = true
 		if options.Application != applicationAdapter.core || options.Extensions == nil ||
 			options.Input != applicationAdapter.stdin || options.Output != applicationAdapter.stdout ||
-			!options.NoColor || !options.ASCII || !options.Plain || options.PageSize != 23 {
+			!options.NoColor || !options.ASCII || !options.Plain || options.Language != "zh-CN" || options.PageSize != 23 {
 			t.Fatalf("workspace options = %#v", options)
 		}
 		return nil

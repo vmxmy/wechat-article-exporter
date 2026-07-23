@@ -56,6 +56,7 @@ const (
 	inputProxyTarget      inputPurpose = "proxy_target"
 	inputPreferenceKey    inputPurpose = "preference_key"
 	inputPreferenceValue  inputPurpose = "preference_value"
+	inputLanguage         inputPurpose = "language"
 	inputDiagnosticBundle inputPurpose = "diagnostic_bundle"
 )
 
@@ -131,6 +132,7 @@ type actionResultMsg struct {
 	job        domain.Job
 	operation  OperationResult
 	notice     string
+	language   string
 	err        error
 }
 
@@ -222,6 +224,9 @@ func NewWorkspace(options WorkspaceOptions) Model {
 	}
 	if !options.ASCII {
 		options.ASCII = !UnicodeSupported(os.Getenv("LC_ALL"), os.Getenv("LC_CTYPE"), os.Getenv("LANG"))
+	}
+	if options.Language != "zh-CN" {
+		options.Language = "en"
 	}
 	state := defaultWorkspaceState(options.PageSize)
 	model := Model{

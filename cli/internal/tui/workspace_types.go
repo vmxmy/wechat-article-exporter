@@ -140,6 +140,7 @@ type WorkspaceOptions struct {
 	NoColor     bool
 	ASCII       bool
 	Plain       bool
+	Language    string
 	Width       int
 	Height      int
 	PageSize    int

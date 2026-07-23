@@ -484,6 +484,11 @@ func updateWorkspacePreference(configuration *profiles.ProfileConfig, key, value
 			return err
 		}
 		configuration.Preferences.Display.Plain = parsed
+	case "display.language":
+		if value != "en" && value != "zh-CN" {
+			return errors.New("display.language must be en or zh-CN")
+		}
+		configuration.Preferences.Display.Language = value
 	case "proxy.direct-first":
 		parsed, err := parseBool()
 		if err != nil {
@@ -1172,6 +1177,9 @@ func displayPreferenceSummary(preferences profiles.DisplayPreferences) string {
 	}
 	if preferences.Plain {
 		values = append(values, "plain")
+	}
+	if preferences.Language != "" {
+		values = append(values, "language="+preferences.Language)
 	}
 	if preferences.HideDeleted {
 		values = append(values, "hide-deleted")

@@ -54,18 +54,15 @@ func (model Model) View() string {
 func (model Model) renderWorkspace() string {
 	var builder strings.Builder
 	style := theme(model.options.NoColor || model.layout == LayoutPlain)
-	title := "WeChat Article Workspace"
-	if model.options.ASCII {
-		title = "WeChat Article Workspace"
-	}
+	title := model.text("WeChat Article Workspace", "微信公众号文章工作台")
 	builder.WriteString(model.renderComponent(style, style.title.Render(title)))
 	builder.WriteString("\n")
 	builder.WriteString(model.renderComponent(style, model.renderNavigation(style)))
 	builder.WriteString("\n")
 	if model.loading {
-		builder.WriteString(model.renderComponent(style, model.symbol("…", "...")+" Loading local workspace through Application…"))
+		builder.WriteString(model.renderComponent(style, model.symbol("…", "...")+model.text(" Loading local workspace through Application…", " 正在加载本地工作区…")))
 	} else {
-		content := style.title.Render(areaLabel(model.state.Area)) + "\n" + model.renderArea(style)
+		content := style.title.Render(model.areaLabel(model.state.Area)) + "\n" + model.renderArea(style)
 		builder.WriteString(model.renderComponent(style, content))
 	}
 	status := ""
@@ -101,7 +98,7 @@ func (model Model) renderComponent(style workspaceTheme, content string) string 
 func (model Model) renderNavigation(style workspaceTheme) string {
 	labels := make([]string, 0, len(workspaceAreas))
 	for index, area := range workspaceAreas {
-		label := fmt.Sprintf("%d %s", index+1, areaLabel(area))
+		label := fmt.Sprintf("%d %s", index+1, model.areaLabel(area))
 		if area == model.state.Area {
 			label = style.active.Render(" " + label + " ")
 		}
@@ -112,31 +109,6 @@ func (model Model) renderNavigation(style workspaceTheme) string {
 		separator = "\n"
 	}
 	return strings.Join(labels, separator)
-}
-
-func areaLabel(area Area) string {
-	switch area {
-	case AreaHome:
-		return "Home"
-	case AreaAccounts:
-		return "Accounts"
-	case AreaArticles:
-		return "Articles"
-	case AreaAlbums:
-		return "Albums"
-	case AreaJobs:
-		return "Jobs"
-	case AreaExports:
-		return "Exports"
-	case AreaSettings:
-		return "Settings"
-	case AreaStorage:
-		return "Storage"
-	case AreaDiagnostics:
-		return "Diagnostics"
-	default:
-		return string(area)
-	}
 }
 
 func (model Model) renderArea(style workspaceTheme) string {
@@ -166,19 +138,19 @@ func (model Model) renderHome(style workspaceTheme) string {
 		sessionLabel = string(wechat.SessionMissing)
 	}
 	lines := []string{
-		style.title.Render("Profile and session"),
-		"Profile: " + fallback(string(model.runtime.Profile), "default"),
-		"Session: " + sessionLabel,
-		"Offline library: " + yesNo(model.runtime.OfflineReady),
-		fmt.Sprintf("Local records: %d accounts · %d articles · %d albums · %d jobs",
+		style.title.Render(model.text("Profile and session", "配置档案和会话")),
+		model.text("Profile: ", "配置档案：") + fallback(string(model.runtime.Profile), "default"),
+		model.text("Session: ", "会话：") + sessionLabel,
+		model.text("Offline library: ", "离线资料库：") + yesNoLocalized(model, model.runtime.OfflineReady),
+		fmt.Sprintf(model.text("Local records: %d accounts · %d articles · %d albums · %d jobs", "本地记录：%d 个公众号 · %d 篇文章 · %d 个专辑 · %d 个任务"),
 			model.storage.Accounts, model.storage.Articles, model.storage.Albums, model.storage.Jobs),
 	}
 	if model.session.State != wechat.SessionAuthenticated {
-		lines = append(lines, "", style.warning.Render("Online discovery and sync require QR login."),
-			"Press l to log in. Accounts, articles, albums, jobs, exports, storage, and diagnostics remain available offline.")
+		lines = append(lines, "", style.warning.Render(model.text("Online discovery and sync require QR login.", "在线搜索和同步需要扫码登录。")),
+			model.text("Press l to log in. Accounts, articles, albums, jobs, exports, storage, and diagnostics remain available offline.", "按 l 登录。公众号、文章、专辑、任务、导出、存储和诊断仍可离线使用。"))
 	} else {
-		lines = append(lines, "Account: "+fallback(model.session.AccountName, string(model.session.AccountID)),
-			"Session expiry: "+formatTime(model.session.ExpiresAt))
+		lines = append(lines, model.text("Account: ", "账号：")+fallback(model.session.AccountName, string(model.session.AccountID)),
+			model.text("Session expiry: ", "会话过期时间：")+formatTime(model.session.ExpiresAt))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -194,8 +166,8 @@ func (model Model) renderAccounts(style workspaceTheme) string {
 		}
 		rows = append(rows, rowValues(columns, values))
 	}
-	return model.renderTable(style, columns, rows, model.accounts.Offset, model.accounts.Limit, model.accounts.Total,
-		"d discover · / local filter · space select · a actions")
+	return model.renderTable(style, model.formatColumns(columns), rows, model.accounts.Offset, model.accounts.Limit, model.accounts.Total,
+		model.text("d discover · / local filter · space select · a actions", "d 搜索公众号 · / 本地筛选 · 空格选择 · a 操作"))
 }
 
 func (model Model) renderArticles(style workspaceTheme) string {
@@ -209,24 +181,24 @@ func (model Model) renderArticles(style workspaceTheme) string {
 		values := map[string]string{
 			"title": article.Title, "author": article.Author, "published": formatTime(article.PublishedAt),
 			"account": string(article.AccountID), "type": fmt.Sprint(article.MessageType),
-			"content": yesNo(article.HasContent), "comments": yesNo(article.HasComments),
-			"original": yesNo(article.Original), "paid": yesNo(article.Paid), "albums": strings.Join(albums, ", "),
+			"content": yesNoLocalized(model, article.HasContent), "comments": yesNoLocalized(model, article.HasComments),
+			"original": yesNoLocalized(model, article.Original), "paid": yesNoLocalized(model, article.Paid), "albums": strings.Join(albums, ", "),
 			"metrics": fmt.Sprintf("R%d L%d C%d", article.ReadCount, article.LikeCount, article.CommentCount),
 		}
 		rows = append(rows, rowValues(columns, values))
 	}
-	return model.renderTable(style, columns, rows, model.articles.Offset, model.articles.Limit, model.articles.Total,
-		"n single URL · / compound filter · c columns · p safe preview · H local HTML · space multi-select · a bulk actions")
+	return model.renderTable(style, model.formatColumns(columns), rows, model.articles.Offset, model.articles.Limit, model.articles.Total,
+		model.text("n single URL · / compound filter · c columns · p safe preview · H local HTML · space multi-select · a bulk actions", "n 单篇 URL · / 组合筛选 · c 列 · p 安全预览 · H 本地 HTML · 空格多选 · a 批量操作"))
 }
 
 func (model Model) renderAlbums(style workspaceTheme) string {
 	columns := []string{"name", "articles", "paid"}
 	rows := make([][]string, 0, len(model.albums.Items))
 	for _, album := range model.albums.Items {
-		rows = append(rows, []string{album.Name, fmt.Sprint(album.ArticleCount), yesNo(album.Paid)})
+		rows = append(rows, []string{album.Name, fmt.Sprint(album.ArticleCount), yesNoLocalized(model, album.Paid)})
 	}
-	return model.renderTable(style, columns, rows, model.albums.Offset, model.albums.Limit, model.albums.Total,
-		"/ filter · space select · a order/traverse/download/export")
+	return model.renderTable(style, model.formatColumns(columns), rows, model.albums.Offset, model.albums.Limit, model.albums.Total,
+		model.text("/ filter · space select · a order/traverse/download/export", "/ 筛选 · 空格选择 · a 排序/遍历/下载/导出"))
 }
 
 func (model Model) renderJobs(style workspaceTheme) string {
@@ -246,8 +218,8 @@ func (model Model) renderJobs(style workspaceTheme) string {
 		}
 		rows = append(rows, []string{job.Kind, string(job.State), formatCounts(job.Counts), throughput, formatTime(job.UpdatedAt)})
 	}
-	return model.renderTable(style, columns, rows, model.jobs.Offset, model.jobs.Limit, model.jobs.Total,
-		"enter detail/lease · a logs/route health/pause/resume/cancel/retry · r refresh")
+	return model.renderTable(style, model.formatColumns(columns), rows, model.jobs.Offset, model.jobs.Limit, model.jobs.Total,
+		model.text("enter detail/lease · a logs/route health/pause/resume/cancel/retry · r refresh", "Enter 详情/租约 · a 日志/路由/暂停/继续/取消/重试 · r 刷新"))
 }
 
 func (model Model) renderExports(style workspaceTheme) string {
@@ -260,8 +232,8 @@ func (model Model) renderExports(style workspaceTheme) string {
 			fmt.Sprint(item.ProvenanceGeneration), sanitizeTableCell(item.OutputRoot),
 		})
 	}
-	return model.renderTable(style, columns, rows, model.exports.Offset, model.exports.Limit, model.exports.Total,
-		"space select exact export ID · enter detail · a start/manifest/verify/open · r refresh")
+	return model.renderTable(style, model.formatColumns(columns), rows, model.exports.Offset, model.exports.Limit, model.exports.Total,
+		model.text("space select exact export ID · enter detail · a start/manifest/verify/open · r refresh", "空格选择导出 ID · Enter 详情 · a 配置/清单/验证/打开 · r 刷新"))
 }
 
 func (model Model) renderPanel(style workspaceTheme, area Area) string {
@@ -269,7 +241,7 @@ func (model Model) renderPanel(style workspaceTheme, area Area) string {
 	if !ok || panel.Title == "" && panel.Message == "" && len(panel.Lines) == 0 {
 		panel = fallbackPanel(area)
 	}
-	return renderOperation(style, panel) + "\n\n" + style.muted.Render("Press a for available workflows.")
+	return renderOperation(style, panel) + "\n\n" + style.muted.Render(model.text("Press a for available workflows.", "按 a 查看可用操作。"))
 }
 
 func fallbackPanel(area Area) OperationResult {
@@ -293,7 +265,7 @@ func fallbackPanel(area Area) OperationResult {
 
 func (model Model) renderTable(style workspaceTheme, columns []string, rows [][]string, offset, limit, total int, help string) string {
 	if len(rows) == 0 {
-		return style.muted.Render("No local results. " + help)
+		return style.muted.Render(model.text("No local results. ", "没有本地结果。") + help)
 	}
 	if model.layout == LayoutCompact {
 		var builder strings.Builder
@@ -384,12 +356,12 @@ func rowValues(columns []string, values map[string]string) []string {
 func tableWidths(columns []string, rows [][]string, available int) []int {
 	widths := make([]int, len(columns))
 	for index, column := range columns {
-		widths[index] = max(4, utf8.RuneCountInString(column))
+		widths[index] = max(4, lipgloss.Width(column))
 	}
 	for _, row := range rows {
 		for index, value := range row {
 			if index < len(widths) {
-				widths[index] = max(widths[index], min(32, utf8.RuneCountInString(value)))
+				widths[index] = max(widths[index], min(32, lipgloss.Width(value)))
 			}
 		}
 	}
@@ -423,8 +395,8 @@ func joinCells(values []string, widths []int) string {
 		if index < len(values) {
 			value = values[index]
 		}
-		value = truncateRunes(value, width)
-		cells[index] = value + strings.Repeat(" ", max(0, width-utf8.RuneCountInString(value)))
+		value = truncateDisplayWidth(value, width)
+		cells[index] = value + strings.Repeat(" ", max(0, width-lipgloss.Width(value)))
 	}
 	return strings.Join(cells, " │ ")
 }
@@ -453,15 +425,35 @@ func truncateRunes(value string, width int) string {
 	return string(runes[:width-1]) + "…"
 }
 
+func truncateDisplayWidth(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(value) <= width {
+		return value
+	}
+	if width == 1 {
+		return "…"
+	}
+	var builder strings.Builder
+	for _, character := range value {
+		if lipgloss.Width(builder.String()+string(character)+"…") > width {
+			break
+		}
+		builder.WriteRune(character)
+	}
+	return builder.String() + "…"
+}
+
 func (model Model) renderModal() string {
 	style := theme(model.options.NoColor || model.layout == LayoutPlain)
 	content := ""
 	switch model.modal {
 	case modalHelp:
 		content = strings.Join([]string{
-			"Keyboard help", "Tab/Shift-Tab or left/right: navigate", "j/k or arrows: move", "Space: select",
-			"/: filter", "c: columns", "a: actions", "Enter: details", "p: safe preview", "H: local HTML handoff",
-			"[/]: page", "r: refresh", "Esc: close", "Ctrl-C: cancel operation", "q: quit",
+			model.text("Keyboard help", "快捷键帮助"), model.text("Tab/Shift-Tab or left/right: navigate", "Tab/Shift-Tab 或左右键：切换区域"), model.text("j/k or arrows: move", "j/k 或上下键：移动"), model.text("Space: select", "空格：选择"),
+			model.text("/: filter", "/：筛选"), model.text("c: columns", "c：列"), model.text("a: actions", "a：操作"), model.text("Enter: details", "Enter：详情"), model.text("p: safe preview", "p：安全预览"), model.text("H: local HTML handoff", "H：本地 HTML 预览"),
+			model.text("[/]: page", "[/]：翻页"), model.text("r: refresh", "r：刷新"), model.text("Esc: close", "Esc：关闭"), model.text("Ctrl-C: cancel operation", "Ctrl-C：取消操作"), model.text("q: quit", "q：退出"),
 		}, "\n")
 	case modalInput:
 		value := model.input
@@ -471,19 +463,19 @@ func (model Model) renderModal() string {
 				value = strings.Repeat("*", utf8.RuneCountInString(model.input))
 			}
 		}
-		content = model.inputLabel + "\n\n> " + value + model.symbol("▌", "_") + "\n\nEnter submit · Esc cancel"
+		content = model.localizedInputLabel(model.inputMode, model.inputLabel) + "\n\n> " + value + model.symbol("▌", "_") + "\n\n" + model.text("Enter submit · Esc cancel", "Enter 提交 · Esc 取消")
 	case modalConfirm:
 		content = strings.Join([]string{
-			style.warning.Render(model.confirm.Title), "Scope: " + model.confirm.Scope,
-			"Recoverability: " + model.confirm.Recoverability,
-			"", "Type exactly: " + model.confirm.Phrase, "> " + model.confirm.Input + model.symbol("▌", "_"),
+			style.warning.Render(model.localizedConfirmationTitle()), model.text("Scope: ", "范围：") + model.localizedConfirmationScope(),
+			model.text("Recoverability: ", "可恢复性：") + model.localizedConfirmationRecoverability(),
+			"", model.text("Type exactly: ", "请输入：") + model.confirm.Phrase, "> " + model.confirm.Input + model.symbol("▌", "_"),
 		}, "\n")
 		if model.confirm.Error != "" {
 			content += "\n" + style.error.Render(model.confirm.Error)
 		}
 	case modalActions:
 		var builder strings.Builder
-		builder.WriteString("Actions\n\n")
+		builder.WriteString(model.text("Actions", "操作") + "\n\n")
 		for index, action := range model.actions {
 			cursor := "  "
 			if index == model.modalCursor {
@@ -501,7 +493,7 @@ func (model Model) renderModal() string {
 		content = builder.String()
 	case modalColumns:
 		var builder strings.Builder
-		builder.WriteString("Visible columns\n\n")
+		builder.WriteString(model.text("Visible columns", "显示列") + "\n\n")
 		for index, column := range availableColumns(model.columnArea) {
 			cursor := "  "
 			if index == model.modalCursor {
@@ -511,7 +503,7 @@ func (model Model) renderModal() string {
 			if contains(model.state.Columns[model.columnArea], column) {
 				checked = "[x]"
 			}
-			builder.WriteString(fmt.Sprintf("%s%s %s\n", cursor, checked, column))
+			builder.WriteString(fmt.Sprintf("%s%s %s\n", cursor, checked, model.formatColumns([]string{column})[0]))
 		}
 		content = builder.String()
 	case modalDetail, modalOperation:
@@ -608,7 +600,7 @@ func (model Model) footerHelp() string {
 	if model.options.ASCII {
 		appearance += "/ASCII"
 	}
-	return fmt.Sprintf("Tab navigate · j/k move · / filter · space select · a actions · ? help · q quit  [%s · %s]", mode, appearance)
+	return fmt.Sprintf(model.text("Tab navigate · j/k move · / filter · space select · a actions · ? help · q quit  [%s · %s]", "Tab 切换 · j/k 移动 · / 筛选 · 空格选择 · a 操作 · ? 帮助 · q 退出  [%s · %s]"), mode, appearance)
 }
 
 func (model Model) symbol(unicodeValue, asciiValue string) string {
@@ -630,6 +622,16 @@ func yesNo(value bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+func yesNoLocalized(model Model, value bool) string {
+	if model.zh() {
+		if value {
+			return "是"
+		}
+		return "否"
+	}
+	return yesNo(value)
 }
 
 func formatCounts(counts map[string]int) string {

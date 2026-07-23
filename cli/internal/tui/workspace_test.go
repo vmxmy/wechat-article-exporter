@@ -74,6 +74,52 @@ func TestWorkspaceRendersBorderedComponentsAndKeepsPlainLayoutUnboxed(t *testing
 	}
 }
 
+func TestWorkspaceRendersSimplifiedChineseAndSwitchesLanguage(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	extensions := &fakeWorkspaceExtensions{}
+	model := loadedWorkspace(t, app, extensions)
+	model.options.Language = "zh-CN"
+	model.state.Area = AreaArticles
+	view := model.View()
+	for _, fragment := range []string{"微信公众号文章工作台", "文章", "批量操作"} {
+		if !strings.Contains(view, fragment) {
+			t.Fatalf("Chinese view does not contain %q:\n%s", fragment, view)
+		}
+	}
+
+	model.state.Area = AreaSettings
+	next, _ := model.chooseAction(actionItem{Kind: "display_language"})
+	model = next.(Model)
+	if model.inputMode != inputLanguage || model.input != "en" {
+		t.Fatalf("language prompt mode=%q input=%q", model.inputMode, model.input)
+	}
+	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message := runCommand(t, command).(actionResultMsg)
+	model = updateWorkspace(t, model, message)
+	last := extensions.requests[len(extensions.requests)-1]
+	if message.err != nil || model.options.Language != "en" || last.Parameters["key"] != "display.language" || last.Parameters["value"] != "en" {
+		t.Fatalf("language update request=%#v language=%q err=%v", last, model.options.Language, message.err)
+	}
+}
+
+func TestWorkspaceLeavesLanguageUnchangedWhenSavingPreferenceFails(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	extensions := &fakeWorkspaceExtensions{operateErr: errors.New("write preference failed")}
+	model := loadedWorkspace(t, app, extensions)
+	model.options.Language = "en"
+	model.state.Area = AreaSettings
+
+	next, _ := model.chooseAction(actionItem{Kind: "display_language"})
+	model = next.(Model)
+	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	model = updateWorkspace(t, model, runCommand(t, command))
+	if model.options.Language != "en" || model.err != "write preference failed" {
+		t.Fatalf("language=%q err=%q", model.options.Language, model.err)
+	}
+}
+
 func TestWorkspaceArticleSelectionStartsOneDownloadJobForStableIDs(t *testing.T) {
 	app := newFakeWorkspaceApplication()
 	model := loadedWorkspace(t, app, nil)
@@ -426,7 +472,7 @@ func TestWorkspaceAreasExposeAllOpenSpecWorkflows(t *testing.T) {
 		AreaJobs:    {"Show logs and lease", "Pause", "Resume", "Retry", "Route health", "Cancel"},
 		AreaExports: {"Configure export", "Result manifest", "Verify result", "Open output"},
 		AreaSettings: {"List credentials", "Import credential", "Validate credential", "Remove credential", "List proxies", "Add proxy",
-			"Enable proxy", "Disable proxy", "Test proxy", "Remove proxy", "Show preferences", "Set preference"},
+			"Enable proxy", "Disable proxy", "Test proxy", "Remove proxy", "Show preferences", "Set preference", "Switch language"},
 		AreaStorage:     {"Backup", "Restore", "Integrity check", "Garbage collection plan", "Apply garbage collection"},
 		AreaDiagnostics: {"Refresh diagnostics", "Create diagnostic bundle", "Route health"},
 	}
@@ -1021,6 +1067,7 @@ type fakeWorkspaceExtensions struct {
 	opened            int
 	requests          []OperationRequest
 	defaultExportRoot string
+	operateErr        error
 }
 
 func (extensions *fakeWorkspaceExtensions) DefaultExportRoot(context.Context) (string, error) {
@@ -1028,7 +1075,7 @@ func (extensions *fakeWorkspaceExtensions) DefaultExportRoot(context.Context) (s
 }
 
 func (extensions *fakeWorkspaceExtensions) Panel(_ context.Context, area Area) (OperationResult, error) {
-	return OperationResult{Title: areaLabel(area), Message: "fixture panel"}, nil
+	return OperationResult{Title: englishAreaLabel(area), Message: "fixture panel"}, nil
 }
 func (*fakeWorkspaceExtensions) QueryExports(_ context.Context, offset, limit int) (domain.Page[ExportSummary], error) {
 	return domain.Page[ExportSummary]{Items: []ExportSummary{{
@@ -1045,6 +1092,9 @@ func (extensions *fakeWorkspaceExtensions) OpenHTMLPreview(context.Context, doma
 }
 func (extensions *fakeWorkspaceExtensions) Operate(_ context.Context, request OperationRequest) (OperationResult, error) {
 	extensions.requests = append(extensions.requests, request)
+	if extensions.operateErr != nil {
+		return OperationResult{}, extensions.operateErr
+	}
 	return OperationResult{Title: string(request.Kind), Message: "complete"}, nil
 }
 

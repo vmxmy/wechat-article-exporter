@@ -101,6 +101,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.err = typed.err.Error()
 			return model, nil
 		}
+		if typed.language != "" {
+			model.options.Language = typed.language
+		}
 		model.err = ""
 		model.notice = typed.notice
 		if typed.job.ID != "" {
@@ -277,7 +280,7 @@ func (model Model) updateKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return model, nil
 	}
 	if keyMatches(value, model.keys.Actions) {
-		model.actions = model.actionsForArea()
+		model.actions = model.localizeActions(model.actionsForArea())
 		model.modalCursor = 0
 		model.modal = modalActions
 		return model, nil
@@ -680,6 +683,21 @@ func (model Model) submitInput() (tea.Model, tea.Cmd) {
 		parameters["value"] = value
 		model.closeModal()
 		return model.executeExtension(OperationPreferenceSet, nil, parameters)
+	case inputLanguage:
+		if value != "en" && value != "zh-CN" {
+			model.err = model.text("language must be en or zh-CN", "语言必须是 en 或 zh-CN")
+			return model, nil
+		}
+		model.closeModal()
+		if model.options.Extensions == nil {
+			model.err = model.text("this operation is unavailable in the current application seam", "当前应用环境不支持此操作")
+			return model, nil
+		}
+		return model, model.beginCommand(func(ctx context.Context) tea.Msg {
+			result, err := model.options.Extensions.Operate(ctx, OperationRequest{Kind: OperationPreferenceSet, Area: model.state.Area,
+				Parameters: map[string]string{"key": "display.language", "value": value}})
+			return actionResultMsg{operation: result, language: value, err: err}
+		})
 	case inputDiagnosticBundle:
 		model.closeModal()
 		if value == "" {
@@ -869,6 +887,15 @@ func (model Model) chooseAction(action actionItem) (tea.Model, tea.Cmd) {
 		return model, nil
 	case string(OperationPreferenceSet):
 		model.inputMode, model.inputLabel, model.input = inputPreferenceKey, "Preference key", ""
+		model.modal = modalInput
+		return model, nil
+	case "display_language":
+		model.inputMode = inputLanguage
+		model.inputLabel = model.localizedInputLabel(inputLanguage, "Language (en or zh-CN)")
+		model.input = "zh-CN"
+		if model.zh() {
+			model.input = "en"
+		}
 		model.modal = modalInput
 		return model, nil
 	case string(OperationDiagnosticBundle):
@@ -1103,6 +1130,7 @@ func (model Model) actionsForArea() []actionItem {
 			{Label: "Enable proxy", Kind: string(OperationProxyEnable)}, {Label: "Disable proxy", Kind: string(OperationProxyDisable)},
 			{Label: "Test proxy", Kind: string(OperationProxyTest)}, {Label: "Remove proxy", Kind: string(OperationProxyRemove)},
 			{Label: "Show preferences", Kind: string(OperationPreferences)}, {Label: "Set preference", Kind: string(OperationPreferenceSet)},
+			{Label: "Switch language", Description: "Choose English or Simplified Chinese", Kind: "display_language"},
 		}
 	case AreaStorage:
 		return []actionItem{
