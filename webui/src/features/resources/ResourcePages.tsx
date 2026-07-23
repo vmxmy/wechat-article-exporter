@@ -14,6 +14,7 @@ import { UnavailableActionPanel } from '../actions/UnavailableActionPanel'
 import { navigateTo } from '../../app/navigation'
 
 const pageSize = 25
+const maximumSelectedAlbumIDs = 50
 
 export function AccountsPage({ messages, locale }: { readonly messages: MessageCatalog; readonly locale: Locale }) {
   const [pageIndex, setPageIndex] = useState(0)
@@ -104,6 +105,7 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
     saveExportHandoff({ selection: { kind: 'album', albumId: album.id }, label: messages.exports.selection.albumLabel(album.id) })
     navigateTo('/exports')
   }
+  const selectionScope = `${accountId}\u0000${keyword}`
   const updateFilter = (set: (value: string) => void) => (value: string) => {
     set(value)
     setPageIndex(0)
@@ -114,7 +116,7 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
       <div><h2 id="album-filters-title">{messages.resources.albums.filters.title}</h2><p>{messages.resources.albums.filters.description}</p></div>
       <div className="account-action-form"><TextInput label={messages.resources.albums.filters.accountId} value={accountId} onChange={updateFilter(setAccountId)} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={updateFilter(setKeyword)} /></div>
     </section>
-    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
+    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} preserveSelectionAcrossPages maximumSelectedIDs={maximumSelectedAlbumIDs} selectionScope={selectionScope} />
     <section className="unavailable-actions" aria-labelledby="album-actions-title">
       <div><h2 id="album-actions-title">{messages.resources.albums.actions.title}</h2><p>{messages.resources.albums.actions.description}</p></div>
       <label>{messages.resources.albums.actions.order}<select aria-label={messages.resources.albums.actions.order} value={order} onChange={(event) => setOrder(event.target.value as AlbumTraversalOrder)}><option value="forward">{messages.resources.albums.actions.forward}</option><option value="reverse">{messages.resources.albums.actions.reverse}</option></select></label>

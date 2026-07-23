@@ -1,7 +1,7 @@
 import { Button } from '@astryxdesign/core/Button'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
-import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type VisibilityState } from '@tanstack/react-table'
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type RowSelectionState, type Updater, type VisibilityState } from '@tanstack/react-table'
 import { useEffect, useMemo, useState } from 'react'
 import type { MessageCatalog } from '../../i18n'
 import type { PaginatedResponse } from '../../lib/api'
@@ -20,9 +20,12 @@ export interface ResourceTableProps<T> {
   readonly pageIndex: number
   readonly onPageChange: (pageIndex: number) => void
   readonly onSelectionChange?: (ids: readonly string[]) => void
+  readonly preserveSelectionAcrossPages?: boolean
+  readonly maximumSelectedIDs?: number
+  readonly selectionScope?: string
 }
 
-export function ResourceTable<T extends { readonly id?: string; readonly name?: string }>({ eyebrow, messages, columns, query, pageIndex, onPageChange, onSelectionChange }: ResourceTableProps<T>) {
+export function ResourceTable<T extends { readonly id?: string; readonly name?: string }>({ eyebrow, messages, columns, query, pageIndex, onPageChange, onSelectionChange, preserveSelectionAcrossPages = false, maximumSelectedIDs, selectionScope }: ResourceTableProps<T>) {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({})
   const selectionColumn = useMemo<ColumnDef<T>>(() => ({
@@ -31,11 +34,21 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
     header: ({ table: currentTable }) => <CheckboxInput label={messages.selectAll} isLabelHidden value={currentTable.getIsSomePageRowsSelected() ? 'indeterminate' : currentTable.getIsAllPageRowsSelected()} onChange={() => currentTable.toggleAllPageRowsSelected()} />,
     cell: ({ row }) => <CheckboxInput label={messages.selectRow(row.id)} isLabelHidden value={row.getIsSelected()} onChange={() => row.toggleSelected()} />
   }), [messages])
-  useEffect(() => setRowSelection({}), [pageIndex])
-  const updateSelection = (updater: Record<string, boolean> | ((current: Record<string, boolean>) => Record<string, boolean>)) => {
+  useEffect(() => {
+    if (!preserveSelectionAcrossPages) {
+      setRowSelection({})
+      onSelectionChange?.([])
+    }
+  }, [onSelectionChange, pageIndex, preserveSelectionAcrossPages])
+  useEffect(() => {
+    setRowSelection({})
+    onSelectionChange?.([])
+  }, [onSelectionChange, selectionScope])
+  const updateSelection = (updater: Updater<RowSelectionState>) => {
     setRowSelection((current) => {
-      const next = typeof updater === 'function' ? updater(current) : updater
-      onSelectionChange?.(Object.entries(next).filter(([, selected]) => selected).map(([id]) => id))
+      const next = selectedIDs(typeof updater === 'function' ? updater(current) : updater)
+      if (maximumSelectedIDs !== undefined && Object.keys(next).length > maximumSelectedIDs) return current
+      onSelectionChange?.(Object.keys(next))
       return next
     })
   }
@@ -97,6 +110,10 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
       </nav>
     </section>
   )
+}
+
+function selectedIDs(selection: RowSelectionState): RowSelectionState {
+  return Object.fromEntries(Object.entries(selection).filter(([, selected]) => selected))
 }
 
 function columnLabel<T>(column: { readonly id: string; readonly columnDef: ColumnDef<T> }) {

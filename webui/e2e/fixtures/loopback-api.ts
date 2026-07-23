@@ -164,7 +164,12 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/articles/article-fixture-1/resources' && method === 'GET') return json(route, { articleId: 'article-fixture-1', total: 4, available: 3, missing: 1, complete: false, url: 'https://sensitive.example/resource', digest: 'sensitive-resource-digest', path: '/sensitive/resource/path', resourceId: 'sensitive-resource-id' })
   if (url.pathname === '/api/v1/articles/article-fixture-1/detail' && method === 'GET') return json(route, { articleId: 'article-fixture-1', metrics: { available: true, readCount: 120, oldLikeCount: 3, likeCount: 4, shareCount: 5, commentCount: 6, capturedAt: now }, resources: { items: [{ role: 'image', ordinal: 0, available: true }, { role: 'image', ordinal: 1, available: false }], total: 4, offset: 0, limit: 25 }, url: 'https://sensitive.example/resource', digest: 'sensitive-resource-digest', path: '/sensitive/resource/path', resourceId: 'sensitive-resource-id', credential: 'sensitive-credential' })
   if (url.pathname === '/api/v1/articles/resources' && method === 'POST') { state.resourceDownloads.push(body); return json(route, { id: 'job-resources-fixture', kind: 'resources', state: 'queued', createdAt: now, updatedAt: now }) }
-  if (url.pathname === '/api/v1/albums') return page(route, [{ id: 'album-fixture-1', accountId: 'account-fixture', name: 'Sanitized album', articleCount: 2, paid: false, description: 'Sanitized album description' }])
+  if (url.pathname === '/api/v1/albums') {
+    const albums = url.searchParams.get('offset') === '25'
+      ? [{ id: 'album-fixture-2', accountId: 'account-fixture', name: 'Sanitized album two', articleCount: 3, paid: false, description: 'Sanitized album two description' }]
+      : [{ id: 'album-fixture-1', accountId: 'account-fixture', name: 'Sanitized album', articleCount: 2, paid: false, description: 'Sanitized album description' }]
+    return page(route, albums, 26)
+  }
   if (url.pathname === '/api/v1/albums/album-fixture-1/traverse' && method === 'POST') { state.albumTraversals.push(body); return json(route, { id: 'job-album-fixture', kind: 'album_sync', state: 'queued', createdAt: now, updatedAt: now }) }
   if (url.pathname === '/api/v1/saved-queries' && method === 'GET') return page(route, state.savedQueries)
   if (url.pathname === '/api/v1/saved-queries' && method === 'POST') {

@@ -171,6 +171,23 @@ test('selected album export handoff queues an opaque album selection', async ({ 
   await expectOnlyLoopbackRequests(page)
 })
 
+test('album selections persist across server pages but retain one-album workflow boundaries', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/albums')
+
+  await page.getByRole('checkbox', { name: 'Select album-fixture-1' }).check()
+  await page.getByRole('button', { name: 'Next page' }).click()
+  await expect(page.getByRole('cell', { name: 'Sanitized album two', exact: true })).toBeVisible()
+  await expect(page.getByText('1 selected', { exact: false })).toBeVisible()
+
+  await page.getByRole('checkbox', { name: 'Select album-fixture-2' }).check()
+  await expect(page.getByText('2 selected', { exact: false })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Traverse selected album' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Traverse and batch download' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Export selected album' })).toBeDisabled()
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('album filters stay server-paginated and traversal sends the selected order', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/albums')
