@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { expectOnlyLoopbackRequests, installLoopbackFixture } from './fixtures/loopback-api'
+import { expectOnlyLoopbackRequests, installExportArtifactFixture, installLoopbackFixture } from './fixtures/loopback-api'
 
 test('sanitized loopback fixture covers QR login UI', async ({ page }) => {
   await installLoopbackFixture(page)
@@ -27,11 +27,34 @@ test('sanitized account and article selections remain browser-local', async ({ p
   await expectOnlyLoopbackRequests(page)
 })
 
+test('saved queries are created, updated, and deleted with scoped confirmation', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/saved-queries')
+  await page.getByRole('textbox', { name: 'Query name' }).fill('fixture recent')
+  await page.getByRole('textbox', { name: 'Query JSON' }).fill('{"keyword":"fixture"}')
+  await page.getByRole('button', { name: 'Save query' }).click()
+  await expect(page.getByText('Saved query “fixture recent”.')).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'fixture recent', exact: true })).toBeVisible()
+  await page.getByRole('checkbox', { name: 'Select fixture recent' }).check()
+  await page.getByRole('button', { name: 'Load selected query' }).click()
+  await page.getByRole('textbox', { name: 'Query JSON' }).fill('{"keyword":"updated"}')
+  await page.getByRole('button', { name: 'Save query' }).click()
+  await expect(page.getByRole('button', { name: 'Load selected query' })).toBeEnabled()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'Delete selected query' }).click()
+  await expect(page.getByText('Deleted saved query “fixture recent”.')).toBeVisible()
+  expect(fixture.requests.filter((request) => request.includes('/api/v1/saved-queries')).length).toBeGreaterThanOrEqual(4)
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('sanitized job observation and control use scoped local API calls', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/jobs')
   await expect(page.getByText('Running', { exact: true })).toBeVisible()
   await page.getByRole('checkbox', { name: 'Select job-fixture-1' }).check()
+  await expect(page.getByRole('heading', { name: 'Task detail' })).toBeVisible()
+  await expect(page.getByText('Sanitized local progress', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Refresh detail' }).click()
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Pause selected task' }).click()
   await expect.poll(() => fixture.controls.length).toBe(1)
@@ -39,12 +62,14 @@ test('sanitized job observation and control use scoped local API calls', async (
   await expectOnlyLoopbackRequests(page)
 })
 
-test('sanitized export flow authorizes a directory, queues, and verifies output', async ({ page }) => {
+test('sanitized export flow authorizes a directory, downloads an artifact, opens output, and verifies output', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
+  await installExportArtifactFixture(page)
   await page.goto('/exports')
   await page.getByRole('button', { name: 'Authorize default directory' }).click()
   await expect(page.getByText('Authorized directory: Sanitized exports')).toBeVisible()
-  const articleIDs = page.locator('textarea[aria-describedby="article-ids-help"]')
+  await page.getByRole('heading', { name: '2. Select articles and format' }).scrollIntoViewIfNeeded()
+  const articleIDs = page.getByRole('textbox', { name: 'Article IDs' })
   await articleIDs.evaluate((element) => {
     const textarea = element as HTMLTextAreaElement
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
@@ -64,6 +89,26 @@ test('sanitized export flow authorizes a directory, queues, and verifies output'
   await expect(exportRecord).toBeChecked()
   await page.getByRole('button', { name: 'View manifest' }).click()
   await expect(page.getByText('sanitized-article.md')).toBeVisible()
+  await page.getByRole('heading', { name: 'Artifact download and output folder' }).scrollIntoViewIfNeeded()
+  const downloadLink = page.getByRole('link', { name: 'Download' })
+  await expect(downloadLink).toHaveAttribute('href', '/api/v1/exports/export-fixture-1/artifact?artifactId=artifact-fixture-1')
+  const download = await Promise.all([page.waitForEvent('download'), downloadLink.click()])
+  expect(download[0].suggestedFilename()).toBe('sanitized-article.md')
+  const openConfirmation = page.getByRole('textbox', { name: 'Confirmation value' })
+  await openConfirmation.evaluate((element) => {
+    const input = element as HTMLInputElement
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    if (!setValue) throw new Error('input value setter is unavailable')
+    setValue.call(input, 'open-export-output:export-fixture-1')
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: 'open-export-output:export-fixture-1', inputType: 'insertText' }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await expect(openConfirmation).toHaveValue('open-export-output:export-fixture-1')
+  await expect(page.getByRole('button', { name: 'Open output folder' })).toBeEnabled()
+  const openRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/exports/export-fixture-1/open'))
+  await page.getByRole('button', { name: 'Open output folder' }).click()
+  await expect((await openRequest).postDataJSON()).toEqual({ confirm: 'open-export-output:export-fixture-1' })
+  await expect(page.getByText('The selected export output folder was opened.')).toBeVisible()
   await page.getByRole('button', { name: 'Verify export' }).click()
   await expect(page.getByText('Valid: 1 output verified.')).toBeVisible()
   await expectOnlyLoopbackRequests(page)

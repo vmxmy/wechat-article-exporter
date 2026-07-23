@@ -5,7 +5,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { useEffect, useMemo, useState } from 'react'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
-import type { ExportFormat, ExportManifest, ExportRecord, ExportVerification } from '../../lib/api'
+import { getExportArtifactDownloadURL, openExportOutput, type ExportFormat, type ExportManifest, type ExportRecord, type ExportVerification } from '../../lib/api'
 import { useExportManifest, useExportPage, useWorkspaceMutations } from '../../lib/queries'
 
 const pageSize = 25
@@ -32,8 +32,10 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   const [htmlResourcePolicy, setHTMLResourcePolicy] = useState<'best-effort' | 'strict'>('best-effort')
   const [htmlBatchArchive, setHTMLBatchArchive] = useState('')
   const [notice, setNotice] = useState<string>()
+  const [outputNotice, setOutputNotice] = useState<string>()
   const [pageIndex, setPageIndex] = useState(0)
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({})
+  const [openConfirmation, setOpenConfirmation] = useState('')
   const mutations = useWorkspaceMutations()
   const records = useExportPage({ page: pageIndex + 1, pageSize })
   const selectedIDs = Object.entries(rowSelection).filter(([, selected]) => selected).map(([id]) => id)
@@ -46,6 +48,10 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   useEffect(() => {
     setRowSelection((current) => Object.fromEntries(Object.entries(current).filter(([id]) => records.data?.data.some((record) => record.id === id))))
   }, [records.data])
+
+  useEffect(() => {
+    setOpenConfirmation('')
+  }, [selectedID])
 
   const columns = useMemo<ColumnDef<ExportRecord>[]>(() => [
     { id: 'select', header: ({ table }) => <CheckboxInput label={copy.selectAll} isLabelHidden value={table.getIsSomePageRowsSelected() ? 'indeterminate' : table.getIsAllPageRowsSelected()} onChange={() => table.toggleAllPageRowsSelected()} />, cell: ({ row }) => <CheckboxInput label={copy.selectRow(row.original.id)} isLabelHidden value={row.getIsSelected()} onChange={() => row.toggleSelected()} /> },
@@ -107,6 +113,16 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
     mutations.verifyExport.mutate(selectedID, { onSuccess: () => setNotice(undefined), onError: () => setNotice(copy.actionFailed) })
   }
 
+  function openOutputDirectory() {
+    if (!selectedID) return setNotice(copy.selectOne)
+    void openExportOutput(selectedID, openConfirmation).then(
+      () => { setOpenConfirmation(''); setOutputNotice(copy.outputOpened) },
+      () => setOutputNotice(copy.actionFailed)
+    )
+  }
+
+  const expectedOpenConfirmation = selectedID ? copy.openConfirmation(selectedID) : ''
+
   return (
     <section aria-labelledby="exports-title">
       <header className="page-heading">
@@ -158,16 +174,18 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
         {mutations.verifyExport.data ? <Verification messages={copy} verification={mutations.verifyExport.data} /> : null}
       </section>
 
-      <section className="unavailable-actions" aria-labelledby="artifact-actions-title">
-        <div><h2 id="artifact-actions-title">{copy.artifactTitle}</h2><p>{copy.artifactUnavailable}</p></div>
-        <div className="action-button-group"><Button label={copy.artifactAction} variant="secondary" isDisabled /><Button label={copy.openAction} variant="secondary" isDisabled /></div>
+      <section className="workspace-panel export-output-actions" aria-labelledby="artifact-actions-title">
+        <div><h2 id="artifact-actions-title">{copy.artifactTitle}</h2><p>{copy.artifactDescription}</p></div>
+        <div className="export-actions"><Button label={copy.openAction} variant="secondary" isDisabled={!selectedID || openConfirmation !== expectedOpenConfirmation} onClick={openOutputDirectory} /></div>
+        {selectedID ? <><div className="confirmation-proof"><span>{copy.openConfirmationLabel}</span><code>{expectedOpenConfirmation}</code><p>{copy.openConfirmationHint}</p></div><TextInput label={copy.openConfirmationInput} value={openConfirmation} onChange={setOpenConfirmation} /></> : <p className="field-hint">{copy.selectOne}</p>}
+        {outputNotice ? <p className="export-notice" role="status" aria-live="polite">{outputNotice}</p> : null}
       </section>
     </section>
   )
 }
 
 function Manifest({ messages, manifest }: { readonly messages: MessageCatalog['exports']; readonly manifest: ExportManifest }) {
-  return <div className="manifest-detail"><p><strong>{manifest.exportId}</strong> · {manifest.format.toUpperCase()} · {manifest.state} · {formatProvenance(manifest)}</p><p>{messages.manifestSummary(manifest.files.length)}</p>{manifest.files.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th scope="col">{messages.fileColumns.path}</th><th scope="col">{messages.fileColumns.size}</th><th scope="col">{messages.fileColumns.status}</th><th scope="col">{messages.fileColumns.checksum}</th></tr></thead><tbody>{manifest.files.map((file) => <tr key={`${file.path}-${file.sha256}`}><td><code>{file.path}</code></td><td>{formatBytes(file.sizeBytes)}</td><td>{file.status}</td><td><code>{file.sha256}</code></td></tr>)}</tbody></table></div> : <p>{messages.noFiles}</p>}</div>
+  return <div className="manifest-detail"><p><strong>{manifest.exportId}</strong> · {manifest.format.toUpperCase()} · {manifest.state} · {formatProvenance(manifest)}</p><p>{messages.manifestSummary(manifest.files.length)}</p>{manifest.files.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th scope="col">{messages.fileColumns.path}</th><th scope="col">{messages.fileColumns.size}</th><th scope="col">{messages.fileColumns.status}</th><th scope="col">{messages.fileColumns.checksum}</th><th scope="col">{messages.fileColumns.download}</th></tr></thead><tbody>{manifest.files.map((file) => <tr key={file.artifactId}><td><code>{file.path}</code></td><td>{formatBytes(file.sizeBytes)}</td><td>{file.status}</td><td><code>{file.sha256}</code></td><td><a className="artifact-download" href={getExportArtifactDownloadURL(manifest.exportId, file.artifactId)}>{messages.downloadArtifact}</a></td></tr>)}</tbody></table></div> : <p>{messages.noFiles}</p>}</div>
 }
 
 function Verification({ messages, verification }: { readonly messages: MessageCatalog['exports']; readonly verification: ExportVerification }) {

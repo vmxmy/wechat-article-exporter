@@ -134,7 +134,7 @@ export const zhCN = {
     visibleColumns: '可见导出列',
     columns: { id: '导出 ID', format: '格式', state: '状态', created: '创建时间', provenance: '溯源' },
     detailTitle: '所选导出详情',
-    detailDescription: 'Manifest 只包含安全的文件元数据和校验和，不包含浏览器下载链接。',
+    detailDescription: 'Manifest 包含安全的文件元数据、不透明下载能力和校验和。',
     selectOne: '请选择且仅选择一条导出记录以查看详情。',
     loadManifest: '查看 Manifest',
     verify: '验证导出',
@@ -144,15 +144,20 @@ export const zhCN = {
     manifestSummary: (count: number) => `已记录 ${count} 个输出文件`,
     files: '已记录文件',
     noFiles: '此导出尚未记录输出文件。',
-    fileColumns: { path: '路径', size: '大小', status: '状态', checksum: 'SHA-256' },
+    fileColumns: { path: '路径', size: '大小', status: '状态', checksum: 'SHA-256', download: '下载' },
+    downloadArtifact: '下载',
     verificationTitle: '验证结果',
     verificationValid: (count: number) => `验证通过：已验证 ${count} 个输出文件。`,
     verificationInvalid: (count: number) => `验证发现问题，已检查 ${count} 个输出文件。`,
     verificationIssues: '验证问题',
-    artifactTitle: '产物下载与桌面打开',
-    artifactUnavailable: '当前浏览器工作区不支持产物流式下载，也不支持打开本机桌面文件夹。Manifest 中的文件名仅用于溯源元数据，不是链接。',
-    artifactAction: '产物下载不可用',
-    openAction: '打开文件夹不可用'
+    artifactTitle: '产物下载与输出目录',
+    artifactDescription: 'Manifest 下载使用不透明的 artifact 能力。打开输出目录需要针对该导出的精确确认值；浏览器不会发送路径。',
+    openAction: '打开输出目录',
+    openConfirmationLabel: '打开此输出目录的精确确认字符串',
+    openConfirmation: (id: string) => `open-export-output:${id}`,
+    openConfirmationHint: '请原样输入此值，只会在本机打开所选导出的输出目录。',
+    openConfirmationInput: '确认字符串',
+    outputOpened: '已打开所选导出的输出目录。'
   },
   settings: {
     title: '设置与维护',
@@ -195,6 +200,7 @@ export const zhCN = {
       description: '每项操作都会创建持久化本地任务；预览保持为安全的本地交接。',
       preview: '预览所选文章',
       previewUnavailable: '请先下载文章正文，再打开本地预览。',
+      previewBlocked: '浏览器阻止了本地预览窗口。',
       download: '下载所选文章',
       metadata: '刷新元数据',
       comments: '下载评论',
@@ -220,17 +226,18 @@ export const zhCN = {
     },
     jobs: {
       title: '任务',
-      description: '持久任务快照每五秒刷新。此 P0 页面只观察共享本地任务，刻意不提供控制操作。',
+      description: '查看共享持久任务、刷新其 SQLite 快照，并在范围确认后使用允许的控制操作。',
       loading: '正在加载本地任务快照…', unavailable: '本地 jobs 快照 API 尚不可用。', empty: '尚未记录持久任务。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '任务分页', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见任务列',
       columns: { kind: '类型', state: '状态', created: '创建时间', updated: '更新时间', counts: '进度' },
-      actions: { title: '任务控制', description: '暂停、继续、重试或取消一个已选持久化任务。', start: '启动任务', pause: '暂停所选任务', resume: '继续所选任务', retry: '重试所选任务', cancel: '取消所选任务', selectOne: '请先仅选择一个任务。', confirmPause: '暂停此任务？', confirmRetry: '重试此任务？', confirmCancel: '取消此任务？这可能中断本地工作。', actionFailed: '无法完成任务操作。' }
+      actions: { title: '任务控制', description: '暂停、继续、重试或取消一个已选持久化任务。', start: '启动任务', pause: '暂停所选任务', resume: '继续所选任务', retry: '重试所选任务', cancel: '取消所选任务', selectOne: '请先仅选择一个任务。', confirmPause: '暂停此任务？', confirmRetry: '重试此任务？', confirmCancel: '取消此任务？这可能中断本地工作。', actionFailed: '无法完成任务操作。' },
+      detail: { title: '任务详情', description: '重连或刷新后会重新读取受限的本地状态。不会显示日志字段、任务载荷、执行者身份或路径。', refresh: '刷新详情', refreshing: '正在刷新详情…', loading: '正在加载任务详情…', unavailable: '无法获取任务详情，可安全重试。', items: '任务项', itemsLimited: (shown: number, total: number) => `显示 ${shown} / ${total} 个任务项。`, noItems: '该任务没有已记录的任务项。', logs: '最近日志', noLogs: '没有已记录的受限日志。', lease: '执行租约', leaseActive: '有效', leaseInactive: '无效', expires: '到期时间', attempts: '尝试次数', errorClass: '错误类别', refreshed: '最近刷新' }
     },
     savedQueries: {
       title: '已保存查询',
-      description: '此处可查看已保存的查询定义。创建、修改和删除会在 mutation 契约发布前保持不可用。',
+      description: '保存、更新和删除可复用的本地文章查询定义。',
       loading: '正在加载已保存查询…', unavailable: '本地 saved-queries API 尚不可用。', empty: '尚未保存文章查询。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '已保存查询分页', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见已保存查询列',
       columns: { name: '名称', query: '查询条件', updated: '更新时间' },
-      actions: { title: '已保存查询操作', description: '创建、编辑或删除已保存查询需要受支持的写入端点。', create: '保存查询', edit: '编辑所选查询', remove: '删除所选查询' }
+      actions: { title: '已保存查询操作', description: '同名保存会更新本地定义；删除需要确认。', name: '查询名称', query: '查询 JSON', create: '保存查询', edit: '载入所选查询', remove: '删除所选查询', selectOne: '请先仅选择一个已保存查询。', invalidQuery: '请输入名称和 JSON 对象形式的查询。', deleteConfirm: (name: string) => `删除已保存查询“${name}”？此操作无法撤销。`, saved: (name: string) => `已保存查询“${name}”。`, editing: (name: string) => `已载入“${name}”以供编辑。`, deleted: (name: string) => `已删除已保存查询“${name}”。`, actionFailed: '无法完成已保存查询操作。' }
     }
   }
 } as const

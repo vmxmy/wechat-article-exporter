@@ -134,7 +134,7 @@ export const en = {
     visibleColumns: 'Visible export columns',
     columns: { id: 'Export ID', format: 'Format', state: 'State', created: 'Created', provenance: 'Provenance' },
     detailTitle: 'Selected export detail',
-    detailDescription: 'A manifest contains safe file metadata and checksums, not browser-download links.',
+    detailDescription: 'A manifest contains safe file metadata, opaque download capabilities, and checksums.',
     selectOne: 'Select exactly one export record to inspect it.',
     loadManifest: 'View manifest',
     verify: 'Verify export',
@@ -144,15 +144,20 @@ export const en = {
     manifestSummary: (count: number) => `${count} recorded output${count === 1 ? '' : 's'}`,
     files: 'Recorded files',
     noFiles: 'No output files are recorded for this export.',
-    fileColumns: { path: 'Path', size: 'Size', status: 'Status', checksum: 'SHA-256' },
+    fileColumns: { path: 'Path', size: 'Size', status: 'Status', checksum: 'SHA-256', download: 'Download' },
+    downloadArtifact: 'Download',
     verificationTitle: 'Verification result',
     verificationValid: (count: number) => `Valid: ${count} output${count === 1 ? '' : 's'} verified.`,
     verificationInvalid: (count: number) => `Verification found issues after checking ${count} output${count === 1 ? '' : 's'}.`,
     verificationIssues: 'Verification issues',
-    artifactTitle: 'Artifact download and desktop open',
-    artifactUnavailable: 'Artifact streaming and opening a local desktop folder are not available in this browser workspace. File names shown in the manifest are provenance metadata, not links.',
-    artifactAction: 'Artifact download unavailable',
-    openAction: 'Open folder unavailable'
+    artifactTitle: 'Artifact download and output folder',
+    artifactDescription: 'Manifest downloads use opaque artifact capabilities. Opening an output folder requires an exact, export-specific confirmation; no path is sent by the browser.',
+    openAction: 'Open output folder',
+    openConfirmationLabel: 'Exact confirmation to open this output folder',
+    openConfirmation: (id: string) => `open-export-output:${id}`,
+    openConfirmationHint: 'Enter this value exactly to open only the selected export output folder on this computer.',
+    openConfirmationInput: 'Confirmation value',
+    outputOpened: 'The selected export output folder was opened.'
   },
   settings: {
     title: 'Settings and maintenance',
@@ -195,6 +200,7 @@ export const en = {
       description: 'Each action creates a persistent local job; preview remains a safe local handoff.',
       preview: 'Preview selected article',
       previewUnavailable: 'Download article content before opening a local preview.',
+      previewBlocked: 'The browser blocked the local preview window.',
       download: 'Download selected article',
       metadata: 'Refresh metadata',
       comments: 'Download comments',
@@ -220,17 +226,18 @@ export const en = {
     },
     jobs: {
       title: 'Jobs',
-      description: 'Persistent job snapshots refresh every five seconds. This P0 view observes shared local jobs and intentionally exposes no controls.',
+      description: 'Inspect shared persistent jobs, refresh their SQLite-backed snapshots, and use the permitted controls with scoped confirmation.',
       loading: 'Loading local job snapshot…', unavailable: 'The local jobs snapshot API is not available yet.', empty: 'No persistent jobs are recorded.', retry: 'Retry', previous: 'Previous page', next: 'Next page', page: (current: number, total: number) => `Page ${current} of ${total}`, pagination: 'Job pagination', selected: 'selected', selectAll: 'Select all rows on this page', selectRow: (row: string) => `Select ${row}`, visibleColumns: 'Visible job columns',
       columns: { kind: 'Kind', state: 'State', created: 'Created', updated: 'Updated', counts: 'Progress' },
-      actions: { title: 'Task controls', description: 'Pause, resume, retry, or cancel one selected persistent task.', start: 'Start task', pause: 'Pause selected task', resume: 'Resume selected task', retry: 'Retry selected task', cancel: 'Cancel selected task', selectOne: 'Select exactly one task first.', confirmPause: 'Pause this task?', confirmRetry: 'Retry this task?', confirmCancel: 'Cancel this task? This may interrupt local work.', actionFailed: 'The task action could not be completed.' }
+      actions: { title: 'Task controls', description: 'Pause, resume, retry, or cancel one selected persistent task.', start: 'Start task', pause: 'Pause selected task', resume: 'Resume selected task', retry: 'Retry selected task', cancel: 'Cancel selected task', selectOne: 'Select exactly one task first.', confirmPause: 'Pause this task?', confirmRetry: 'Retry this task?', confirmCancel: 'Cancel this task? This may interrupt local work.', actionFailed: 'The task action could not be completed.' },
+      detail: { title: 'Task detail', description: 'Bounded local status is re-read after reconnect or refresh. Log fields, payloads, executor identities, and paths are not shown.', refresh: 'Refresh detail', refreshing: 'Refreshing detail…', loading: 'Loading task detail…', unavailable: 'Task detail is unavailable. You can retry safely.', items: 'Items', itemsLimited: (shown: number, total: number) => `Showing ${shown} of ${total} items.`, noItems: 'This task has no recorded items.', logs: 'Recent logs', noLogs: 'No bounded log entries are recorded.', lease: 'Execution lease', leaseActive: 'Active', leaseInactive: 'Inactive', expires: 'Expires', attempts: 'Attempts', errorClass: 'Error class', refreshed: 'Last refreshed' }
     },
     savedQueries: {
       title: 'Saved queries',
-      description: 'Saved query definitions can be inspected here. Creating, changing, or deleting them is deliberately unavailable until mutation contracts ship.',
+      description: 'Save, update, and remove reusable local article-query definitions.',
       loading: 'Loading saved queries…', unavailable: 'The local saved-queries API is not available yet.', empty: 'No saved article queries are recorded.', retry: 'Retry', previous: 'Previous page', next: 'Next page', page: (current: number, total: number) => `Page ${current} of ${total}`, pagination: 'Saved-query pagination', selected: 'selected', selectAll: 'Select all rows on this page', selectRow: (row: string) => `Select ${row}`, visibleColumns: 'Visible saved-query columns',
       columns: { name: 'Name', query: 'Query', updated: 'Updated' },
-      actions: { title: 'Saved-query actions', description: 'Creating, editing, or deleting saved queries requires a supported write endpoint.', create: 'Save a query', edit: 'Edit selected query', remove: 'Delete selected query' }
+      actions: { title: 'Saved-query actions', description: 'A matching name updates its local definition. Removal requires confirmation.', name: 'Query name', query: 'Query JSON', create: 'Save query', edit: 'Load selected query', remove: 'Delete selected query', selectOne: 'Select exactly one saved query first.', invalidQuery: 'Enter a name and a JSON object for the query.', deleteConfirm: (name: string) => `Delete saved query “${name}”? This cannot be undone.`, saved: (name: string) => `Saved query “${name}”.`, editing: (name: string) => `Loaded “${name}” for editing.`, deleted: (name: string) => `Deleted saved query “${name}”.`, actionFailed: 'The saved-query action could not be completed.' }
     }
   }
 } as const

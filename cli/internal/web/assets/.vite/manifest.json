@@ -1,11 +1,4 @@
 {
-  "_UnavailableActionPanel-ReCDJcdy.js": {
-    "file": "assets/UnavailableActionPanel-ReCDJcdy.js",
-    "name": "UnavailableActionPanel",
-    "imports": [
-      "_react-IsLpfBRF.js"
-    ]
-  },
   "_astryx-BrBKOP69.js": {
     "file": "assets/astryx-BrBKOP69.js",
     "name": "astryx",
@@ -25,7 +18,7 @@
     ]
   },
   "index.html": {
-    "file": "assets/index-BLUz1u33.js",
+    "file": "assets/index-DtHU5JG2.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -46,11 +39,11 @@
       "src/features/resources/ResourcePages.tsx"
     ],
     "css": [
-      "assets/index-BCwJWg3f.css"
+      "assets/index-B16VHseb.css"
     ]
   },
   "src/features/articles/ArticleTable.tsx": {
-    "file": "assets/ArticleTable-Dw42u3NG.js",
+    "file": "assets/ArticleTable-BaY1Y6xR.js",
     "name": "ArticleTable",
     "src": "src/features/articles/ArticleTable.tsx",
     "isDynamicEntry": true,
@@ -58,12 +51,11 @@
       "_react-IsLpfBRF.js",
       "_tanstack-B10LnHfr.js",
       "index.html",
-      "_UnavailableActionPanel-ReCDJcdy.js",
       "_astryx-BrBKOP69.js"
     ]
   },
   "src/features/exports/ExportPage.tsx": {
-    "file": "assets/ExportPage-BQLesp6k.js",
+    "file": "assets/ExportPage-C1B4DwQI.js",
     "name": "ExportPage",
     "src": "src/features/exports/ExportPage.tsx",
     "isDynamicEntry": true,
@@ -75,7 +67,7 @@
     ]
   },
   "src/features/import/ImportPage.tsx": {
-    "file": "assets/ImportPage-CYkR2S5n.js",
+    "file": "assets/ImportPage-DmLUbpY2.js",
     "name": "ImportPage",
     "src": "src/features/import/ImportPage.tsx",
     "isDynamicEntry": true,
@@ -87,7 +79,7 @@
     ]
   },
   "src/features/login/LoginPage.tsx": {
-    "file": "assets/LoginPage-Db6o5ygF.js",
+    "file": "assets/LoginPage-Bxj2Cxvu.js",
     "name": "LoginPage",
     "src": "src/features/login/LoginPage.tsx",
     "isDynamicEntry": true,
@@ -99,7 +91,7 @@
     ]
   },
   "src/features/resources/ResourcePages.tsx": {
-    "file": "assets/ResourcePages-BuvcnURj.js",
+    "file": "assets/ResourcePages-DF3ZffN2.js",
     "name": "ResourcePages",
     "src": "src/features/resources/ResourcePages.tsx",
     "isDynamicEntry": true,
@@ -107,12 +99,11 @@
       "_react-IsLpfBRF.js",
       "index.html",
       "_tanstack-B10LnHfr.js",
-      "_astryx-BrBKOP69.js",
-      "_UnavailableActionPanel-ReCDJcdy.js"
+      "_astryx-BrBKOP69.js"
     ]
   },
   "src/features/settings/SettingsPage.tsx": {
-    "file": "assets/SettingsPage-A8ecOja7.js",
+    "file": "assets/SettingsPage-9SLxWpEe.js",
     "name": "SettingsPage",
     "src": "src/features/settings/SettingsPage.tsx",
     "isDynamicEntry": true,

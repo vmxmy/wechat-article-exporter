@@ -19,6 +19,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
   let directory = { token: 'dir-sanitized', label: 'Sanitized exports' }
   let backupID = ''
   let gcPlan = false
+  let savedQueries: Array<{ name: string; query: Record<string, unknown>; createdAt: string; updatedAt: string }> = []
 
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url())
@@ -44,6 +45,8 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       onDirectory: (next) => { directory = next },
       onBackupID: (id) => { backupID = id },
       onGCPlan: (next) => { gcPlan = next }
+      ,savedQueries
+      ,onSavedQueries: (next) => { savedQueries = next }
     })
   })
   return { requests, controls, exports, preferencePatches }
@@ -52,6 +55,12 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
 export async function expectOnlyLoopbackRequests(page: Page) {
   const origins = await page.evaluate(() => performance.getEntriesByType('resource').map((entry) => new URL(entry.name).hostname))
   expect(origins.every((hostname) => hostname === '127.0.0.1' || hostname === 'localhost')).toBeTruthy()
+}
+
+export async function installExportArtifactFixture(page: Page) {
+  await page.route('**/api/v1/exports/export-fixture-1/manifest', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ apiVersion: 'v1', data: { exportId: 'export-fixture-1', format: 'markdown', state: 'completed', provenanceState: 'complete', provenanceGeneration: 1, files: [{ artifactId: 'artifact-fixture-1', articleId: 'article-fixture-1', path: 'sanitized-article.md', sizeBytes: 42, sha256: 'a'.repeat(64), status: 'written' }] } }) }))
+  await page.route('**/api/v1/exports/export-fixture-1/artifact?artifactId=artifact-fixture-1', (route) => route.fulfill({ contentType: 'text/markdown', headers: { 'content-disposition': 'attachment; filename="sanitized-article.md"' }, body: '# sanitized artifact\n' }))
+  await page.route('**/api/v1/exports/export-fixture-1/open', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ apiVersion: 'v1', data: {} }) }))
 }
 
 interface State {
@@ -66,6 +75,8 @@ interface State {
   readonly onDirectory: (directory: { readonly token: string; readonly label: string }) => void
   readonly onBackupID: (id: string) => void
   readonly onGCPlan: (value: boolean) => void
+  readonly savedQueries: readonly { name: string; query: Record<string, unknown>; createdAt: string; updatedAt: string }[]
+  readonly onSavedQueries: (value: Array<{ name: string; query: Record<string, unknown>; createdAt: string; updatedAt: string }>) => void
 }
 
 async function fulfillAPI(route: Route, url: URL, state: State) {
@@ -88,8 +99,23 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/accounts' || url.pathname === '/api/v1/accounts/search') return page(route, [{ id: 'account-fixture', name: 'Fixture Account', alias: 'fixture', articleCount: 2, lastSyncAt: now, syncCompleted: true }])
   if (url.pathname === '/api/v1/articles') return page(route, [{ id: 'article-fixture-1', title: 'Sanitized article one', accountId: 'account-fixture', accountName: 'Fixture Account', author: 'Fixture Author', publishedAt: now, state: 'ready' }, { id: 'article-fixture-2', title: 'Sanitized article two', accountId: 'account-fixture', accountName: 'Fixture Account', author: 'Fixture Author', publishedAt: now, state: 'queued' }])
   if (url.pathname === '/api/v1/albums') return page(route, [])
-  if (url.pathname === '/api/v1/saved-queries') return page(route, [])
+  if (url.pathname === '/api/v1/saved-queries' && method === 'GET') return page(route, state.savedQueries)
+  if (url.pathname === '/api/v1/saved-queries' && method === 'POST') {
+    const name = String(body?.name || '').trim()
+    const query = body?.query
+    if (!name || !query || Array.isArray(query) || typeof query !== 'object') return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Invalid saved query' } }) })
+    const next = { name, query: query as Record<string, unknown>, createdAt: now, updatedAt: now }
+    state.onSavedQueries([...state.savedQueries.filter((item) => item.name !== name), next])
+    return json(route, next)
+  }
+  if (url.pathname === '/api/v1/saved-queries' && method === 'DELETE') {
+    const name = String(body?.name || '').trim()
+    if (body?.confirm !== `delete-saved-query:${name}`) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Confirmation required' } }) })
+    state.onSavedQueries(state.savedQueries.filter((item) => item.name !== name))
+    return route.fulfill({ status: 204, body: '' })
+  }
   if (url.pathname === '/api/v1/jobs') return page(route, [{ id: 'job-fixture-1', kind: 'export', state: 'running', profile: 'fixture-profile', createdAt: now, updatedAt: now, counts: { completed: 1, total: 2 } }])
+  if (url.pathname === '/api/v1/jobs/job-fixture-1/detail') return json(route, { job: { id: 'job-fixture-1', kind: 'export', state: 'running', profile: 'fixture-profile', createdAt: now, updatedAt: now, counts: { completed: 1, total: 2 } }, items: [{ id: 'item-fixture-1', state: 'completed', attemptCount: 1, createdAt: now, updatedAt: now }, { id: 'item-fixture-2', state: 'running', attemptCount: 2, errorClass: 'network', createdAt: now, updatedAt: now }], itemsTotal: 2, itemsLimited: false, logs: [{ id: 1, itemId: 'item-fixture-2', level: 'info', message: 'Sanitized local progress', createdAt: now }], lease: { active: true, expiresAt: '2026-07-24T09:35:00.000Z' }, refreshedAt: now })
   if (/^\/api\/v1\/jobs\/job-fixture-1\/(pause|resume|retry|cancel)$/.test(url.pathname)) { state.controls.push(url.pathname); return json(route, { id: 'job-fixture-1', kind: 'export', state: url.pathname.endsWith('cancel') ? 'cancelled' : 'running', createdAt: now, updatedAt: now }) }
 
   if (url.pathname === '/api/v1/export-directories/authorize') return json(route, state.directory)

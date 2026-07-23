@@ -5,19 +5,21 @@ import {
   getArticlePage,
   getExportManifest,
   getExportPage,
+  getJobDetail,
   getJobPage,
   getRuntimeStatus,
   getSavedQueryPage,
   getSessionStatus,
   getStorageStatus,
   getWorkspaceSnapshot,
-  authorizeDefaultExportDirectory, beginLogin, completeLogin, controlJob, createExportDirectory, deleteAccounts, ingestURL, pollLogin, saveAccount, searchAccounts, startExport, syncAccount, updateAccount, verifyExport,
+  authorizeDefaultExportDirectory, beginLogin, completeLogin, controlJob, createExportDirectory, deleteAccounts, ingestURL, openExportOutput, pollLogin, saveAccount, searchAccounts, startExport, syncAccount, updateAccount, verifyExport,
   addProxy, applyGarbageCollection, createBackup, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importCredential, patchPreferences, planGarbageCollection, removeCredential, removeProxy, setProxyEnabled, testProxy, verifyBackup,
-  downloadArticles, traverseAlbum,
+  deleteSavedQuery, downloadArticles, saveSavedQuery, traverseAlbum,
   type AccountInput,
   type ArticleDownloadKind,
   type ArticlePageParams,
   type PageParams
+  ,type SavedQueryInput
 } from './api'
 
 export const queryKeys = {
@@ -29,6 +31,7 @@ export const queryKeys = {
   articles: (params: ArticlePageParams) => ['articles', params] as const,
   albums: (params: PageParams) => ['albums', params] as const,
   jobs: (params: PageParams) => ['jobs', params] as const,
+  jobDetail: (id: string) => ['jobs', id, 'detail'] as const,
   exports: (params: PageParams) => ['exports', params] as const,
   exportManifest: (id: string) => ['exports', id, 'manifest'] as const,
   savedQueries: (params: PageParams) => ['saved-queries', params] as const,
@@ -73,6 +76,10 @@ export function useJobPage(params: PageParams) {
   return usePageQuery(queryKeys.jobs(params), ({ signal }) => getJobPage(params, signal), snapshotPolling)
 }
 
+export function useJobDetail(id: string | undefined) {
+  return useQuery({ queryKey: queryKeys.jobDetail(id ?? ''), queryFn: ({ signal }) => getJobDetail(id ?? '', signal), enabled: Boolean(id), ...snapshotPolling })
+}
+
 export function useExportPage(params: PageParams) {
   return usePageQuery(queryKeys.exports(params), ({ signal }) => getExportPage(params, signal), snapshotPolling)
 }
@@ -104,12 +111,15 @@ export function useWorkspaceMutations() {
     syncAccount: useMutation({ mutationFn: syncAccount, onSuccess: refresh }),
     ingestURL: useMutation({ mutationFn: ({ url, force }: { url: string; force: boolean }) => ingestURL(url, force), onSuccess: refresh }),
     downloadArticles: useMutation({ mutationFn: ({ articleIds, kind, force }: { articleIds: readonly string[]; kind: ArticleDownloadKind; force?: boolean }) => downloadArticles(articleIds, kind, force), onSuccess: refresh }),
+    saveSavedQuery: useMutation({ mutationFn: (input: SavedQueryInput) => saveSavedQuery(input), onSuccess: refresh }),
+    deleteSavedQuery: useMutation({ mutationFn: (name: string) => deleteSavedQuery(name), onSuccess: refresh }),
     traverseAlbum: useMutation({ mutationFn: ({ albumId, accountId, download }: { albumId: string; accountId: string; download: boolean }) => traverseAlbum(albumId, accountId, download), onSuccess: refresh }),
     controlJob: useMutation({ mutationFn: ({ id, action }: { id: string; action: 'cancel' | 'pause' | 'resume' | 'retry' }) => controlJob(id, action), onSuccess: refresh }),
     authorizeDefaultExportDirectory: useMutation({ mutationFn: authorizeDefaultExportDirectory }),
     createExportDirectory: useMutation({ mutationFn: ({ parentToken, name }: { parentToken: string; name: string }) => createExportDirectory(parentToken, name) }),
     startExport: useMutation({ mutationFn: startExport, onSuccess: refresh }),
-    verifyExport: useMutation({ mutationFn: verifyExport, onSuccess: refresh })
+    verifyExport: useMutation({ mutationFn: verifyExport, onSuccess: refresh }),
+    openExportOutput: useMutation({ mutationFn: ({ id, confirmation }: { id: string; confirmation: string }) => openExportOutput(id, confirmation) })
     ,importCredential: useMutation({ mutationFn: importCredential, onSuccess: refresh })
     ,removeCredential: useMutation({ mutationFn: removeCredential, onSuccess: refresh })
     ,addProxy: useMutation({ mutationFn: addProxy, onSuccess: refresh })

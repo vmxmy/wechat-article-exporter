@@ -88,7 +88,7 @@ export interface ArticleRecord {
 }
 
 export type ArticleDownloadKind = 'article' | 'metadata' | 'comments' | 'resources'
-export interface ArticlePreview { readonly articleId: string; readonly title: string; readonly available: boolean }
+export interface ArticlePreview { readonly articleId: string; readonly title: string; readonly available: boolean; readonly documentUrl?: string }
 
 export interface AlbumRecord {
   readonly id: string
@@ -109,6 +109,38 @@ export interface JobRecord {
   readonly counts?: Readonly<Record<string, number>>
 }
 
+export interface JobItemDetail {
+  readonly id: string
+  readonly state: string
+  readonly attemptCount: number
+  readonly errorClass?: string
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+export interface JobLogDetail {
+  readonly id: number
+  readonly itemId?: string
+  readonly level: string
+  readonly message: string
+  readonly createdAt: string
+}
+
+export interface JobLeaseDetail {
+  readonly active: boolean
+  readonly expiresAt?: string
+}
+
+export interface JobDetail {
+  readonly job: JobRecord
+  readonly items: readonly JobItemDetail[]
+  readonly itemsTotal: number
+  readonly itemsLimited: boolean
+  readonly logs: readonly JobLogDetail[]
+  readonly lease: JobLeaseDetail
+  readonly refreshedAt: string
+}
+
 export interface StorageStatus {
   readonly databaseAvailable: boolean
   readonly objectStoreReady: boolean
@@ -125,6 +157,11 @@ export interface SavedQueryRecord {
   readonly query: Readonly<Record<string, unknown>>
   readonly createdAt: string
   readonly updatedAt: string
+}
+
+export interface SavedQueryInput {
+  readonly name: string
+  readonly query: Readonly<Record<string, unknown>>
 }
 
 export type ExportFormat = 'html' | 'markdown' | 'text' | 'json' | 'xlsx' | 'docx' | 'pdf'
@@ -172,6 +209,7 @@ export interface ExportRecord {
 }
 
 export interface ExportFile {
+  readonly artifactId: string
   readonly articleId?: string
   readonly path: string
   readonly sizeBytes: number
@@ -344,6 +382,15 @@ export async function downloadArticles(articleIds: readonly string[], kind: Arti
 export async function getArticlePreview(articleId: string, signal?: AbortSignal): Promise<ArticlePreview> {
   return request<ArticlePreview>(`${apiBase}/articles/preview?articleId=${encodeURIComponent(articleId)}`, { signal })
 }
+export async function saveSavedQuery(input: SavedQueryInput): Promise<SavedQueryRecord> { return mutate<SavedQueryRecord>('saved-queries', 'POST', input) }
+export async function deleteSavedQuery(name: string): Promise<void> {
+  const csrfToken = await getCSRFToken()
+  const response = await fetch(`${apiBase}/saved-queries`, {
+    method: 'DELETE', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+    body: JSON.stringify({ name, confirm: `delete-saved-query:${name}` })
+  })
+  if (!response.ok) throw new ApiError(response.status, await readErrorMessage(response))
+}
 export async function traverseAlbum(albumId: string, accountId: string, download: boolean): Promise<JobRecord> {
   return mutate<JobRecord>(`albums/${encodeURIComponent(albumId)}/traverse`, 'POST', { accountId, download })
 }
@@ -366,6 +413,10 @@ export async function getAlbumPage(params: PageParams, signal?: AbortSignal): Pr
 
 export async function getJobPage(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<JobRecord>> {
   return getPage<JobRecord>('jobs', params, signal)
+}
+
+export async function getJobDetail(id: string, signal?: AbortSignal): Promise<JobDetail> {
+  return request<JobDetail>(`${apiBase}/jobs/${encodeURIComponent(id)}/detail`, { signal })
 }
 
 export async function getSavedQueryPage(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<SavedQueryRecord>> {
@@ -400,8 +451,16 @@ export async function getExportManifest(id: string, signal?: AbortSignal): Promi
   return request<ExportManifest>(`${apiBase}/exports/${encodeURIComponent(id)}/manifest`, { signal })
 }
 
+export function getExportArtifactDownloadURL(exportId: string, artifactId: string): string {
+  return `${apiBase}/exports/${encodeURIComponent(exportId)}/artifact?artifactId=${encodeURIComponent(artifactId)}`
+}
+
 export async function verifyExport(id: string): Promise<ExportVerification> {
   return mutate<ExportVerification>(`exports/${encodeURIComponent(id)}/verify`, 'POST', { confirm: `verify-export:${id}` })
+}
+
+export async function openExportOutput(id: string, confirmation: string): Promise<void> {
+  await mutate(`exports/${encodeURIComponent(id)}/open`, 'POST', { confirm: confirmation })
 }
 
 export async function getCredentials(signal?: AbortSignal): Promise<readonly CredentialMetadata[]> { return request(`${apiBase}/settings/credentials`, { signal }) }
