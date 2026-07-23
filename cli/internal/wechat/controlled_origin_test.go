@@ -55,18 +55,7 @@ func TestControlledOriginClientBlocksCrossOriginRequestsAndRedirects(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path == "/redirect" {
-			return &http.Response{
-				StatusCode: http.StatusFound,
-				Header:     http.Header{"Location": []string{"http://127.0.0.1:43126/escaped"}},
-				Body:       http.NoBody,
-				Request:    request,
-			}, nil
-		}
-		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody, Request: request}, nil
-	})
-	client, err := NewClientForControlledOrigin(&http.Client{Transport: transport}, secrets.NewMemoryStore(), "fixture", origin)
+	client, err := NewClientForControlledOrigin(http.DefaultClient, secrets.NewMemoryStore(), "fixture", origin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,13 +64,49 @@ func TestControlledOriginClientBlocksCrossOriginRequestsAndRedirects(t *testing.
 		t.Fatalf("cross-origin transport error = %v", err)
 	}
 	request, _ = http.NewRequestWithContext(context.Background(), http.MethodGet, origin.String()+"/redirect", nil)
-	if _, err := client.http.Do(request); err == nil || !strings.Contains(err.Error(), "changed origin") {
+	redirectRequest, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://127.0.0.1:43126/escaped", nil)
+	if err := client.http.CheckRedirect(redirectRequest, []*http.Request{request}); err == nil || !strings.Contains(err.Error(), "changed origin") {
 		t.Fatalf("redirect error = %v", err)
 	}
 
 	bad := &url.URL{Scheme: "http", Host: "127.0.0.1:43125", User: url.User("fixture")}
 	if matchesControlledAuthority(bad, origin) {
 		t.Fatal("userinfo-bearing target matched controlled authority")
+	}
+}
+
+func TestControlledOriginClientRejectsUnauditableTransport(t *testing.T) {
+	origin, err := ParseControlledOrigin("http://127.0.0.1:43125")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: request}, nil
+	})
+	if _, err := NewClientForControlledOrigin(&http.Client{Transport: transport}, secrets.NewMemoryStore(), "fixture", origin); err == nil || !strings.Contains(err.Error(), "auditable") {
+		t.Fatalf("NewClientForControlledOrigin error = %v", err)
+	}
+}
+
+func TestControlledOriginClientIgnoresRegisteredProtocolHandlers(t *testing.T) {
+	origin, err := ParseControlledOrigin("http://127.0.0.1:43125")
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.RegisterProtocol("http", roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: request}, nil
+	}))
+	client, err := NewClientForControlledOrigin(&http.Client{Transport: transport}, secrets.NewMemoryStore(), "fixture", origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, origin.String()+"/probe", nil)
+	_, _ = client.http.Do(request)
+	if called {
+		t.Fatal("registered protocol handler was retained by controlled transport")
 	}
 }
 

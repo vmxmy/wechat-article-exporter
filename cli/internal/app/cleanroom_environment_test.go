@@ -41,7 +41,8 @@ func TestControlledCleanRoomDependenciesRequireExplicitLoopbackPair(t *testing.T
 func TestControlledCleanRoomDependenciesRequireIsolatedPortableRoot(t *testing.T) {
 	t.Setenv(cleanRoomEnvironment, "1")
 	t.Setenv(cleanRoomOrigin, "http://127.0.0.1:43125")
-	for _, root := range []string{"", "relative", string(filepath.Separator)} {
+	normalizesToRoot := filepath.Clean(filepath.Join(string(filepath.Separator), "tmp", "..", ".."))
+	for _, root := range []string{"", "relative", string(filepath.Separator), normalizesToRoot} {
 		t.Setenv("WECHAT_ARTICLE_PORTABLE_ROOT", root)
 		if _, ok, err := controlledCleanRoomDependencies(); ok || err == nil {
 			t.Fatalf("unsafe portable root %q did not fail closed", root)

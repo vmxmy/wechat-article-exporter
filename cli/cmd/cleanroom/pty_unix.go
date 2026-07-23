@@ -4,13 +4,21 @@ package main
 
 import (
 	"context"
+	"errors"
+	"os"
+	"sync"
+	"syscall"
 
 	pty "github.com/aymanbagabas/go-pty"
 )
 
 type unixCandidatePTY struct {
-	p pty.Pty
-	c *pty.Cmd
+	p         pty.Pty
+	c         *pty.Cmd
+	mu        sync.Mutex
+	waited    bool
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func newCandidatePTYHarness(width, height int) (candidatePTYHarness, error) {
@@ -28,6 +36,17 @@ func newCandidatePTYHarness(width, height int) (candidatePTYHarness, error) {
 func (harness *unixCandidatePTY) start(ctx context.Context, binary string, environment []string) error {
 	harness.c = harness.p.CommandContext(ctx, binary)
 	harness.c.Env = environment
+	harness.c.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
+	harness.c.Cancel = func() error {
+		if harness.c == nil || harness.c.Process == nil {
+			return nil
+		}
+		err := syscall.Kill(-harness.c.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		return err
+	}
 	return harness.c.Start()
 }
 
@@ -36,5 +55,20 @@ func (harness *unixCandidatePTY) Write(value []byte) (int, error) { return harne
 func (harness *unixCandidatePTY) resize(width, height int) error {
 	return harness.p.Resize(width, height)
 }
-func (harness *unixCandidatePTY) wait() error  { return harness.c.Wait() }
-func (harness *unixCandidatePTY) close() error { return harness.p.Close() }
+func (harness *unixCandidatePTY) wait() error {
+	err := harness.c.Wait()
+	harness.mu.Lock()
+	harness.waited = true
+	harness.mu.Unlock()
+	return err
+}
+func (harness *unixCandidatePTY) close() error {
+	harness.closeOnce.Do(func() {
+		if harness.p != nil {
+			if err := harness.p.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+				harness.closeErr = errors.Join(harness.closeErr, err)
+			}
+		}
+	})
+	return harness.closeErr
+}

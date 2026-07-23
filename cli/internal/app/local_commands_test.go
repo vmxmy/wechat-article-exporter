@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -440,6 +441,32 @@ func TestNoWaitDownloadDetachedWorkerCompletesAfterParentReturns(t *testing.T) {
 	if err != nil || len(jobPage.Items) != 1 || jobPage.Items[0].State != domain.JobCompleted {
 		items, _ := applicationAdapter.active.Jobs.ListItems(context.Background(), jobPage.Items[0].ID)
 		t.Fatalf("jobs=%#v items=%#v err=%v", jobPage, items, err)
+	}
+}
+
+func TestControlledOriginDependenciesRequireExactPairedPolicy(t *testing.T) {
+	origin, err := url.Parse("http://127.0.0.1:43125")
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := network.DestinationPolicy{AllowedHosts: map[string]struct{}{"127.0.0.1": {}},
+		AllowedAuthorities: map[string]struct{}{"127.0.0.1:43125": {}}, AllowLoopback: true}
+	if err := validateControlledOriginDependencies(origin, valid); err != nil {
+		t.Fatalf("valid policy: %v", err)
+	}
+	if err := validateControlledOriginDependencies(nil, valid); err == nil {
+		t.Fatal("policy without controlled origin was accepted")
+	}
+	if err := validateControlledOriginDependencies(nil, network.DestinationPolicy{AllowedHosts: map[string]struct{}{}}); err == nil {
+		t.Fatal("empty non-nil policy override without controlled origin was accepted")
+	}
+	if err := validateControlledOriginDependencies(origin, network.DestinationPolicy{}); err == nil {
+		t.Fatal("controlled origin without exact policy was accepted")
+	}
+	wrongAuthority := valid
+	wrongAuthority.AllowedAuthorities = map[string]struct{}{"127.0.0.1:43126": {}}
+	if err := validateControlledOriginDependencies(origin, wrongAuthority); err == nil {
+		t.Fatal("controlled origin with mismatched authority was accepted")
 	}
 }
 

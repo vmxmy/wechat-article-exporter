@@ -42,6 +42,7 @@ type commandEnvelope struct {
 	SchemaVersion string          `json:"schemaVersion"`
 	Success       bool            `json:"success"`
 	Data          json.RawMessage `json:"data"`
+	Error         json.RawMessage `json:"error,omitempty"`
 }
 
 type jobEnvelopeData struct {
@@ -80,7 +81,13 @@ func verifySetCommand(arguments []string) error {
 	flags := flag.NewFlagSet("verify-set", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	var path string
+	var expectedRepository, expectedTag, expectedCommit, expectedVersion, expectedChecksumManifest string
 	flags.StringVar(&path, "receipt-set", "", "aggregate release receipt-set JSON path")
+	flags.StringVar(&expectedRepository, "repository", "", "expected release repository")
+	flags.StringVar(&expectedTag, "tag", "", "expected release tag")
+	flags.StringVar(&expectedCommit, "commit", "", "expected release commit")
+	flags.StringVar(&expectedVersion, "version", "", "expected release version")
+	flags.StringVar(&expectedChecksumManifest, "checksum-manifest-sha256", "", "expected release checksum-manifest digest")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -93,6 +100,24 @@ func verifySetCommand(arguments []string) error {
 	}
 	if err := validateReceiptSet(receiptSet, filepath.Dir(path)); err != nil {
 		return err
+	}
+	for _, assertion := range []struct {
+		label    string
+		expected string
+		actual   string
+	}{
+		{label: "repository", expected: expectedRepository, actual: receiptSet.Release.Repository},
+		{label: "tag", expected: expectedTag, actual: receiptSet.Release.Tag},
+		{label: "commit", expected: expectedCommit, actual: receiptSet.Release.Commit},
+		{label: "version", expected: expectedVersion, actual: receiptSet.Release.Version},
+		{label: "checksum-manifest-sha256", expected: expectedChecksumManifest, actual: receiptSet.Release.ChecksumManifestSHA256},
+	} {
+		if strings.TrimSpace(assertion.expected) == "" {
+			continue
+		}
+		if assertion.actual != assertion.expected {
+			return fmt.Errorf("receipt-set %s=%q, want %q", assertion.label, assertion.actual, assertion.expected)
+		}
 	}
 	fmt.Printf("clean-room receipt set verified: %s (%d targets)\n", receiptSet.Release.Version, len(receiptSet.Receipts))
 	return nil
@@ -183,10 +208,7 @@ func runCleanRoom(options runOptions) error {
 	options.Binary = artifact.BinaryPath
 	options.BuildInfo = artifact.BuildInfoPath
 
-	archiveDigest, err := sha256File(options.Archive)
-	if err != nil {
-		return err
-	}
+	archiveDigest := artifact.ArchiveSHA256
 	binaryDigest, err := sha256File(options.Binary)
 	if err != nil {
 		return err
@@ -241,6 +263,7 @@ func runCleanRoom(options runOptions) error {
 		result, reason := resultPassed, ""
 		if operationErr != nil {
 			result, reason = resultFailed, boundedReasonCode(operationErr)
+			evidence = nil
 			fmt.Fprintf(os.Stderr, "clean-room workflow %s failed: %v\n", id, operationErr)
 		}
 		receipt.Workflows = append(receipt.Workflows, WorkflowResult{ID: id, Phase: phase, Result: result,
@@ -249,7 +272,10 @@ func runCleanRoom(options runOptions) error {
 	}
 
 	run("install.archive", phaseOffline, func() (map[string]string, error) {
-		command := bootstrapRunner.command("--version")
+		command, err := bootstrapRunner.configuredCommand("--version")
+		if err != nil {
+			return nil, err
+		}
 		var output bytes.Buffer
 		command.Stdout = &output
 		command.Stderr = &output
@@ -326,7 +352,15 @@ func runCleanRoom(options runOptions) error {
 		if err != nil {
 			return nil, err
 		}
-		if !bytes.Contains(result.Envelope.Data, []byte(`"authenticated"`)) {
+		var statusData struct {
+			Session struct {
+				State string `json:"state"`
+			} `json:"session"`
+		}
+		if err := json.Unmarshal(result.Envelope.Data, &statusData); err != nil {
+			return nil, fmt.Errorf("decode status data: %w", err)
+		}
+		if statusData.Session.State != "authenticated" {
 			return nil, errors.New("fresh candidate process did not load the authenticated session")
 		}
 		return map[string]string{"processRestarted": "true", "backend": "encrypted-vault", "sessionReused": "true"}, nil
@@ -347,8 +381,11 @@ func runCleanRoom(options runOptions) error {
 			return nil, err
 		}
 		listed, err := runner.runJSON(ctx, "article", "list", "--account", accountID, "--json")
-		if err != nil || !bytes.Contains(listed.Envelope.Data, []byte(articleID)) {
-			return nil, fmt.Errorf("synchronized article not visible: %w", err)
+		if err != nil {
+			return nil, fmt.Errorf("list synchronized articles: %w", err)
+		}
+		if !articlePageContains(listed.Envelope.Data, string(articleID), false) {
+			return nil, errors.New("synchronized article not visible")
 		}
 		return map[string]string{"accountCount": "1", "articleCount": "1", "expectedDatasetVisible": "true"}, nil
 	})
@@ -362,8 +399,11 @@ func runCleanRoom(options runOptions) error {
 			return nil, err
 		}
 		listed, err := runner.runJSON(ctx, "article", "list", "--has-content", "true", "--json")
-		if err != nil || !bytes.Contains(listed.Envelope.Data, []byte(articleID)) {
-			return nil, fmt.Errorf("downloaded article not queryable: %w", err)
+		if err != nil {
+			return nil, fmt.Errorf("list downloaded articles: %w", err)
+		}
+		if !articlePageContains(listed.Envelope.Data, string(articleID), true) {
+			return nil, errors.New("downloaded article not queryable")
 		}
 		return map[string]string{"articleCount": "1", "contentAvailable": "true"}, nil
 	})
@@ -442,6 +482,15 @@ func runCleanRoom(options runOptions) error {
 	}
 
 	run("automation.mcp", phaseOffline, func() (map[string]string, error) {
+		unsupportedInput := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"unsupported-clean-room-version"}}` + "\n"
+		unsupportedOutput, unsupportedStderr, unsupportedExitCode, err := runner.runStdio(ctx, unsupportedInput, "mcp", "serve", "--transport", "stdio")
+		if err != nil || unsupportedExitCode != 0 {
+			return nil, fmt.Errorf("unsupported MCP process exited %d: %w", unsupportedExitCode, err)
+		}
+		if !isUnsupportedProtocolResponse(unsupportedOutput, mcp.ProtocolVersion) {
+			return nil, errors.New("MCP accepted or incorrectly handled an unsupported protocol version")
+		}
+
 		input := strings.Join([]string{
 			fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":%q}}`, mcp.ProtocolVersion),
 			`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`,
@@ -478,7 +527,8 @@ func runCleanRoom(options runOptions) error {
 			!jsonPathBoolean(storage, "result", "structuredContent", "objectStoreReady") {
 			return nil, errors.New("MCP storage.status did not prove local storage readiness")
 		}
-		return map[string]string{"responses": "3", "transport": "stdio", "stderrBytes": fmt.Sprint(len(stderr))}, nil
+		return map[string]string{"responses": "3", "transport": "stdio", "unsupportedRejected": "true",
+			"stderrBytes": fmt.Sprint(len(stderr) + len(unsupportedStderr))}, nil
 	})
 
 	backupPath := filepath.Join(workRoot, "backup.zip")
@@ -516,7 +566,15 @@ func runCleanRoom(options runOptions) error {
 		if err != nil {
 			return nil, fmt.Errorf("inspect restored profile: %w", err)
 		}
-		if !jsonHasPositiveCount(status.Envelope.Data, "articles") {
+		var restored struct {
+			Storage struct {
+				Articles int64 `json:"articles"`
+			} `json:"storage"`
+		}
+		if err := json.Unmarshal(status.Envelope.Data, &restored); err != nil {
+			return nil, fmt.Errorf("decode restored storage status: %w", err)
+		}
+		if restored.Storage.Articles <= 0 {
 			return nil, errors.New("restored profile has no article")
 		}
 		receipt.CleanRoom.IndependentRestore = true
@@ -758,37 +816,6 @@ func nonEmptyLines(value string) []string {
 	return result
 }
 
-func jsonHasPositiveCount(data json.RawMessage, name string) bool {
-	var decoded any
-	if json.Unmarshal(data, &decoded) != nil {
-		return false
-	}
-	var visit func(any) bool
-	visit = func(value any) bool {
-		switch typed := value.(type) {
-		case map[string]any:
-			for key, item := range typed {
-				if key == name {
-					if number, ok := item.(float64); ok && number > 0 {
-						return true
-					}
-				}
-				if visit(item) {
-					return true
-				}
-			}
-		case []any:
-			for _, item := range typed {
-				if visit(item) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	return visit(decoded)
-}
-
 func jsonBoolean(data json.RawMessage, name string) bool {
 	var object map[string]any
 	if json.Unmarshal(data, &object) != nil {
@@ -796,6 +823,24 @@ func jsonBoolean(data json.RawMessage, name string) bool {
 	}
 	value, _ := object[name].(bool)
 	return value
+}
+
+func articlePageContains(data json.RawMessage, articleID string, requireContent bool) bool {
+	var page struct {
+		Items []struct {
+			ID         string `json:"id"`
+			HasContent bool   `json:"hasContent"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(data, &page) != nil {
+		return false
+	}
+	for _, article := range page.Items {
+		if article.ID == articleID && (!requireContent || article.HasContent) {
+			return true
+		}
+	}
+	return false
 }
 
 func jsonNestedBoolean(data json.RawMessage, parent, name string) bool {
@@ -862,6 +907,39 @@ func jsonContainsTool(object map[string]any, name string) bool {
 		}
 	}
 	return false
+}
+
+func isUnsupportedProtocolResponse(output []byte, supportedVersion string) bool {
+	lines := nonEmptyLines(string(output))
+	if len(lines) != 1 {
+		return false
+	}
+	var response struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  json.RawMessage `json:"result"`
+		Error   *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Data    struct {
+				Supported string `json:"supported"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(lines[0]))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&response) != nil {
+		return false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return false
+	}
+	if response.JSONRPC != "2.0" || string(response.ID) != "1" || response.Error == nil || len(response.Result) != 0 {
+		return false
+	}
+	return response.Error.Code == -32602 && response.Error.Message == "unsupported protocolVersion" &&
+		response.Error.Data.Supported == supportedVersion
 }
 
 func fatalf(format string, arguments ...any) {

@@ -20,7 +20,7 @@ type WorkerLauncher interface {
 type processWorkerLauncher struct{}
 
 func (processWorkerLauncher) Start(_ context.Context, executable string, args, environment []string) error {
-	command, err := newWorkerCommand(nil, executable, args, environment)
+	command, err := newWorkerCommand(context.Background(), executable, args, environment)
 	if err != nil {
 		return err
 	}
@@ -63,7 +63,7 @@ func (foregroundProcessWorker) Start(ctx context.Context, executable string, arg
 		return err
 	}
 	if err := command.Run(); err != nil {
-		if ctx.Err() != nil {
+		if ctx != nil && ctx.Err() != nil {
 			return fmt.Errorf("run foreground job worker: %w", ctx.Err())
 		}
 		return fmt.Errorf("run foreground job worker: %w", err)

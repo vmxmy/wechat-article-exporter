@@ -10,7 +10,7 @@ import (
 
 const candidateProcessWaitLimit = 5 * time.Second
 
-func runCandidateProcess(ctx context.Context, command *exec.Cmd) error {
+func runCandidateProcess(ctx context.Context, command *exec.Cmd) (resultErr error) {
 	configureCandidateProcess(command)
 	if err := command.Start(); err != nil {
 		return err
@@ -21,20 +21,36 @@ func runCandidateProcess(ctx context.Context, command *exec.Cmd) error {
 		_ = command.Wait()
 		return fmt.Errorf("attach candidate process tree: %w", attachErr)
 	}
-	defer tree.Close()
+	defer func() {
+		resultErr = errors.Join(resultErr, tree.Close())
+	}()
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- command.Wait() }()
 	select {
 	case err := <-waitDone:
-		return err
+		tree.MarkExited()
+		resultErr = err
+		return resultErr
 	case <-ctx.Done():
+		select {
+		case err := <-waitDone:
+			tree.MarkExited()
+			resultErr = err
+			return resultErr
+		default:
+		}
 		killErr := tree.Kill()
+		deadline := time.NewTimer(candidateProcessWaitLimit)
+		defer deadline.Stop()
 		select {
 		case waitErr := <-waitDone:
-			return &candidateContextError{contextErr: ctx.Err(), killErr: killErr, waitErr: waitErr}
-		case <-time.After(candidateProcessWaitLimit):
-			_ = command.Process.Kill()
-			return errors.Join(ctx.Err(), killErr, errors.New("candidate process tree did not exit after cancellation"))
+			tree.MarkExited()
+			resultErr = &candidateContextError{contextErr: ctx.Err(), killErr: killErr, waitErr: waitErr}
+			return resultErr
+		case <-deadline.C:
+			fallbackErr := command.Process.Kill()
+			resultErr = errors.Join(ctx.Err(), killErr, fallbackErr, errors.New("candidate process tree did not exit after cancellation"))
+			return resultErr
 		}
 	}
 }
@@ -53,5 +69,6 @@ func (err *candidateContextError) Unwrap() error { return err.contextErr }
 
 type candidateProcessTree interface {
 	Kill() error
+	MarkExited()
 	Close() error
 }

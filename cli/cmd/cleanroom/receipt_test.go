@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,8 +39,15 @@ func TestValidateReceiptRejectsInvalidWorkflowRegistryAndSummary(t *testing.T) {
 		{name: "bad digest", edit: func(receipt *Receipt) { receipt.Artifact.BinarySHA256 = "ABC" }, want: "binarySha256"},
 		{name: "retired domain", edit: func(receipt *Receipt) { receipt.Network.RetiredDomainContacts = 1 }, want: "retired project domains"},
 		{name: "bad duration", edit: func(receipt *Receipt) { receipt.Workflows[0].DurationMS++ }, want: "duration does not match"},
+		{name: "outside receipt interval", edit: func(receipt *Receipt) {
+			receipt.Workflows[0].StartedAt = receipt.StartedAt.Add(-time.Second)
+			receipt.Workflows[0].FinishedAt = receipt.StartedAt
+			receipt.Workflows[0].DurationMS = 1000
+		}, want: "outside the receipt interval"},
 		{name: "bad summary", edit: func(receipt *Receipt) { receipt.Summary.Passed-- }, want: "summary result counts"},
 		{name: "wrong phase", edit: func(receipt *Receipt) { receipt.Workflows[0].Phase = phaseOnlineFixture }, want: "phase="},
+		{name: "unknown evidence", edit: func(receipt *Receipt) { receipt.Workflows[0].Evidence["unexpected"] = "true" }, want: "evidence is invalid"},
+		{name: "missing evidence", edit: func(receipt *Receipt) { delete(receipt.Workflows[0].Evidence, "archiveSha256") }, want: "evidence is invalid"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -110,6 +118,27 @@ func TestValidateReceiptRejectsFixtureLiveSubstitutionAndLeakage(t *testing.T) {
 	}
 }
 
+func TestValidateReceiptRequiresLiveRunnerIdentity(t *testing.T) {
+	receipt := validTestReceipt()
+	receipt.Mode = modeLive
+	receipt.Source.Repository = "vmxmy/wechat-article-exporter"
+	receipt.Platform.RunnerOS = "Linux"
+	receipt.Platform.RunnerArch = "X64"
+	for index, workflow := range receipt.Workflows {
+		contract, _ := workflowContractByID(workflow.ID)
+		if contract.LiveEvidence {
+			receipt.Workflows[index].Phase = phaseOnlineLive
+		}
+	}
+	if err := validateReceipt(receipt, true); err != nil {
+		t.Fatalf("valid live runner identity: %v", err)
+	}
+	receipt.Platform.RunnerArch = "ARM64"
+	if err := validateReceipt(receipt, true); err == nil || !strings.Contains(err.Error(), "runner identity") {
+		t.Fatalf("mismatched runner identity error = %v", err)
+	}
+}
+
 func validTestReceipt() Receipt {
 	now := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
 	digest := sha256.Sum256([]byte("clean-room-test"))
@@ -137,11 +166,36 @@ func validTestReceipt() Receipt {
 		}
 		receipt.Workflows = append(receipt.Workflows, WorkflowResult{
 			ID: contract.ID, Phase: phase, Result: resultPassed, StartedAt: start, FinishedAt: start.Add(time.Millisecond),
-			DurationMS: 1, Executor: WorkflowExecutor{Kind: "release-binary", BinarySHA256: sha}, Evidence: map[string]string{"digest": sha},
+			DurationMS: 1, Executor: WorkflowExecutor{Kind: "release-binary", BinarySHA256: sha}, Evidence: testWorkflowEvidence(contract, sha),
 		})
 	}
 	receipt.finalize()
 	return receipt
+}
+
+func testWorkflowEvidence(contract workflowContract, sha string) map[string]string {
+	values := make(map[string]string, len(contract.Evidence))
+	for name, constraint := range contract.Evidence {
+		if constraint.Equals != "" {
+			values[name] = constraint.Equals
+			continue
+		}
+		switch constraint.Rule {
+		case evidenceBoolean:
+			values[name] = "true"
+		case evidenceCount:
+			if constraint.Minimum > 0 {
+				values[name] = fmt.Sprint(constraint.Minimum)
+			} else {
+				values[name] = "0"
+			}
+		case evidenceDigest:
+			values[name] = sha
+		case evidenceText:
+			values[name] = "verified"
+		}
+	}
+	return values
 }
 
 func workflowIndex(receipt Receipt, id string) int {

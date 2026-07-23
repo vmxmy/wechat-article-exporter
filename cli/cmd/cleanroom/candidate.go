@@ -29,13 +29,24 @@ type candidateRunner struct {
 }
 
 func (runner candidateRunner) command(arguments ...string) *exec.Cmd {
-	command := exec.Command(runner.binary, arguments...)
-	command.Env = candidateEnvironment(runner.env)
-	return command
+	return exec.Command(runner.binary, arguments...)
+}
+
+func (runner candidateRunner) configuredCommand(arguments ...string) (*exec.Cmd, error) {
+	command := runner.command(arguments...)
+	environment, err := candidateEnvironment(runner.env)
+	if err != nil {
+		return nil, err
+	}
+	command.Env = environment
+	return command, nil
 }
 
 func (runner candidateRunner) runJSON(ctx context.Context, arguments ...string) (candidateCommandResult, error) {
-	command := runner.command(arguments...)
+	command, err := runner.configuredCommand(arguments...)
+	if err != nil {
+		return candidateCommandResult{}, fmt.Errorf("configure candidate environment: %w", err)
+	}
 	stdout := newBoundedBuffer(candidateStdoutLimit)
 	stderr := newBoundedBuffer(candidateStderrLimit)
 	command.Stdout = &stdout
@@ -51,6 +62,12 @@ func (runner candidateRunner) runJSON(ctx context.Context, arguments ...string) 
 		outputErr = errors.Join(outputErr, fmt.Errorf("candidate stderr exceeded %d bytes", candidateStderrLimit))
 	}
 	decodeErr := decodeSingleCommandEnvelope(result.Stdout, &result.Envelope)
+	if decodeErr == nil && result.Envelope.SchemaVersion != "wechat-article-cli/v1" {
+		decodeErr = fmt.Errorf("unsupported candidate schemaVersion %q", result.Envelope.SchemaVersion)
+	}
+	if decodeErr == nil {
+		decodeErr = validateCommandEnvelope(result.Envelope)
+	}
 	if runErr != nil {
 		combined := errors.Join(
 			fmt.Errorf("candidate %q exited %d: %w", strings.Join(arguments, " "), exitCode, runErr),
@@ -71,21 +88,41 @@ func (runner candidateRunner) runJSON(ctx context.Context, arguments ...string) 
 	return result, nil
 }
 
+func validateCommandEnvelope(envelope commandEnvelope) error {
+	if envelope.Success {
+		if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+			return errors.New("successful command envelope has no data")
+		}
+		if len(envelope.Error) != 0 && string(envelope.Error) != "null" {
+			return errors.New("successful command envelope must not contain an error")
+		}
+		return nil
+	}
+	if len(envelope.Error) == 0 || string(envelope.Error) == "null" {
+		return errors.New("failed command envelope has no error")
+	}
+	return nil
+}
+
 func (runner candidateRunner) runStdio(ctx context.Context, input string, arguments ...string) ([]byte, []byte, int, error) {
-	command := runner.command(arguments...)
+	command, err := runner.configuredCommand(arguments...)
+	if err != nil {
+		return nil, nil, -1, fmt.Errorf("configure candidate environment: %w", err)
+	}
 	command.Stdin = strings.NewReader(input)
 	stdout := newBoundedBuffer(candidateStdoutLimit)
 	stderr := newBoundedBuffer(candidateStderrLimit)
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	runErr := runCandidateProcess(ctx, command)
+	exitCode := candidateExitCode(runErr)
 	if stdout.Overflowed() {
 		runErr = errors.Join(runErr, fmt.Errorf("candidate stdout exceeded %d bytes", candidateStdoutLimit))
 	}
 	if stderr.Overflowed() {
 		runErr = errors.Join(runErr, fmt.Errorf("candidate stderr exceeded %d bytes", candidateStderrLimit))
 	}
-	return stdout.Bytes(), stderr.Bytes(), candidateExitCode(runErr), runErr
+	return stdout.Bytes(), stderr.Bytes(), exitCode, runErr
 }
 
 func candidateExitCode(err error) int {
@@ -104,6 +141,7 @@ func decodeSingleCommandEnvelope(body []byte, target *commandEnvelope) error {
 		return fmt.Errorf("stdout exceeds %d bytes", candidateStdoutLimit)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}

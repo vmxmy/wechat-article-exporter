@@ -12,13 +12,22 @@ import (
 )
 
 func runTUISmoke(ctx context.Context, binary string, environment []string) (map[string]string, error) {
+	harnessContext, cancelHarness := context.WithCancel(ctx)
+	defer cancelHarness()
+	environment, err := candidateEnvironment(append(append([]string(nil), environment...),
+		"TERM=xterm-256color", "LANG=en_US.UTF-8"))
+	if err != nil {
+		return nil, fmt.Errorf("configure candidate TUI environment: %w", err)
+	}
 	harness, err := newCandidatePTYHarness(100, 30)
 	if err != nil {
 		return nil, err
 	}
-	defer harness.close()
-	if err := harness.start(ctx, binary, candidateEnvironment(append(append([]string(nil), environment...),
-		"TERM=xterm-256color", "LANG=en_US.UTF-8"))); err != nil {
+	defer func() {
+		cancelHarness()
+		_ = harness.close()
+	}()
+	if err := harness.start(harnessContext, binary, environment); err != nil {
 		return nil, fmt.Errorf("start candidate TUI in PTY: %w", err)
 	}
 	transcript := &lockedBuffer{}
@@ -39,7 +48,7 @@ func runTUISmoke(ctx context.Context, binary string, environment []string) (map[
 	if _, err := harness.Write([]byte{'\t'}); err != nil {
 		return nil, err
 	}
-	if err := awaitCandidatePTYTextAfter(ctx, transcript, "2 Accounts", navigationOffset, 25*time.Second); err != nil {
+	if err := awaitCandidatePTYTextAfter(ctx, transcript, "d discover", navigationOffset, 25*time.Second); err != nil {
 		return nil, fmt.Errorf("accounts navigation: %w", err)
 	}
 	if err := harness.resize(48, 16); err != nil {
@@ -90,26 +99,56 @@ type candidatePTYHarness interface {
 }
 
 type lockedBuffer struct {
-	mu sync.RWMutex
-	b  bytes.Buffer
+	mu       sync.RWMutex
+	b        bytes.Buffer
+	overflow bool
 }
+
+const maximumPTYTranscriptBytes = 8 << 20
 
 func (buffer *lockedBuffer) Write(value []byte) (int, error) {
 	buffer.mu.Lock()
 	defer buffer.mu.Unlock()
-	return buffer.b.Write(value)
-}
-
-func (buffer *lockedBuffer) String() string {
-	buffer.mu.RLock()
-	defer buffer.mu.RUnlock()
-	return buffer.b.String()
+	original := len(value)
+	remaining := maximumPTYTranscriptBytes - buffer.b.Len()
+	written := original
+	if remaining > 0 {
+		if len(value) > remaining {
+			value = value[:remaining]
+		}
+		_, _ = buffer.b.Write(value)
+	}
+	if written > remaining {
+		written = max(remaining, 0)
+		buffer.overflow = true
+		return written, errors.New("candidate PTY transcript exceeded size limit")
+	}
+	return written, nil
 }
 
 func (buffer *lockedBuffer) Len() int {
 	buffer.mu.RLock()
 	defer buffer.mu.RUnlock()
 	return buffer.b.Len()
+}
+
+func (buffer *lockedBuffer) Overflowed() bool {
+	buffer.mu.RLock()
+	defer buffer.mu.RUnlock()
+	return buffer.overflow
+}
+
+func (buffer *lockedBuffer) ContainsAfter(offset int, expected string) bool {
+	buffer.mu.RLock()
+	defer buffer.mu.RUnlock()
+	value := buffer.b.Bytes()
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(value) {
+		offset = len(value)
+	}
+	return bytes.Contains(value[offset:], []byte(expected))
 }
 
 func awaitCandidatePTYText(ctx context.Context, transcript *lockedBuffer, expected string, timeout time.Duration) error {
@@ -122,14 +161,10 @@ func awaitCandidatePTYTextAfter(ctx context.Context, transcript *lockedBuffer, e
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		value := transcript.String()
-		if offset < 0 {
-			offset = 0
+		if transcript.Overflowed() {
+			return errors.New("candidate PTY transcript exceeded size limit")
 		}
-		if offset > len(value) {
-			offset = len(value)
-		}
-		if strings.Contains(value[offset:], expected) {
+		if transcript.ContainsAfter(offset, expected) {
 			return nil
 		}
 		select {

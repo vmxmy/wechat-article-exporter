@@ -193,11 +193,15 @@ func NewClientForControlledOrigin(httpClient *http.Client, secretStore secrets.S
 		return nil, errors.New("controlled WeChat origin must be loopback HTTP without path, query, fragment, or user information")
 	}
 	clone := *origin
-	client := newClient(controlledOriginHTTPClient(httpClient, &clone), secretStore, profile, clone.String())
+	controlledClient, err := controlledOriginHTTPClient(httpClient, &clone)
+	if err != nil {
+		return nil, err
+	}
+	client := newClient(controlledClient, secretStore, profile, clone.String())
 	return client, nil
 }
 
-func controlledOriginHTTPClient(source *http.Client, origin *url.URL) *http.Client {
+func controlledOriginHTTPClient(source *http.Client, origin *url.URL) (*http.Client, error) {
 	if source == nil {
 		source = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -206,12 +210,19 @@ func controlledOriginHTTPClient(source *http.Client, origin *url.URL) *http.Clie
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	if direct, ok := transport.(*http.Transport); ok && direct != nil {
-		direct = direct.Clone()
-		direct.Proxy = nil
-		transport = direct
+	if direct, ok := transport.(*http.Transport); !ok || direct == nil {
+		return nil, errors.New("controlled WeChat origin requires an auditable direct HTTP transport")
 	}
-	client.Transport = controlledOriginTransport{origin: origin, next: transport}
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok || defaultTransport == nil {
+		return nil, errors.New("controlled WeChat origin requires the default direct HTTP transport")
+	}
+	direct := defaultTransport.Clone()
+	direct.Proxy = nil
+	direct.DialContext = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	direct.DialTLSContext = nil
+	direct.TLSClientConfig = nil
+	client.Transport = controlledOriginTransport{origin: origin, next: direct}
 	previousRedirectCheck := source.CheckRedirect
 	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
 		if !matchesControlledAuthority(request.URL, origin) {
@@ -225,7 +236,7 @@ func controlledOriginHTTPClient(source *http.Client, origin *url.URL) *http.Clie
 		}
 		return nil
 	}
-	return &client
+	return &client, nil
 }
 
 type controlledOriginTransport struct {

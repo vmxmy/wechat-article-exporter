@@ -12,8 +12,9 @@ func TestValidateReceiptSetRequiresAllFiveLiveTargets(t *testing.T) {
 	root := t.TempDir()
 	set := ReceiptSet{
 		SchemaVersion: receiptSetSchemaVersion,
-		Release:       ReceiptSetRelease{Repository: "vmxmy/wechat-article-exporter", Commit: "0123456789012345678901234567890123456789", Version: "2.0.1"},
-		Summary:       ReceiptSetSummary{RequiredTargets: 5, PassedTargets: 5, GateStatus: "pass"},
+		Release: ReceiptSetRelease{Repository: "vmxmy/wechat-article-exporter", Tag: "wechat-article-v2.0.1",
+			Commit: "0123456789012345678901234567890123456789", Version: "2.0.1", ChecksumManifestSHA256: validTestReceipt().Artifact.ChecksumManifestSHA256},
+		Summary: ReceiptSetSummary{RequiredTargets: 5, PassedTargets: 5, GateStatus: "pass"},
 	}
 	for _, target := range requiredTargetTuples {
 		receipt := validTestReceipt()
@@ -24,6 +25,7 @@ func TestValidateReceiptSetRequiresAllFiveLiveTargets(t *testing.T) {
 		receipt.Source.Version = set.Release.Version
 		parts := strings.Split(target, "/")
 		receipt.Platform.GOOS, receipt.Platform.GOARCH = parts[0], parts[1]
+		receipt.Platform.RunnerOS, receipt.Platform.RunnerArch = parts[0], parts[1]
 		receipt.Artifact.TargetGOOS, receipt.Artifact.TargetGOARCH = parts[0], parts[1]
 		for index := range receipt.Workflows {
 			contract, ok := workflowContractByID(receipt.Workflows[index].ID)
@@ -84,8 +86,30 @@ func TestValidateReceiptSetRejectsUnsafeReferencePaths(t *testing.T) {
 	if err := os.Symlink(real, target); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	if err := validateReceiptSet(set, root); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+	if err := validateReceiptSet(set, root); err == nil || !strings.Contains(err.Error(), "path is unsafe") {
 		t.Fatalf("symlink error = %v", err)
+	}
+}
+
+func TestValidateReceiptSetRejectsInternalSymlinkReference(t *testing.T) {
+	set, root := completeTestReceiptSet(t)
+	target := filepath.Join(root, set.Receipts[0].ReceiptPath)
+	real := filepath.Join(root, "real.json")
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Base(real), target); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := validateReceiptSet(set, root); err == nil || !strings.Contains(err.Error(), "path is unsafe") {
+		t.Fatalf("internal symlink error = %v", err)
 	}
 }
 
@@ -94,8 +118,9 @@ func completeTestReceiptSet(t *testing.T) (ReceiptSet, string) {
 	root := t.TempDir()
 	set := ReceiptSet{
 		SchemaVersion: receiptSetSchemaVersion,
-		Release:       ReceiptSetRelease{Repository: "vmxmy/wechat-article-exporter", Commit: "0123456789012345678901234567890123456789", Version: "2.0.1"},
-		Summary:       ReceiptSetSummary{RequiredTargets: 5, PassedTargets: 5, GateStatus: "pass"},
+		Release: ReceiptSetRelease{Repository: "vmxmy/wechat-article-exporter", Tag: "wechat-article-v2.0.1",
+			Commit: "0123456789012345678901234567890123456789", Version: "2.0.1", ChecksumManifestSHA256: validTestReceipt().Artifact.ChecksumManifestSHA256},
+		Summary: ReceiptSetSummary{RequiredTargets: 5, PassedTargets: 5, GateStatus: "pass"},
 	}
 	for _, target := range requiredTargetTuples {
 		receipt := validTestReceipt()
@@ -103,6 +128,7 @@ func completeTestReceiptSet(t *testing.T) (ReceiptSet, string) {
 		receipt.Source = SourceEvidence{Repository: set.Release.Repository, Tag: "wechat-article-v" + set.Release.Version, Commit: set.Release.Commit, Version: set.Release.Version}
 		parts := strings.Split(target, "/")
 		receipt.Platform.GOOS, receipt.Platform.GOARCH = parts[0], parts[1]
+		receipt.Platform.RunnerOS, receipt.Platform.RunnerArch = parts[0], parts[1]
 		receipt.Artifact.TargetGOOS, receipt.Artifact.TargetGOARCH = parts[0], parts[1]
 		for index, workflow := range receipt.Workflows {
 			contract, _ := workflowContractByID(workflow.ID)

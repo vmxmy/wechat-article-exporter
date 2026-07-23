@@ -29,7 +29,8 @@ func controlledCleanRoomDependencies() (cleanRoomEnvironmentConfiguration, bool,
 	if portableRoot == "" {
 		return cleanRoomEnvironmentConfiguration{}, false, errors.New("WECHAT_ARTICLE_CLEAN_ROOM requires an isolated WECHAT_ARTICLE_PORTABLE_ROOT")
 	}
-	if !filepath.IsAbs(portableRoot) || filepath.Clean(portableRoot) == string(filepath.Separator) {
+	cleanPortableRoot := filepath.Clean(portableRoot)
+	if !filepath.IsAbs(cleanPortableRoot) || filepath.Dir(cleanPortableRoot) == cleanPortableRoot {
 		return cleanRoomEnvironmentConfiguration{}, false, errors.New("WECHAT_ARTICLE_CLEAN_ROOM requires an absolute non-root WECHAT_ARTICLE_PORTABLE_ROOT")
 	}
 	origin, err := wechat.ParseControlledOrigin(os.Getenv(cleanRoomOrigin))

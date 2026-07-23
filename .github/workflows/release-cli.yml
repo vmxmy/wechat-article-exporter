@@ -376,7 +376,7 @@ jobs:
           if-no-files-found: error
 
   checksum-manifest:
-    needs: [build]
+    needs: [release-metadata, build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -391,7 +391,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          find . -maxdepth 1 -type f ! -name 'checksums.txt' -printf '%f\n' | sort | xargs sha256sum > checksums.txt
+          expected=(
+            wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_arm64.tar.gz
+            wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_arm64.sbom.cdx.json
+            wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_amd64.tar.gz
+            wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_amd64.sbom.cdx.json
+            wechat-article_${{ needs.release-metadata.outputs.version }}_linux_arm64.tar.gz
+            wechat-article_${{ needs.release-metadata.outputs.version }}_linux_arm64.sbom.cdx.json
+            wechat-article_${{ needs.release-metadata.outputs.version }}_linux_amd64.tar.gz
+            wechat-article_${{ needs.release-metadata.outputs.version }}_linux_amd64.sbom.cdx.json
+            wechat-article_${{ needs.release-metadata.outputs.version }}_windows_amd64.zip
+            wechat-article_${{ needs.release-metadata.outputs.version }}_windows_amd64.sbom.cdx.json
+          )
+          mapfile -t actual < <(find . -maxdepth 1 -type f ! -name 'checksums.txt' -printf '%f\n' | sort)
+          mapfile -t wanted < <(printf '%s\n' "${expected[@]}" | sort)
+          test "${#actual[@]}" -eq 10
+          test "${actual[*]}" = "${wanted[*]}"
+          printf '%s\n' "${wanted[@]}" | xargs sha256sum > checksums.txt
           sha256sum --check checksums.txt
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -684,7 +700,7 @@ jobs:
 
   controlled-live-receipts:
     if: startsWith(github.ref, 'refs/tags/wechat-article-v')
-    needs: [release-metadata, build, clean-room-fixture]
+    needs: [release-metadata, build, checksum-manifest, clean-room-fixture]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -718,14 +734,53 @@ jobs:
             exit 1
           fi
 
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: wechat-article-checksums
+          path: ${{ runner.temp }}/checksums
+
       - name: Verify five-target controlled-live gate
         working-directory: cli
         shell: bash
+        env:
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          EXPECTED_VERSION: ${{ needs.release-metadata.outputs.version }}
+          EXPECTED_TAG: ${{ github.ref_name }}
+          RECEIPT_RUN_ID: ${{ vars.CONTROLLED_LIVE_RECEIPT_RUN_ID }}
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_CONTROLLED_LIVE_WORKFLOW_ID: ${{ vars.CONTROLLED_LIVE_WORKFLOW_ID }}
         run: |
           set -euo pipefail
+          run_json="$RUNNER_TEMP/controlled-live-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RECEIPT_RUN_ID" > "$run_json"
+          test "$(jq -r '.repository.full_name' "$run_json")" = "$EXPECTED_REPOSITORY"
+          test "$(jq -r '.head_sha' "$run_json")" = "$EXPECTED_COMMIT"
+          test "$(jq -r '.status' "$run_json")" = 'completed'
+          test "$(jq -r '.conclusion' "$run_json")" = 'success'
+          test "$(jq -r '.event' "$run_json")" = 'workflow_dispatch'
+          if ! [[ "$EXPECTED_CONTROLLED_LIVE_WORKFLOW_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo 'Set CONTROLLED_LIVE_WORKFLOW_ID to the approved controlled-live workflow numeric ID.' >&2
+            exit 1
+          fi
+          test "$(jq -r '.workflow_id' "$run_json")" = "$EXPECTED_CONTROLLED_LIVE_WORKFLOW_ID"
           receipt_set="$(find "$RUNNER_TEMP/controlled-live" -type f -name 'release-receipt-set.json' -print -quit)"
           test -n "$receipt_set"
-          go run ./cmd/cleanroom verify-set --receipt-set "$receipt_set"
+          test "$(jq -r '.release.repository' "$receipt_set")" = "$EXPECTED_REPOSITORY"
+          test "$(jq -r '.release.commit' "$receipt_set")" = "$EXPECTED_COMMIT"
+          test "$(jq -r '.release.version' "$receipt_set")" = "$EXPECTED_VERSION"
+          test "$(jq -r '.release.tag' "$receipt_set")" = "$EXPECTED_TAG"
+          checksum_manifest="$RUNNER_TEMP/checksums/checksums.txt"
+          test -f "$checksum_manifest"
+          checksum_digest="$(sha256sum "$checksum_manifest" | cut -d ' ' -f1)"
+          test "$(jq -r '.release.checksumManifestSha256' "$receipt_set")" = "$checksum_digest"
+          go run ./cmd/cleanroom verify-set \
+            --receipt-set "$receipt_set" \
+            --repository "$EXPECTED_REPOSITORY" \
+            --tag "$EXPECTED_TAG" \
+            --commit "$EXPECTED_COMMIT" \
+            --version "$EXPECTED_VERSION" \
+            --checksum-manifest-sha256 "$checksum_digest"
 
   release:
     if: startsWith(github.ref, 'refs/tags/wechat-article-v')
@@ -738,13 +793,14 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
+          pattern: wechat-article-*
           merge-multiple: true
 
       - name: Create checksums
         working-directory: artifacts
         run: |
           set -euo pipefail
-          find . -maxdepth 1 -type f ! -name 'checksums.txt' -printf '%f\n' | sort | xargs sha256sum > checksums.txt
+          test -f checksums.txt
           sha256sum --check checksums.txt
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

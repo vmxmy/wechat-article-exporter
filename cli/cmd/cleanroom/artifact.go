@@ -14,7 +14,14 @@ import (
 	"strings"
 )
 
-const maximumArchiveMemberBytes = 256 << 20
+const (
+	maximumArchiveMemberBytes = 256 << 20
+	maximumArchiveTotalBytes  = 512 << 20
+	maximumArchiveMembers     = 128
+	maximumArchiveInputBytes  = 512 << 20
+	maximumSBOMInputBytes     = 32 << 20
+	maximumChecksumInputBytes = 8 << 20
+)
 
 type candidateArtifact struct {
 	BinaryPath             string
@@ -23,6 +30,7 @@ type candidateArtifact struct {
 	BuildInfoMember        string
 	BinarySHA256           string
 	BuildInfoSHA256        string
+	ArchiveSHA256          string
 	ChecksumManifestSHA256 string
 	SBOMSHA256             string
 	GOOS                   string
@@ -40,7 +48,42 @@ func inspectCandidateArtifact(options runOptions, destination string) (candidate
 	if err := os.MkdirAll(destination, 0o700); err != nil {
 		return candidateArtifact{}, err
 	}
-	members, err := extractReleaseArchive(options.Archive, destination)
+	staging := filepath.Join(destination, ".inputs")
+	if err := os.Mkdir(staging, 0o700); err != nil {
+		return candidateArtifact{}, err
+	}
+	stagedArchive, err := stageRegularFile(options.Archive, staging, "candidate-archive"+releaseArchiveSuffix(options.Archive), maximumArchiveInputBytes)
+	if err != nil {
+		return candidateArtifact{}, err
+	}
+	stagedSBOM, err := stageRegularFile(options.SBOM, staging, "candidate-sbom", maximumSBOMInputBytes)
+	if err != nil {
+		return candidateArtifact{}, err
+	}
+	stagedChecksums, err := stageRegularFile(options.ChecksumManifest, staging, "checksums.txt", maximumChecksumInputBytes)
+	if err != nil {
+		return candidateArtifact{}, err
+	}
+	archiveName := filepath.Base(options.Archive)
+	sbomName := filepath.Base(options.SBOM)
+	if archiveName == sbomName {
+		return candidateArtifact{}, errors.New("release archive and SBOM must have distinct asset names")
+	}
+	sbomDigest, err := sha256File(stagedSBOM)
+	if err != nil {
+		return candidateArtifact{}, err
+	}
+	archiveDigest, err := sha256File(stagedArchive)
+	if err != nil {
+		return candidateArtifact{}, err
+	}
+	if err := verifyChecksumManifest(stagedChecksums, map[string]string{
+		archiveName: archiveDigest,
+		sbomName:    sbomDigest,
+	}); err != nil {
+		return candidateArtifact{}, err
+	}
+	members, err := extractReleaseArchive(stagedArchive, destination)
 	if err != nil {
 		return candidateArtifact{}, err
 	}
@@ -97,34 +140,84 @@ func inspectCandidateArtifact(options runOptions, destination string) (candidate
 			return candidateArtifact{}, errors.New("supplied --build-info is not the archive build-info.txt")
 		}
 	}
-	if err := verifyChecksumManifest(options.ChecksumManifest, options.Archive); err != nil {
+	if err := verifyArtifactSBOM(stagedSBOM, options.Version, runtime.GOOS, runtime.GOARCH); err != nil {
 		return candidateArtifact{}, err
 	}
-	checksumDigest, err := sha256File(options.ChecksumManifest)
-	if err != nil {
-		return candidateArtifact{}, err
-	}
-	if err := verifyArtifactSBOM(options.SBOM, options.Version, runtime.GOOS, runtime.GOARCH); err != nil {
-		return candidateArtifact{}, err
-	}
-	sbomDigest, err := sha256File(options.SBOM)
+	checksumDigest, err := sha256File(stagedChecksums)
 	if err != nil {
 		return candidateArtifact{}, err
 	}
 	return candidateArtifact{BinaryPath: binaryPath, BuildInfoPath: buildInfoPath, BinaryMember: binaryMember,
 		BuildInfoMember: buildInfoMember, BinarySHA256: binaryDigest, BuildInfoSHA256: buildInfoDigest,
-		ChecksumManifestSHA256: checksumDigest, SBOMSHA256: sbomDigest,
+		ArchiveSHA256: archiveDigest, ChecksumManifestSHA256: checksumDigest, SBOMSHA256: sbomDigest,
 		GOOS: metadata.GOOS, GOARCH: metadata.GOARCH, CGOEnabled: metadata.CGOEnabled, Module: metadata.Module, Commit: metadata.Commit}, nil
 }
 
+func stageRegularFile(source, destination, name string, limit int64) (target string, resultErr error) {
+	input, info, err := openRegularFileNoFollow(source)
+	if err != nil {
+		return "", fmt.Errorf("open release input %q: %w", filepath.Base(source), err)
+	}
+	if info.Size() < 0 || info.Size() > limit {
+		_ = input.Close()
+		return "", fmt.Errorf("release input %q is not a bounded regular file", filepath.Base(source))
+	}
+	defer input.Close()
+	target = filepath.Join(destination, name)
+	output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if resultErr != nil {
+			_ = os.Remove(target)
+		}
+	}()
+	written, copyErr := io.Copy(output, io.LimitReader(input, limit+1))
+	closeErr := output.Close()
+	if written > limit {
+		copyErr = errors.Join(copyErr, errors.New("release input exceeded size limit"))
+	}
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
+func releaseArchiveSuffix(path string) string {
+	lower := strings.ToLower(path)
+	switch {
+	case strings.HasSuffix(lower, ".tar.gz"):
+		return ".tar.gz"
+	case strings.HasSuffix(lower, ".zip"):
+		return ".zip"
+	default:
+		return ""
+	}
+}
+
 func extractReleaseArchive(path, destination string) (map[string]string, error) {
-	if strings.HasSuffix(path, ".zip") {
+	if strings.HasSuffix(path, ".zip") || archiveLooksLikeZIP(path) {
 		return extractZIPArchive(path, destination)
 	}
-	if strings.HasSuffix(path, ".tar.gz") {
+	if strings.HasSuffix(path, ".tar.gz") || archiveLooksLikeGzip(path) {
 		return extractTarGzipArchive(path, destination)
 	}
 	return nil, errors.New("release archive must be .tar.gz or .zip")
+}
+
+func archiveLooksLikeZIP(path string) bool  { return fileHasPrefix(path, []byte{'P', 'K', 3, 4}) }
+func archiveLooksLikeGzip(path string) bool { return fileHasPrefix(path, []byte{0x1f, 0x8b}) }
+
+func fileHasPrefix(path string, prefix []byte) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	body := make([]byte, len(prefix))
+	_, err = io.ReadFull(file, body)
+	return err == nil && string(body) == string(prefix)
 }
 
 func extractZIPArchive(path, destination string) (map[string]string, error) {
@@ -133,7 +226,11 @@ func extractZIPArchive(path, destination string) (map[string]string, error) {
 		return nil, err
 	}
 	defer archive.Close()
+	if len(archive.File) > maximumArchiveMembers {
+		return nil, fmt.Errorf("archive exceeds %d members", maximumArchiveMembers)
+	}
 	members := make(map[string]string)
+	var totalBytes uint64
 	for _, member := range archive.File {
 		if member.FileInfo().IsDir() {
 			continue
@@ -144,6 +241,13 @@ func extractZIPArchive(path, destination string) (map[string]string, error) {
 		if member.UncompressedSize64 > maximumArchiveMemberBytes {
 			return nil, fmt.Errorf("archive member %q is too large", member.Name)
 		}
+		if len(members) >= maximumArchiveMembers {
+			return nil, fmt.Errorf("archive exceeds %d regular members", maximumArchiveMembers)
+		}
+		if member.UncompressedSize64 > uint64(maximumArchiveTotalBytes)-totalBytes {
+			return nil, fmt.Errorf("archive exceeds %d uncompressed bytes", maximumArchiveTotalBytes)
+		}
+		totalBytes += member.UncompressedSize64
 		name, target, err := safeArchiveTarget(destination, member.Name, members)
 		if err != nil {
 			return nil, err
@@ -177,6 +281,7 @@ func extractTarGzipArchive(path, destination string) (map[string]string, error) 
 	defer compressed.Close()
 	reader := tar.NewReader(compressed)
 	members := make(map[string]string)
+	var totalBytes int64
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -191,6 +296,13 @@ func extractTarGzipArchive(path, destination string) (map[string]string, error) 
 		if header.Typeflag != tar.TypeReg || header.Size < 0 || header.Size > maximumArchiveMemberBytes {
 			return nil, fmt.Errorf("archive member %q is not a bounded regular file", header.Name)
 		}
+		if len(members) >= maximumArchiveMembers {
+			return nil, fmt.Errorf("archive exceeds %d regular members", maximumArchiveMembers)
+		}
+		if header.Size > maximumArchiveTotalBytes-totalBytes {
+			return nil, fmt.Errorf("archive exceeds %d uncompressed bytes", maximumArchiveTotalBytes)
+		}
+		totalBytes += header.Size
 		name, target, err := safeArchiveTarget(destination, header.Name, members)
 		if err != nil {
 			return nil, err
@@ -284,23 +396,35 @@ func parseBuildInfo(path string) (artifactBuildMetadata, error) {
 	return metadata, nil
 }
 
-func verifyChecksumManifest(path, archive string) error {
+func verifyChecksumManifest(path string, expected map[string]string) error {
 	body, err := readBoundedRegularFile(path, 8<<20)
 	if err != nil {
 		return err
 	}
-	digest, err := sha256File(archive)
-	if err != nil {
-		return err
-	}
-	wanted := filepath.Base(archive)
+	entries := make(map[string]string)
 	for _, line := range strings.Split(string(body), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == digest && strings.TrimPrefix(fields[len(fields)-1], "*") == wanted {
-			return nil
+		if len(fields) != 2 || !validSHA256(fields[0]) {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			return errors.New("release checksum manifest contains a malformed entry")
+		}
+		name := strings.TrimPrefix(fields[1], "*")
+		if filepath.Base(name) != name || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+			return errors.New("release checksum manifest contains an unsafe asset name")
+		}
+		if _, duplicate := entries[name]; duplicate {
+			return fmt.Errorf("release checksum manifest contains duplicate asset %q", name)
+		}
+		entries[name] = fields[0]
+	}
+	for name, digest := range expected {
+		if entries[name] != digest {
+			return fmt.Errorf("release checksum manifest does not contain the expected digest for %q", name)
 		}
 	}
-	return errors.New("release checksum manifest does not contain the candidate archive digest")
+	return nil
 }
 
 func verifyArtifactSBOM(path, version, goos, goarch string) error {

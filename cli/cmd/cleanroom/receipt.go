@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -31,33 +32,83 @@ type workflowContract struct {
 	ID           string
 	LiveEvidence bool
 	Phase        string
+	Evidence     map[string]evidenceConstraint
+}
+
+type evidenceRule string
+
+const (
+	evidenceBoolean evidenceRule = "boolean"
+	evidenceCount   evidenceRule = "count"
+	evidenceDigest  evidenceRule = "digest"
+	evidenceText    evidenceRule = "text"
+)
+
+type evidenceConstraint struct {
+	Rule    evidenceRule
+	Equals  string
+	Minimum uint64
+	Maximum uint64
+}
+
+type evidenceField struct {
+	Name       string
+	Constraint evidenceConstraint
+}
+
+func field(name string, rule evidenceRule) evidenceField {
+	return evidenceField{Name: name, Constraint: evidenceConstraint{Rule: rule, Maximum: 1_000_000_000}}
+}
+
+func equalField(name string, rule evidenceRule, value string) evidenceField {
+	result := field(name, rule)
+	result.Constraint.Equals = value
+	return result
+}
+
+func positiveCount(name string) evidenceField {
+	result := field(name, evidenceCount)
+	result.Constraint.Minimum = 1
+	return result
+}
+
+func evidence(fields ...evidenceField) map[string]evidenceConstraint {
+	result := make(map[string]evidenceConstraint, len(fields))
+	for _, item := range fields {
+		result[item.Name] = item.Constraint
+	}
+	return result
 }
 
 var workflowContracts = []workflowContract{
-	{ID: "install.archive", Phase: phaseOffline},
-	{ID: "storage.clean-roots", Phase: phaseOffline},
-	{ID: "migration.legacy-web", Phase: phaseOffline},
-	{ID: "migration.database-baselines", Phase: phaseOffline},
-	{ID: "login.qr", LiveEvidence: true},
-	{ID: "session.restart-persistence", LiveEvidence: true},
-	{ID: "sync.account", LiveEvidence: true},
-	{ID: "download.article", LiveEvidence: true},
-	{ID: "download.resources", LiveEvidence: true},
-	{ID: "export.html", Phase: phaseOffline},
-	{ID: "export.markdown", Phase: phaseOffline},
-	{ID: "export.text", Phase: phaseOffline},
-	{ID: "export.json", Phase: phaseOffline},
-	{ID: "export.xlsx", Phase: phaseOffline},
-	{ID: "export.docx", Phase: phaseOffline},
-	{ID: "export.pdf", Phase: phaseOffline},
-	{ID: "automation.cobra", Phase: phaseOffline},
-	{ID: "ui.tui", Phase: phaseOffline},
-	{ID: "automation.mcp", Phase: phaseOffline},
-	{ID: "storage.backup-restore", Phase: phaseOffline},
-	{ID: "offline.local-workflows", Phase: phaseOffline},
-	{ID: "network.no-retired-domain", Phase: phaseOffline},
-	{ID: "security.no-receipt-leakage", Phase: phaseOffline},
-	{ID: "secrets.platform-persistence", Phase: phaseOffline},
+	{ID: "install.archive", Phase: phaseOffline, Evidence: evidence(field("archiveSha256", evidenceDigest), field("binarySha256", evidenceDigest), field("archiveMember", evidenceText), field("target", evidenceText), equalField("cgoEnabled", evidenceText, "0"), equalField("versionExact", evidenceBoolean, "true"))},
+	{ID: "storage.clean-roots", Phase: phaseOffline, Evidence: evidence(equalField("rootCount", evidenceCount, "4"), equalField("beganEmpty", evidenceBoolean, "true"))},
+	{ID: "migration.legacy-web", Phase: phaseOffline, Evidence: evidence(field("archiveSha256", evidenceDigest), equalField("format", evidenceText, "wechat-article-exporter-legacy-archive"), positiveCount("records"))},
+	{ID: "migration.database-baselines", Phase: phaseOffline, Evidence: evidence(field("compatibilityWindow", evidenceText), equalField("currentDatabaseOpened", evidenceBoolean, "true"), equalField("integrityValid", evidenceBoolean, "true"))},
+	{ID: "login.qr", LiveEvidence: true, Evidence: evidence(equalField("qrRemoved", evidenceBoolean, "true"), equalField("session", evidenceText, "authenticated"), field("backend", evidenceText))},
+	{ID: "session.restart-persistence", LiveEvidence: true, Evidence: evidence(equalField("processRestarted", evidenceBoolean, "true"), field("backend", evidenceText), equalField("sessionReused", evidenceBoolean, "true"))},
+	{ID: "sync.account", LiveEvidence: true, Evidence: evidence(positiveCount("accountCount"), positiveCount("articleCount"), equalField("expectedDatasetVisible", evidenceBoolean, "true"))},
+	{ID: "download.article", LiveEvidence: true, Evidence: evidence(positiveCount("articleCount"), equalField("contentAvailable", evidenceBoolean, "true"))},
+	{ID: "download.resources", LiveEvidence: true, Evidence: evidence(positiveCount("resourceRequestDelta"), equalField("objectMappingVerified", evidenceBoolean, "true"))},
+	{ID: "export.html", Phase: phaseOffline, Evidence: exportEvidence()},
+	{ID: "export.markdown", Phase: phaseOffline, Evidence: exportEvidence()},
+	{ID: "export.text", Phase: phaseOffline, Evidence: exportEvidence()},
+	{ID: "export.json", Phase: phaseOffline, Evidence: exportEvidence()},
+	{ID: "export.xlsx", Phase: phaseOffline, Evidence: exportEvidence()},
+	{ID: "export.docx", Phase: phaseOffline, Evidence: exportEvidence()},
+	{ID: "export.pdf", Phase: phaseOffline, Evidence: exportEvidence()},
+	{ID: "automation.cobra", Phase: phaseOffline, Evidence: evidence(equalField("schemaVersion", evidenceText, "wechat-article-cli/v1"), equalField("jsonPure", evidenceBoolean, "true"))},
+	{ID: "ui.tui", Phase: phaseOffline, Evidence: evidence(equalField("pty", evidenceText, "native"), equalField("candidateBinary", evidenceBoolean, "true"), equalField("navigation", evidenceText, "passed"), equalField("resize", evidenceText, "passed"))},
+	{ID: "automation.mcp", Phase: phaseOffline, Evidence: evidence(equalField("responses", evidenceCount, "3"), equalField("transport", evidenceText, "stdio"), equalField("unsupportedRejected", evidenceBoolean, "true"), field("stderrBytes", evidenceCount))},
+	{ID: "storage.backup-restore", Phase: phaseOffline, Evidence: evidence(field("backupSha256", evidenceDigest), equalField("restoreRootEmpty", evidenceBoolean, "true"))},
+	{ID: "offline.local-workflows", Phase: phaseOffline, Evidence: evidence(equalField("controlledOriginClosed", evidenceBoolean, "true"), field("guard", evidenceText))},
+	{ID: "network.no-retired-domain", Phase: phaseOffline, Evidence: evidence(equalField("retiredDomainContacts", evidenceCount, "0"), field("observedHostCount", evidenceCount))},
+	{ID: "security.no-receipt-leakage", Phase: phaseOffline, Evidence: evidence(equalField("scanPassed", evidenceBoolean, "true"), equalField("rawPayloadStored", evidenceBoolean, "false"))},
+	{ID: "secrets.platform-persistence", Phase: phaseOffline, Evidence: evidence(field("backend", evidenceText), equalField("restartRoundTrip", evidenceBoolean, "true"))},
+}
+
+func exportEvidence() map[string]evidenceConstraint {
+	return evidence(positiveCount("fileCount"), field("firstOutputSha256", evidenceDigest), equalField("manifestVerified", evidenceBoolean, "true"))
 }
 
 const receiptSetSchemaVersion = "wechat-article-clean-room-release-set/v1"
@@ -201,6 +252,12 @@ func validateReceipt(receipt Receipt, requireLive bool) error {
 	if !receipt.Platform.Native || receipt.Platform.GOOS == "" || receipt.Platform.GOARCH == "" {
 		problems = append(problems, errors.New("native platform evidence is required"))
 	}
+	if receipt.Mode == modeLive {
+		expectedOS, expectedArch, ok := normalizedRunnerTarget(receipt.Platform.RunnerOS, receipt.Platform.RunnerArch)
+		if !ok || expectedOS != receipt.Platform.GOOS || expectedArch != receipt.Platform.GOARCH {
+			problems = append(problems, errors.New("live receipt runner identity does not match the native target"))
+		}
+	}
 	if receipt.Source.Commit == "" || receipt.Source.Version == "" {
 		problems = append(problems, errors.New("source commit and version are required"))
 	}
@@ -269,12 +326,23 @@ func validateReceipt(receipt Receipt, requireLive bool) error {
 		if workflow.StartedAt.IsZero() || workflow.FinishedAt.IsZero() || workflow.FinishedAt.Before(workflow.StartedAt) {
 			problems = append(problems, fmt.Errorf("workflow %q has invalid timestamps", workflow.ID))
 		}
+		if !receipt.StartedAt.IsZero() && !workflow.StartedAt.IsZero() && workflow.StartedAt.Before(receipt.StartedAt) ||
+			!receipt.FinishedAt.IsZero() && !workflow.FinishedAt.IsZero() && workflow.FinishedAt.After(receipt.FinishedAt) {
+			problems = append(problems, fmt.Errorf("workflow %q timestamps fall outside the receipt interval", workflow.ID))
+		}
 		expectedDuration := workflow.FinishedAt.Sub(workflow.StartedAt).Milliseconds()
 		if workflow.DurationMS < 0 || workflow.DurationMS != expectedDuration {
 			problems = append(problems, fmt.Errorf("workflow %q duration does not match timestamps", workflow.ID))
 		}
 		if workflow.Result == resultSkipped && strings.TrimSpace(workflow.Reason) == "" {
 			problems = append(problems, fmt.Errorf("workflow %q skip reason is required", workflow.ID))
+		}
+		if workflow.Result == resultPassed {
+			if err := validateWorkflowEvidence(contract, workflow.Evidence); err != nil {
+				problems = append(problems, fmt.Errorf("workflow %q evidence is invalid: %w", workflow.ID, err))
+			}
+		} else if len(workflow.Evidence) != 0 {
+			problems = append(problems, fmt.Errorf("workflow %q non-passing result must not contain evidence", workflow.ID))
 		}
 	}
 	for _, contract := range workflowContracts {
@@ -322,6 +390,70 @@ func validateReceipt(receipt Receipt, requireLive bool) error {
 	return errors.Join(problems...)
 }
 
+func normalizedRunnerTarget(runnerOS, runnerArch string) (string, string, bool) {
+	switch strings.ToLower(strings.TrimSpace(runnerOS)) {
+	case "macos", "darwin":
+		runnerOS = "darwin"
+	case "linux":
+		runnerOS = "linux"
+	case "windows":
+		runnerOS = "windows"
+	default:
+		return "", "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(runnerArch)) {
+	case "x64", "x86_64", "amd64":
+		runnerArch = "amd64"
+	case "arm64", "aarch64":
+		runnerArch = "arm64"
+	default:
+		return "", "", false
+	}
+	return runnerOS, runnerArch, true
+}
+
+func validateWorkflowEvidence(contract workflowContract, values map[string]string) error {
+	if len(values) != len(contract.Evidence) {
+		return fmt.Errorf("got %d field(s), want %d", len(values), len(contract.Evidence))
+	}
+	for name, constraint := range contract.Evidence {
+		value, ok := values[name]
+		if !ok {
+			return fmt.Errorf("missing field %q", name)
+		}
+		if constraint.Equals != "" && value != constraint.Equals {
+			return fmt.Errorf("field %q=%q, want %q", name, value, constraint.Equals)
+		}
+		switch constraint.Rule {
+		case evidenceBoolean:
+			if value != "true" && value != "false" {
+				return fmt.Errorf("field %q is not boolean", name)
+			}
+		case evidenceCount:
+			parsed, err := strconv.ParseUint(value, 10, 64)
+			if err != nil || parsed < constraint.Minimum || parsed > constraint.Maximum {
+				return fmt.Errorf("field %q is not a bounded count", name)
+			}
+		case evidenceDigest:
+			if !validSHA256(value) {
+				return fmt.Errorf("field %q is not a SHA-256 digest", name)
+			}
+		case evidenceText:
+			if strings.TrimSpace(value) == "" || len(value) > 256 || strings.ContainsAny(value, "\r\n\x00") {
+				return fmt.Errorf("field %q is not bounded text", name)
+			}
+		default:
+			return fmt.Errorf("field %q has unknown validation rule", name)
+		}
+	}
+	for name := range values {
+		if _, ok := contract.Evidence[name]; !ok {
+			return fmt.Errorf("unknown field %q", name)
+		}
+	}
+	return nil
+}
+
 func writeReceipt(path string, receipt Receipt) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -354,7 +486,7 @@ func writeReceipt(path string, receipt Receipt) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(temporaryPath, path); err != nil {
+	if err := commitReceiptFile(temporaryPath, path); err != nil {
 		return err
 	}
 	committed = true
@@ -394,9 +526,11 @@ type ReceiptSet struct {
 }
 
 type ReceiptSetRelease struct {
-	Repository string `json:"repository,omitempty"`
-	Commit     string `json:"commit"`
-	Version    string `json:"version"`
+	Repository             string `json:"repository,omitempty"`
+	Tag                    string `json:"tag"`
+	Commit                 string `json:"commit"`
+	Version                string `json:"version"`
+	ChecksumManifestSHA256 string `json:"checksumManifestSha256"`
 }
 
 type ReceiptSetReference struct {
@@ -421,6 +555,12 @@ func validateReceiptSet(receiptSet ReceiptSet, baseDirectory string) error {
 	if receiptSet.Release.Commit == "" || receiptSet.Release.Version == "" {
 		problems = append(problems, errors.New("release commit and version are required"))
 	}
+	if receiptSet.Release.Tag != "wechat-article-v"+receiptSet.Release.Version {
+		problems = append(problems, errors.New("release tag does not match the exact version"))
+	}
+	if !validSHA256(receiptSet.Release.ChecksumManifestSHA256) {
+		problems = append(problems, errors.New("release checksum-manifest digest is invalid"))
+	}
 	required := make(map[string]struct{}, len(requiredTargetTuples))
 	for _, target := range requiredTargetTuples {
 		required[target] = struct{}{}
@@ -439,14 +579,13 @@ func validateReceiptSet(receiptSet ReceiptSet, baseDirectory string) error {
 			problems = append(problems, fmt.Errorf("target %q contains an invalid digest", reference.Target))
 			continue
 		}
-		path, err := receiptReferencePath(baseDirectory, reference.ReceiptPath)
+		body, err := readReceiptReference(baseDirectory, reference.ReceiptPath)
 		if err != nil {
 			problems = append(problems, fmt.Errorf("target %q receipt path is unsafe", reference.Target))
 			continue
 		}
-		body, err := readBoundedRegularFile(path, maximumReceiptBytes)
 		digest := sha256Bytes(body)
-		if err != nil || digest != reference.ReceiptSHA256 {
+		if digest != reference.ReceiptSHA256 {
 			problems = append(problems, fmt.Errorf("target %q receipt digest mismatch", reference.Target))
 			continue
 		}
@@ -457,7 +596,9 @@ func validateReceiptSet(receiptSet ReceiptSet, baseDirectory string) error {
 		}
 		actualTarget := receipt.Platform.GOOS + "/" + receipt.Platform.GOARCH
 		if actualTarget != reference.Target || receipt.Source.Commit != receiptSet.Release.Commit ||
-			receipt.Source.Version != receiptSet.Release.Version || receipt.Source.Repository != receiptSet.Release.Repository ||
+			receipt.Source.Version != receiptSet.Release.Version || receipt.Source.Tag != receiptSet.Release.Tag ||
+			receipt.Source.Repository != receiptSet.Release.Repository ||
+			receipt.Artifact.ChecksumManifestSHA256 != receiptSet.Release.ChecksumManifestSHA256 ||
 			receipt.Artifact.ArchiveSHA256 != reference.ArchiveSHA256 {
 			problems = append(problems, fmt.Errorf("target %q release identity mismatch", reference.Target))
 			continue
@@ -516,26 +657,32 @@ func receiptReferencePath(baseDirectory, reference string) (string, error) {
 	return resolved, nil
 }
 
-func readBoundedRegularFile(path string, limit int64) ([]byte, error) {
-	linkInfo, err := os.Lstat(path)
+func readReceiptReference(baseDirectory, reference string) ([]byte, error) {
+	resolved, err := receiptReferencePath(baseDirectory, reference)
 	if err != nil {
 		return nil, err
 	}
-	if linkInfo.Mode()&os.ModeSymlink != 0 {
-		return nil, errors.New("receipt must not be a symlink")
-	}
-	file, err := os.Open(path)
+	file, _, err := openRegularFileNoFollow(resolved)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	info, err := file.Stat()
+	body, err := io.ReadAll(io.LimitReader(file, maximumReceiptBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, errors.New("receipt must be a regular non-symlink file")
+	if len(body) > maximumReceiptBytes {
+		return nil, fmt.Errorf("receipt exceeds %d bytes", maximumReceiptBytes)
 	}
+	return body, nil
+}
+
+func readBoundedRegularFile(path string, limit int64) ([]byte, error) {
+	file, _, err := openRegularFileNoFollow(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
 	body, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return nil, err
@@ -552,7 +699,7 @@ func sha256Bytes(value []byte) string {
 }
 
 func sha256File(path string) (string, error) {
-	file, err := os.Open(path)
+	file, _, err := openRegularFileNoFollow(path)
 	if err != nil {
 		return "", err
 	}

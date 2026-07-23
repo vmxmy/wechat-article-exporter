@@ -16,14 +16,19 @@ import (
 )
 
 type windowsCandidatePTY struct {
-	hpc       windows.Handle
-	input     *os.File
-	output    *os.File
-	process   *os.Process
-	job       windows.Handle
-	attrs     *windows.ProcThreadAttributeListContainer
-	closeOnce sync.Once
-	closeErr  error
+	hpc        windows.Handle
+	input      *os.File
+	output     *os.File
+	process    *os.Process
+	job        windows.Handle
+	attrs      *windows.ProcThreadAttributeListContainer
+	cancelStop func() bool
+	cancelMu   sync.Mutex
+	context    context.Context
+	closed     bool
+	canceled   bool
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 func newCandidatePTYHarness(width, height int) (candidatePTYHarness, error) {
@@ -116,18 +121,20 @@ func (harness *windowsCandidatePTY) start(ctx context.Context, binary string, en
 		return err
 	}
 	_ = windows.CloseHandle(process.Process)
-	go func() {
-		<-ctx.Done()
-		if harness.job != 0 {
-			_ = windows.TerminateJobObject(harness.job, 1)
-		}
-	}()
+	stop := context.AfterFunc(ctx, func() { _ = harness.cancel() })
+	harness.cancelMu.Lock()
+	harness.cancelStop = stop
+	harness.context = ctx
+	alreadyClosed := harness.closed
+	harness.cancelMu.Unlock()
+	if alreadyClosed {
+		stop()
+	}
 	return nil
 }
 
 func candidateEnvironmentBlock(environment []string) *uint16 {
-	values := candidateEnvironment(environment)
-	encoded := utf16.Encode([]rune(strings.Join(values, "\x00") + "\x00\x00"))
+	encoded := utf16.Encode([]rune(strings.Join(environment, "\x00") + "\x00\x00"))
 	return &encoded[0]
 }
 
@@ -147,13 +154,36 @@ func (harness *windowsCandidatePTY) wait() error {
 	_, err := harness.process.Wait()
 	return err
 }
+
 func (harness *windowsCandidatePTY) close() error {
+	return harness.shutdown(false)
+}
+
+func (harness *windowsCandidatePTY) cancel() error {
+	return harness.shutdown(true)
+}
+
+func (harness *windowsCandidatePTY) shutdown(canceled bool) error {
 	harness.closeOnce.Do(func() {
+		harness.cancelMu.Lock()
+		harness.closed = true
+		harness.canceled = harness.canceled || canceled || (harness.context != nil && harness.context.Err() != nil)
+		stop := harness.cancelStop
+		exitCode := uint32(0)
+		if harness.canceled {
+			exitCode = 1
+		}
+		harness.cancelMu.Unlock()
+		if stop != nil {
+			stop()
+		}
 		if harness.job != 0 {
-			harness.closeErr = errors.Join(harness.closeErr, windows.TerminateJobObject(harness.job, 0), windows.CloseHandle(harness.job))
+			harness.closeErr = errors.Join(harness.closeErr, windows.TerminateJobObject(harness.job, exitCode), windows.CloseHandle(harness.job))
 			harness.job = 0
 		}
-		harness.closeErr = errors.Join(harness.closeErr, harness.input.Close())
+		if harness.input != nil {
+			harness.closeErr = errors.Join(harness.closeErr, harness.input.Close())
+		}
 		windows.ClosePseudoConsole(harness.hpc)
 		if harness.attrs != nil {
 			harness.attrs.Delete()

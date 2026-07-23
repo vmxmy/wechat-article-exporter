@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
@@ -179,9 +180,50 @@ func newRuntimeManager(version string, paths profiles.Paths, dependencies Depend
 		version: version, paths: paths, http: httpDoer, clock: clock,
 		filesystem: filesystem, browser: browser, browserExplicit: browserExplicit, pdfRunner: dependencies.PDFRunner, signals: signals,
 		secrets: secretStore, executable: executable, worker: worker, factory: dependencies.ApplicationFactory,
-		wechatOrigin: wechatOrigin, downloadPolicy: dependencies.DownloadDestinationPolicy,
+		wechatOrigin: wechatOrigin, downloadPolicy: cloneDestinationPolicy(dependencies.DownloadDestinationPolicy),
 		databaseOpen: library.Open,
 	}
+}
+
+func cloneDestinationPolicy(policy network.DestinationPolicy) network.DestinationPolicy {
+	clone := policy
+	if policy.AllowedHosts != nil {
+		clone.AllowedHosts = make(map[string]struct{}, len(policy.AllowedHosts))
+		for host := range policy.AllowedHosts {
+			clone.AllowedHosts[host] = struct{}{}
+		}
+	}
+	if policy.AllowedAuthorities != nil {
+		clone.AllowedAuthorities = make(map[string]struct{}, len(policy.AllowedAuthorities))
+		for authority := range policy.AllowedAuthorities {
+			clone.AllowedAuthorities[authority] = struct{}{}
+		}
+	}
+	return clone
+}
+
+func validateControlledOriginDependencies(origin *url.URL, policy network.DestinationPolicy) error {
+	hasPolicy := policy.AllowedHosts != nil || policy.AllowedAuthorities != nil || policy.AllowSubdomains ||
+		policy.AllowLoopback || policy.AllowPrivate || policy.AllowCloudMetadata || policy.Resolver != nil
+	if origin == nil {
+		if hasPolicy {
+			return errors.New("download destination policy override requires a controlled WeChat origin")
+		}
+		return nil
+	}
+	if !policy.AllowLoopback || policy.AllowPrivate || policy.AllowCloudMetadata || policy.AllowSubdomains || policy.Resolver != nil ||
+		len(policy.AllowedHosts) != 1 || len(policy.AllowedAuthorities) != 1 {
+		return errors.New("controlled WeChat origin requires an exact authority-bound loopback download policy")
+	}
+	host := strings.ToLower(origin.Hostname())
+	authority := strings.ToLower(origin.Host)
+	if _, ok := policy.AllowedHosts[host]; !ok {
+		return errors.New("controlled WeChat origin download policy host mismatch")
+	}
+	if _, ok := policy.AllowedAuthorities[authority]; !ok {
+		return errors.New("controlled WeChat origin download policy authority mismatch")
+	}
+	return nil
 }
 
 func (manager *runtimeManager) Build(ctx context.Context, profile profiles.Profile) (*ProfileRuntime, error) {
@@ -235,6 +277,9 @@ func (manager *runtimeManager) prepareLocked(ctx context.Context, profile profil
 }
 
 func (manager *runtimeManager) prepareProfileLocked(ctx context.Context, profile profiles.Profile, maintenanceGateHeld bool) (*ProfileRuntime, error) {
+	if err := validateControlledOriginDependencies(manager.wechatOrigin, manager.downloadPolicy); err != nil {
+		return nil, err
+	}
 
 	profilePaths := manager.paths.ForProfile(profile.ID)
 	if err := ensureProfilePaths(manager.filesystem, profilePaths); err != nil {
