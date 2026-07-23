@@ -55,6 +55,57 @@ func TestVerifyAndRestoreRejectUnsafeArchiveNamesBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestVerifyAndRestoreRejectSymlinkArchiveEntryBeforeMutation(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "symlink.wab")
+	archive, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(archive)
+	header := &zip.FileHeader{Name: "objects/sha256/aa/aa/linked-object", Method: zip.Store}
+	header.SetMode(os.ModeSymlink | 0o777)
+	entry, err := writer.CreateHeader(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write([]byte("../../outside")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	verification, err := VerifyBackup(context.Background(), archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.Valid || !containsFailure(verification.Failures, "unsupported archive entry") {
+		t.Fatalf("verification=%#v, want symlink-entry rejection", verification)
+	}
+
+	databasePath := filepath.Join(t.TempDir(), "live.sqlite")
+	if err := os.WriteFile(databasePath, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := objects.NewFileStore(filepath.Join(t.TempDir(), "objects"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreBackup(context.Background(), RestoreOptions{ArchivePath: archivePath, DatabasePath: databasePath, ObjectStore: store}); err == nil {
+		t.Fatal("RestoreBackup() error = nil")
+	}
+	contents, err := os.ReadFile(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "unchanged" {
+		t.Fatalf("live database changed to %q", contents)
+	}
+}
+
 func TestIndexBackupEntriesAppliesEntryCountAndSizeLimits(t *testing.T) {
 	archivePath := writeLimitTestArchive(t, map[string][]byte{"one": []byte("one"), "two": []byte("two")})
 	reader, err := zip.OpenReader(archivePath)
