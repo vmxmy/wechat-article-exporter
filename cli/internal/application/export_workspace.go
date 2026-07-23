@@ -79,13 +79,12 @@ type WorkspaceExportRecord struct {
 }
 
 type WorkspaceExportFile struct {
-	ArticleID  string `json:"articleId,omitempty"`
-	Path       string `json:"path"`
-	SizeBytes  int64  `json:"sizeBytes"`
-	SHA256     string `json:"sha256"`
-	MediaType  string `json:"mediaType,omitempty"`
-	Status     string `json:"status"`
-	DownloadID string `json:"downloadId,omitempty"`
+	ArticleID string `json:"articleId,omitempty"`
+	Path      string `json:"path"`
+	SizeBytes int64  `json:"sizeBytes"`
+	SHA256    string `json:"sha256"`
+	MediaType string `json:"mediaType,omitempty"`
+	Status    string `json:"status"`
 }
 
 type WorkspaceExportManifest struct {
@@ -113,7 +112,6 @@ type WorkspaceDownloadArtifactRequest struct {
 // WorkspaceDownloadArtifact describes a verified file that a local adapter
 // may stream. It intentionally contains no absolute filename.
 type WorkspaceDownloadArtifact struct {
-	ID        string `json:"id"`
 	ExportID  string `json:"exportId"`
 	Path      string `json:"path"`
 	Name      string `json:"name"`
@@ -124,6 +122,9 @@ type WorkspaceDownloadArtifact struct {
 
 type workspaceExportDirectoryCapability struct {
 	path      string
+	root      *os.Root
+	device    uint64
+	inode     uint64
 	createdAt time.Time
 	label     string
 	isDefault bool
@@ -134,7 +135,6 @@ type workspaceExportDirectoryCapability struct {
 type WorkspaceExports struct {
 	application Application
 	library     workspaceExportLibrary
-	downloads   map[string]WorkspaceDownloadArtifact
 	directories map[WorkspaceDirectoryHandle]workspaceExportDirectoryCapability
 	mu          sync.Mutex
 	now         func() time.Time
@@ -152,7 +152,6 @@ func NewWorkspaceExports(application Application, records workspaceExportLibrary
 	return &WorkspaceExports{
 		application: application,
 		library:     records,
-		downloads:   make(map[string]WorkspaceDownloadArtifact),
 		directories: make(map[WorkspaceDirectoryHandle]workspaceExportDirectoryCapability),
 		now:         time.Now,
 		home:        os.UserHomeDir,
@@ -168,7 +167,30 @@ func (service *WorkspaceExports) DefaultExportDirectory(ctx context.Context) (Wo
 	if err != nil {
 		return WorkspaceExportDirectory{}, workspaceError(fmt.Errorf("resolve Downloads directory: %w", err))
 	}
-	return service.issueDirectory(filepath.Join(home, "Downloads", workspaceDefaultExportDirectory), workspaceDefaultExportDirectory, true)
+	homeRoot, err := os.OpenRoot(home)
+	if err != nil {
+		return WorkspaceExportDirectory{}, workspaceError(fmt.Errorf("open home directory: %w", err))
+	}
+	const relative = "Downloads/" + workspaceDefaultExportDirectory
+	if err := homeRoot.MkdirAll(relative, 0o700); err != nil {
+		homeRoot.Close()
+		return WorkspaceExportDirectory{}, workspaceError(fmt.Errorf("create default export directory: %w", err))
+	}
+	info, err := homeRoot.Lstat(relative)
+	if err != nil {
+		homeRoot.Close()
+		return WorkspaceExportDirectory{}, workspaceError(fmt.Errorf("inspect default export directory: %w", err))
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		homeRoot.Close()
+		return WorkspaceExportDirectory{}, workspaceError(errors.New("default export directory must be a non-symlink directory"))
+	}
+	root, err := homeRoot.OpenRoot(relative)
+	homeRoot.Close()
+	if err != nil {
+		return WorkspaceExportDirectory{}, workspaceError(fmt.Errorf("open default export directory: %w", err))
+	}
+	return service.issueOpenedDirectory(filepath.Join(home, filepath.FromSlash(relative)), root, workspaceDefaultExportDirectory, true)
 }
 
 func (service *WorkspaceExports) CreateExportDirectory(ctx context.Context, request WorkspaceCreateExportDirectoryRequest) (WorkspaceExportDirectory, error) {
@@ -183,11 +205,21 @@ func (service *WorkspaceExports) CreateExportDirectory(ctx context.Context, requ
 	if err != nil {
 		return WorkspaceExportDirectory{}, err
 	}
-	path := filepath.Join(parent.path, name)
-	if err := createWorkspaceExportDirectory(path); err != nil {
+	if err := parent.root.Mkdir(name, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return WorkspaceExportDirectory{}, workspaceError(fmt.Errorf("create export directory: %w", err))
+	}
+	info, err := parent.root.Lstat(name)
+	if err != nil {
 		return WorkspaceExportDirectory{}, workspaceError(err)
 	}
-	return service.issueDirectory(path, name, false)
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return WorkspaceExportDirectory{}, workspaceError(errors.New("export directory must be a non-symlink directory"))
+	}
+	child, err := parent.root.OpenRoot(name)
+	if err != nil {
+		return WorkspaceExportDirectory{}, workspaceError(fmt.Errorf("open export directory: %w", err))
+	}
+	return service.issueOpenedDirectory(filepath.Join(parent.path, name), child, name, false)
 }
 
 func (service *WorkspaceExports) StartExport(ctx context.Context, request WorkspaceStartExportRequest) (WorkspaceExportJob, error) {
@@ -202,16 +234,13 @@ func (service *WorkspaceExports) StartExport(ctx context.Context, request Worksp
 	if err != nil {
 		return WorkspaceExportJob{}, err
 	}
-	outputRoot, err := workspaceExportChildDirectory(directory.path, relative)
+	outputRoot, err := service.openExportChildDirectory(directory, relative)
 	if err != nil {
 		return WorkspaceExportJob{}, workspaceError(err)
 	}
 	job, err := service.application.StartExport(ctx, domain.ExportRequest{
 		Selection: request.Selection, Format: strings.TrimSpace(request.Format), Options: request.Options,
-		// The local runtime issues the execution-time authorization after this
-		// facade has resolved a capability-backed directory. That authorization
-		// includes platform file identity which application DTOs must not forge.
-		OutputRoot: outputRoot,
+		OutputRoot: outputRoot.Root, OutputAuthorization: outputRoot,
 	})
 	if err != nil {
 		return WorkspaceExportJob{}, workspaceError(err)
@@ -246,7 +275,7 @@ func (service *WorkspaceExports) ExportManifest(ctx context.Context, exportID st
 	}
 	return WorkspaceExportManifest{ExportID: string(record.ID), Format: record.Format, State: record.State,
 		ProvenanceState: record.ProvenanceState, ProvenanceGeneration: record.ProvenanceGeneration,
-		Files: service.exportFiles(files)}, nil
+		Files: workspaceExportFiles(files)}, nil
 }
 
 func (service *WorkspaceExports) VerifyExport(ctx context.Context, exportID string) (WorkspaceExportVerification, error) {
@@ -288,10 +317,6 @@ func (service *WorkspaceExports) DownloadArtifact(ctx context.Context, request W
 		}
 		artifact := WorkspaceDownloadArtifact{ExportID: string(file.ExportID), Path: file.RelativePath, Name: filepath.Base(file.RelativePath),
 			SizeBytes: file.SizeBytes, SHA256: file.SHA256, MediaType: file.MediaType}
-		artifact.ID, err = service.issueDownload(artifact)
-		if err != nil {
-			return WorkspaceDownloadArtifact{}, workspaceError(err)
-		}
 		return artifact, nil
 	}
 	return WorkspaceDownloadArtifact{}, workspaceError(fmt.Errorf("export artifact %q: %w", path, fs.ErrNotExist))
@@ -316,31 +341,37 @@ func (service *WorkspaceExports) exportRecordAndFiles(ctx context.Context, expor
 	return record, files, nil
 }
 
-func (service *WorkspaceExports) exportFiles(files []library.ExportFileRecord) []WorkspaceExportFile {
+func workspaceExportFiles(files []library.ExportFileRecord) []WorkspaceExportFile {
 	items := make([]WorkspaceExportFile, 0, len(files))
 	for _, file := range files {
 		item := WorkspaceExportFile{ArticleID: string(file.ArticleID), Path: file.RelativePath, SizeBytes: file.SizeBytes,
 			SHA256: file.SHA256, MediaType: file.MediaType, Status: file.Status}
-		if id, err := service.issueDownload(WorkspaceDownloadArtifact{ExportID: string(file.ExportID), Path: file.RelativePath,
-			Name: filepath.Base(file.RelativePath), SizeBytes: file.SizeBytes, SHA256: file.SHA256, MediaType: file.MediaType}); err == nil {
-			item.DownloadID = id
-		}
 		items = append(items, item)
 	}
 	return items
 }
 
-func (service *WorkspaceExports) issueDirectory(path, label string, isDefault bool) (WorkspaceExportDirectory, error) {
-	if err := createWorkspaceExportDirectory(path); err != nil {
-		return WorkspaceExportDirectory{}, workspaceError(err)
+func (service *WorkspaceExports) issueOpenedDirectory(path string, root *os.Root, label string, isDefault bool) (WorkspaceExportDirectory, error) {
+	identity, err := root.Open(".")
+	if err != nil {
+		root.Close()
+		return WorkspaceExportDirectory{}, workspaceError(fmt.Errorf("inspect export directory identity: %w", err))
+	}
+	device, inode, identityErr := workspaceExportRootIdentityFromFile(identity)
+	closeErr := identity.Close()
+	if err := errors.Join(identityErr, closeErr); err != nil {
+		root.Close()
+		return WorkspaceExportDirectory{}, workspaceError(fmt.Errorf("identify export directory: %w", err))
 	}
 	token, err := service.token("dir")
 	if err != nil {
+		root.Close()
 		return WorkspaceExportDirectory{}, workspaceError(err)
 	}
 	createdAt := service.now().UTC()
 	service.mu.Lock()
-	service.directories[token] = workspaceExportDirectoryCapability{path: path, label: label, isDefault: isDefault, createdAt: createdAt}
+	service.directories[token] = workspaceExportDirectoryCapability{path: path, root: root, device: device, inode: inode,
+		label: label, isDefault: isDefault, createdAt: createdAt}
 	service.mu.Unlock()
 	return WorkspaceExportDirectory{Token: token, Label: label, IsDefault: isDefault, CreatedAt: createdAt}, nil
 }
@@ -356,17 +387,6 @@ func (service *WorkspaceExports) directory(token WorkspaceDirectoryHandle) (work
 		return workspaceExportDirectoryCapability{}, &WorkspaceError{Code: WorkspaceErrorNotFound, Message: "export directory token was not found"}
 	}
 	return directory, nil
-}
-
-func (service *WorkspaceExports) issueDownload(artifact WorkspaceDownloadArtifact) (string, error) {
-	id, err := service.token("download")
-	if err != nil {
-		return "", err
-	}
-	service.mu.Lock()
-	service.downloads[string(id)] = artifact
-	service.mu.Unlock()
-	return string(id), nil
 }
 
 func (service *WorkspaceExports) token(prefix string) (WorkspaceDirectoryHandle, error) {
@@ -423,20 +443,6 @@ func workspaceSafeArtifactPath(value string) (string, error) {
 	return path, nil
 }
 
-func createWorkspaceExportDirectory(path string) error {
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return fmt.Errorf("create export directory: %w", err)
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return fmt.Errorf("inspect export directory: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return errors.New("export directory must be a non-symlink directory")
-	}
-	return nil
-}
-
 func workspaceAuthorizedOutputRoot(authorization *domain.ExportOutputAuthorization) (string, error) {
 	if authorization == nil {
 		return "", errors.New("export output authorization is unavailable")
@@ -445,35 +451,78 @@ func workspaceAuthorizedOutputRoot(authorization *domain.ExportOutputAuthorizati
 	if err != nil {
 		return "", err
 	}
-	if err := createWorkspaceExportDirectory(authorization.Root); err != nil {
-		return "", err
+	if relative != "" {
+		return "", errors.New("workspace export authorization must identify a concrete output directory")
 	}
-	root := filepath.Join(authorization.Root, filepath.FromSlash(relative))
-	info, err := os.Lstat(root)
+	info, err := os.Lstat(authorization.Root)
 	if err != nil {
 		return "", fmt.Errorf("inspect authorized export directory: %w", err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return "", errors.New("authorized export directory changed type")
 	}
-	return root, nil
+	file, err := os.Open(authorization.Root)
+	if err != nil {
+		return "", fmt.Errorf("open authorized export directory: %w", err)
+	}
+	device, inode, identityErr := workspaceExportRootIdentityFromFile(file)
+	closeErr := file.Close()
+	if err := errors.Join(identityErr, closeErr); err != nil {
+		return "", fmt.Errorf("identify authorized export directory: %w", err)
+	}
+	if device != authorization.Device || inode != authorization.Inode {
+		return "", errors.New("authorized export directory was replaced")
+	}
+	return authorization.Root, nil
 }
 
-func workspaceExportChildDirectory(root, relative string) (string, error) {
-	if err := createWorkspaceExportDirectory(root); err != nil {
-		return "", err
+func (service *WorkspaceExports) openExportChildDirectory(directory workspaceExportDirectoryCapability, relative string) (*domain.ExportOutputAuthorization, error) {
+	root := directory.root
+	if root == nil {
+		return nil, errors.New("export directory capability is unavailable")
 	}
 	target := root
+	path := directory.path
 	for _, component := range strings.Split(relative, "/") {
 		if component == "" {
 			continue
 		}
-		target = filepath.Join(target, component)
-		if err := createWorkspaceExportDirectory(target); err != nil {
-			return "", err
+		if err := target.Mkdir(component, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+			return nil, fmt.Errorf("create export subdirectory: %w", err)
 		}
+		info, err := target.Lstat(component)
+		if err != nil {
+			return nil, fmt.Errorf("inspect export subdirectory: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return nil, errors.New("export subdirectory must be a non-symlink directory")
+		}
+		next, err := target.OpenRoot(component)
+		if err != nil {
+			return nil, fmt.Errorf("open export subdirectory: %w", err)
+		}
+		if target != root {
+			_ = target.Close()
+		}
+		target = next
+		path = filepath.Join(path, component)
 	}
-	return target, nil
+	identity, err := target.Open(".")
+	if err != nil {
+		if target != root {
+			_ = target.Close()
+		}
+		return nil, fmt.Errorf("inspect export output identity: %w", err)
+	}
+	device, inode, identityErr := workspaceExportRootIdentityFromFile(identity)
+	closeErr := identity.Close()
+	if target != root {
+		_ = target.Close()
+	}
+	if err := errors.Join(identityErr, closeErr); err != nil {
+		return nil, fmt.Errorf("identify export output: %w", err)
+	}
+	return &domain.ExportOutputAuthorization{Root: path, Device: device, Inode: inode}, nil
 }
 
 var _ WorkspaceExportService = (*WorkspaceExports)(nil)

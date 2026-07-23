@@ -82,8 +82,10 @@ func TestWorkspaceExportsIssuesOpaqueDirectoriesAndAuthorizesOnlyChildren(t *tes
 		t.Fatal(err)
 	}
 	wantRoot := filepath.Join(temporary, "Downloads", workspaceDefaultExportDirectory, "July", "ready")
-	if exports.request.OutputRoot != wantRoot || exports.request.OutputAuthorization != nil {
-		t.Fatalf("authorized request = %#v, want root %q and no caller-created authorization", exports.request, wantRoot)
+	if exports.request.OutputRoot != wantRoot || exports.request.OutputAuthorization == nil ||
+		exports.request.OutputAuthorization.Root != wantRoot || exports.request.OutputAuthorization.RelativePath != "" ||
+		exports.request.OutputAuthorization.Device == 0 || exports.request.OutputAuthorization.Inode == 0 {
+		t.Fatalf("authorized request = %#v, want concrete authorized root %q", exports.request, wantRoot)
 	}
 	if queued.ID != "job-1" || queued.Directory != string(child.Token) || filepath.IsAbs(queued.Directory) {
 		t.Fatalf("queued export = %#v", queued)
@@ -140,11 +142,11 @@ func TestWorkspaceExportsReturnSafeManifestAndArtifactMetadata(t *testing.T) {
 	}
 
 	manifest, err := service.ExportManifest(context.Background(), "export-1")
-	if err != nil || len(manifest.Files) != 1 || manifest.Files[0].Path != "article.md" || manifest.Files[0].DownloadID == "" {
+	if err != nil || len(manifest.Files) != 1 || manifest.Files[0].Path != "article.md" {
 		t.Fatalf("ExportManifest() = %#v, %v", manifest, err)
 	}
 	artifact, err := service.DownloadArtifact(context.Background(), WorkspaceDownloadArtifactRequest{ExportID: "export-1", Path: "article.md"})
-	if err != nil || artifact.Path != "article.md" || artifact.Name != "article.md" || artifact.ID == "" {
+	if err != nil || artifact.Path != "article.md" || artifact.Name != "article.md" {
 		t.Fatalf("DownloadArtifact() = %#v, %v", artifact, err)
 	}
 	if reflect.ValueOf(artifact).FieldByName("AbsolutePath").IsValid() {
