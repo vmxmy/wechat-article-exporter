@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
@@ -28,6 +29,21 @@ type apiErrorEnvelope struct {
 type apiError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// workspaceSnapshot is the bounded polling DTO for local browser state. It
+// deliberately contains only existing browser-safe read models. Revision is
+// local to one server process: it advances only when the observable snapshot
+// changes, so reconnecting clients can distinguish a fresh observation from a
+// semantic state change without treating an event stream as the source of
+// truth.
+type workspaceSnapshot struct {
+	Runtime    application.WorkspaceRuntime          `json:"runtime"`
+	Session    application.WorkspaceSession          `json:"session"`
+	Storage    domain.StorageStatus                  `json:"storage"`
+	Jobs       application.WorkspacePage[domain.Job] `json:"jobs"`
+	ObservedAt time.Time                             `json:"observedAt"`
+	Revision   uint64                                `json:"revision"`
 }
 
 // api is the authenticated P0 read surface. Every route is GET-only and
@@ -321,7 +337,34 @@ func (server *Server) snapshot(writer http.ResponseWriter, request *http.Request
 		server.workspaceError(writer, err)
 		return
 	}
-	writeAPI(writer, http.StatusOK, map[string]any{"runtime": runtime, "session": session, "storage": runtime.Storage, "jobs": jobs, "checkedAt": runtime.CheckedAt})
+	snapshot := workspaceSnapshot{Runtime: runtime, Session: session, Storage: runtime.Storage, Jobs: jobs}
+	writeAPI(writer, http.StatusOK, server.observeSnapshot(snapshot))
+}
+
+func (server *Server) observeSnapshot(snapshot workspaceSnapshot) workspaceSnapshot {
+	// Marshal the typed, sanitized DTO rather than any application/domain
+	// object. observedAt and revision are observation metadata, not semantic
+	// state, so clear them before comparing snapshots.
+	semanticSnapshot := snapshot
+	semanticSnapshot.ObservedAt = time.Time{}
+	semanticSnapshot.Revision = 0
+	semanticSnapshot.Runtime.CheckedAt = time.Time{}
+	semantic, err := json.Marshal(semanticSnapshot)
+	if err != nil {
+		// Every field is a fixed safe DTO; retain a usable response even if a
+		// future field accidentally becomes non-marshallable.
+		semantic = nil
+	}
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if server.lastSnapshot.revision == 0 || server.lastSnapshot.semantic != string(semantic) {
+		server.lastSnapshot.revision++
+		server.lastSnapshot.semantic = string(semantic)
+	}
+	snapshot.Revision = server.lastSnapshot.revision
+	snapshot.ObservedAt = server.now().UTC()
+	return snapshot
 }
 
 func (server *Server) workspaceError(writer http.ResponseWriter, err error) {

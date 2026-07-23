@@ -307,7 +307,10 @@ export interface WorkspaceSnapshot {
   readonly session: SessionStatus
   readonly storage: StorageStatus
   readonly jobs?: PaginatedResponse<JobRecord>
-  readonly checkedAt?: string
+  /** Observation metadata only; state remains authoritative in local SQLite. */
+  readonly observedAt: string
+  /** Monotonic within one local workspace process; increments on semantic changes. */
+  readonly revision: number
 }
 
 export interface LoginFlow { readonly sessionId: string; readonly qrCode?: string; readonly expiresAt?: string }

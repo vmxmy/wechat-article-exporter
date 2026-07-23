@@ -73,6 +73,7 @@ type Server struct {
 	bootstrapUsed  bool
 	closed         bool
 	serveCompleted chan struct{}
+	lastSnapshot   snapshotObservation
 
 	exportVerificationWindow time.Time
 	exportVerifications      int
@@ -84,6 +85,11 @@ type Server struct {
 type session struct {
 	csrf      string
 	expiresAt time.Time
+}
+
+type snapshotObservation struct {
+	semantic string
+	revision uint64
 }
 
 // New creates an unstarted local workspace server. It fails closed if the

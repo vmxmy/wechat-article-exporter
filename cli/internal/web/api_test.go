@@ -58,6 +58,77 @@ func TestReadAPIProvidesVersionedBoundedWorkspaceData(t *testing.T) {
 	}
 }
 
+func TestSnapshotPollingRevisionAdvancesOnlyForObservedStateChanges(t *testing.T) {
+	now := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
+	app := &apiApplication{
+		runtime: domain.RuntimeStatus{Profile: "fixture-profile", Storage: domain.StorageStatus{Articles: 1}},
+		session: wechat.Session{State: wechat.SessionMissing},
+		jobs:    domain.Page[domain.Job]{Items: []domain.Job{{ID: "11111111-1111-1111-1111-111111111111", State: domain.JobRunning}}, Total: 1},
+	}
+	server, err := New(Options{Application: app, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(context.Background()) }()
+	t.Cleanup(func() {
+		_ = server.Close()
+		if err := <-done; err != nil {
+			t.Errorf("server stopped with error: %v", err)
+		}
+	})
+	client := newTestClient(t)
+	base := authorizeAPI(t, client, server.URL())
+
+	readSnapshot := func() workspaceSnapshot {
+		t.Helper()
+		response := get(t, client, base+"/api/v1/events/snapshot")
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("snapshot status=%d body=%s", response.StatusCode, readResponse(t, response))
+		}
+		var envelope apiEnvelope
+		if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+			response.Body.Close()
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		data, err := json.Marshal(envelope.Data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var snapshot workspaceSnapshot
+		if err := json.Unmarshal(data, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		return snapshot
+	}
+
+	first := readSnapshot()
+	now = now.Add(time.Second)
+	second := readSnapshot()
+	if first.Revision != 1 || second.Revision != first.Revision || !first.ObservedAt.Equal(now.Add(-time.Second)) || !second.ObservedAt.Equal(now) {
+		t.Fatalf("unchanged snapshots = %#v, %#v", first, second)
+	}
+	app.jobs = domain.Page[domain.Job]{Items: []domain.Job{{ID: "11111111-1111-1111-1111-111111111111", State: domain.JobCompleted}}, Total: 1}
+	now = now.Add(time.Second)
+	third := readSnapshot()
+	if third.Revision != 2 || !third.ObservedAt.Equal(now) || len(third.Jobs.Items) != 1 || third.Jobs.Items[0].State != domain.JobCompleted {
+		t.Fatalf("changed snapshot = %#v", third)
+	}
+	encoded, err := json.Marshal(third)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"/private", "Paths"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("snapshot leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
 func TestJobDetailAPIUsesSafeBoundedWorkspaceDTO(t *testing.T) {
 	const jobID = "11111111-1111-1111-1111-111111111111"
 	app := &apiApplication{job: domain.Job{ID: jobID, Kind: "download", State: domain.JobRunning}, jobDetail: application.WorkspaceJobDetail{

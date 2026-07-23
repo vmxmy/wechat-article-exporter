@@ -343,3 +343,36 @@ test('failure states remain usable with sanitized local errors', async ({ page }
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
   await expectOnlyLoopbackRequests(page)
 })
+
+test('an online reconnect invalidates a failed local snapshot and renders evolved state', async ({ page }) => {
+  await installLoopbackFixture(page)
+  let snapshotRequests = 0
+  await page.route('**/api/v1/events/snapshot', (route) => {
+    snapshotRequests += 1
+    if (snapshotRequests <= 2) {
+      return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Sanitized snapshot temporarily unavailable' } }) })
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        apiVersion: 'v1',
+        data: {
+          runtime: { version: 'e2e-sanitized', profileId: 'fixture-profile' },
+          session: { state: 'authenticated', accountName: 'Recovered Fixture Account' },
+          storage: { databaseAvailable: true, objectStoreReady: true, accounts: 1, articles: 7, albums: 0, jobs: 1, objects: 2, objectBytes: 84 },
+          jobs: { items: [], total: 0, offset: 0, limit: 100 },
+          observedAt: '2026-07-24T09:31:00.000Z',
+          revision: 2
+        }
+      })
+    })
+  })
+
+  await page.goto('/')
+  await expect(page.getByText('Live local details are unavailable. The page remains read-only while the P0 API is rolling out.')).toBeVisible()
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  await expect(page.getByText('Recovered Fixture Account')).toBeVisible()
+  await expect(page.getByText('1 accounts · 7 articles · 0 albums · 1 jobs')).toBeVisible()
+  expect(snapshotRequests).toBeGreaterThanOrEqual(3)
+  await expectOnlyLoopbackRequests(page)
+})
