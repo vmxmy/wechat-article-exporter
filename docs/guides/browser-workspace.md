@@ -36,13 +36,9 @@ wechat-article profile list
 
 导出是持久任务。选择文章、格式和已授权目录后，工作区会返回 job ID；在 Jobs 或 Exports 中查看进度、manifest 和离线校验结果。生成的文件只能通过 manifest 中的不透明 artifact capability 流式下载，不接受路径参数；打开所选导出的输出目录也必须输入该导出的精确确认值。浏览器不会接收任意主机路径。
 
-凭据字段在浏览器中是仅写入的：导入后会清空，列表只显示安全元数据。维护页面已接入备份创建和验证（使用不透明 backup ID）、完整性检查、GC 的计划/一次性确认执行、诊断读取，以及以不透明一次性 handle 下载的脱敏诊断包。恢复归档的上传/staging 流程仍未在当前浏览器工作区交付；请使用经确认的本地 CLI：
+凭据字段在浏览器中是仅写入的：导入后会清空，列表只显示安全元数据。维护页面已接入备份创建和验证（使用不透明 backup ID）、完整性检查、GC 的计划/一次性确认执行、诊断读取，以及以不透明一次性 handle 下载的脱敏诊断包。
 
-```bash
-wechat-article db restore ./backups/work.zip \
-  --conflict refuse \
-  --confirm 'restore-backup:./backups/work.zip'
-```
+恢复时，在 Settings 选择一个归档和冲突策略（`refuse` 或 `rename`）。浏览器一次只能上传一个归档，最大 2 GiB；归档被写入当前 profile 的私有 staging，页面和 API 只收到不透明 handle，不能读取或提交主机路径。随后 prepare 会把该归档和策略绑定到一个短期、一次性的精确确认值；只有逐字输入该值才能 commit。无论归档过期、取消、失败或服务器关闭，未消费的 staged archive 都会清理。成功 commit 会恢复 archive 并关闭本地浏览器服务器以避免在运行时继续使用已替换的状态；重新运行 `wechat-article web` 后再打开新的工作区地址。
 
 不要上传真实 session、Cookie、vault passphrase 或未脱敏的文章归档到 issue、截图或第三方文件服务。
 
@@ -62,10 +58,11 @@ wechat-article db restore ./backups/work.zip \
 | 页面无法加载或 API 不可用 | 保持 `web` 进程运行，确认地址仍是 `127.0.0.1`，再运行 `wechat-article status --json` 与 `wechat-article diagnostics status --json`。 |
 | 看不到另一入口创建的内容/任务 | 确认两个入口使用同一 active profile；切换 profile 后需要重启浏览器工作区。 |
 | 导出目录不可用 | 从导出页重新授权默认目录或创建其下子目录；不要尝试粘贴绝对路径。 |
-| 恢复归档或任意文件上传不可用 | 这是当前已知限制，使用 Cobra 的 `db restore` 等受确认命令。 |
+| 恢复提交后页面无法继续操作 | 这是预期行为：成功恢复会关闭本地服务器。重新运行 `wechat-article web`，使用新的地址打开工作区。 |
+| 归档上传被拒绝或无法再次上传 | 仅支持一个最多 2 GiB 的 restore archive；完成、过期或关闭工作区后会清理。账号 manifest 和 Credential 的浏览器文件上传仍未提供。 |
 
 ## 当前浏览器范围
 
-工作区已经覆盖本地 session、账号/文章/专辑的分页查询、账号搜索与同步、单 URL 导入、保存的文章查询、受限本地预览、带边界的作业详情与允许的控制、受控目录导出、导出 manifest/verification、opaque artifact 下载、精确确认后的输出目录打开、凭据/代理/安全偏好、备份创建/验证、完整性、GC 和诊断（包括 opaque diagnostic bundle 下载）。完整逐项对照见 [能力矩阵](../release/browser-capability-matrix.md)。
+工作区已经覆盖本地 session、账号/文章/专辑的分页查询、账号搜索与同步、单 URL 导入、保存的文章查询、受限本地预览、带边界的作业详情与允许的控制、受控目录导出、导出 manifest/verification、opaque artifact 下载、精确确认后的输出目录打开、凭据/代理/安全偏好、备份创建/验证、单归档恢复上传/staging/prepare/commit、完整性、GC 和诊断（包括 opaque diagnostic bundle 下载）。完整逐项对照见 [能力矩阵](../release/browser-capability-matrix.md)。
 
-未交付的浏览器能力不会被标记为 parity：恢复归档上传、任意主机文件选择和批量导出仍使用 Cobra 或 TUI。浏览器的 artifact 下载和输出目录打开受到 opaque capability 与精确确认的约束，不能成为任意文件或目录访问接口。文章预览及文章/元数据/评论/资源下载、单专辑遍历和批量下载会复用同一套持久作业；stdio MCP 则有意不提供 GUI、浏览器 session 或网络监听，只通过 stdio 和 profile policy 面向自动化。
+未交付的浏览器能力不会被标记为 parity：账号 manifest 与 Credential 的浏览器文件上传、批量导出仍使用 Cobra 或 TUI。即使恢复归档可由浏览器选择并上传，浏览器仍没有任意主机路径或通用文件访问 API；staged archive 和 artifact 下载/输出目录打开都受到 opaque capability 与精确确认的约束。文章预览及文章/元数据/评论/资源下载、单专辑遍历和批量下载会复用同一套持久作业；stdio MCP 则有意不提供 GUI、浏览器 session 或网络监听，只通过 stdio 和 profile policy 面向自动化。

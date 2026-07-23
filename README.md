@@ -134,7 +134,7 @@ wechat-article export verify \
 
 默认网络路径是本地进程直连微信。代理必须由用户显式配置；包含 Cookie、Credential、评论、指标或付费授权的请求只能直连或通过用户明确确认的 `credential-trusted` 代理。详见 [本地数据与安全](./docs/operations/local-data-security.md) 和 [备份恢复](./docs/operations/backup-restore.md)。
 
-浏览器工作区与 Cobra、TUI、MCP 共享当前 profile，但不会接收任意主机路径：导出通过默认根或其下子目录的 opaque token 完成，生成产物只能以 opaque artifact capability 流式下载；打开某个导出输出目录必须输入该导出的精确确认值。Credential 在页面中只写入不回显；维护入口已接入备份验证、完整性、GC 计划/确认执行、诊断与诊断包下载。恢复归档上传仍未实现，需使用确认过的 CLI 恢复流程。当前逐项支持状态见[浏览器能力矩阵](./docs/release/browser-capability-matrix.md)。
+浏览器工作区与 Cobra、TUI、MCP 共享当前 profile，但不会接收任意主机路径：导出通过默认根或其下子目录的 opaque token 完成，生成产物只能以 opaque artifact capability 流式下载；打开某个导出输出目录必须输入该导出的精确确认值。Credential 在页面中只写入不回显；维护入口已接入备份验证、完整性、GC 计划/确认执行、诊断与诊断包下载，以及单个恢复归档的上传、私有 staging、prepare 和 commit。恢复上传最多为 2 GiB，工作区同一时刻只保留一个归档；页面只拿到不透明 handle，commit 需要该 prepare 返回的一次性精确确认值。成功恢复后本地浏览器服务器会关闭，须重新运行 `wechat-article web`。这不是任意主机路径或通用文件访问 API；账号 manifest、Credential 的浏览器文件上传和批量导出仍使用其他本地入口。当前逐项支持状态见[浏览器能力矩阵](./docs/release/browser-capability-matrix.md)。
 
 ## PDF
 

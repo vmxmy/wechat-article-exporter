@@ -92,7 +92,7 @@ server 不监听网络，不使用 OAuth。stdout 只包含换行分隔的 JSON-
 
 `exports.start` 的输出目录必须位于 active profile 数据目录、`preferences.export.root` 或 profile 配置的 `mcp.allowedOutputRoots` 绝对路径内；路径穿越与 symlink 逃逸会被拒绝。
 
-浏览器的文件模型不同：它只可授权默认 export root 或其下子目录，并把不透明 directory token 交回服务端；不会获得绝对路径。浏览器支持受控导出、manifest/verification、以 opaque artifact capability 流式下载生成文件，以及输入精确确认值后打开所选导出的输出目录；还支持文章/资源/评论下载和专辑遍历/批量下载。维护页面已接入备份验证、完整性、GC 计划/确认执行、诊断与 opaque diagnostic bundle 下载。restore archive upload 和任意文件选择仍未实现，须使用确认过的 Cobra/TUI/MCP 流程；批量导出也仍使用这些入口。完整对照见[浏览器能力矩阵](../docs/release/browser-capability-matrix.md)。
+浏览器的文件模型不同：它只可授权默认 export root 或其下子目录，并把不透明 directory token 交回服务端；不会获得绝对路径。浏览器支持受控导出、manifest/verification、以 opaque artifact capability 流式下载生成文件，以及输入精确确认值后打开所选导出的输出目录；还支持文章/资源/评论下载和专辑遍历/批量下载。维护页面已接入备份验证、完整性、GC 计划/确认执行、诊断与 opaque diagnostic bundle 下载，以及单个 restore archive 的上传、私有 staging、prepare 和 commit。restore 上传限制为 2 GiB，工作区同时只接纳一个归档，页面只会收到不透明 staging handle；prepare 返回的精确确认值只能用于一次 commit。commit 成功后服务器关闭，重新启动 `web` 再继续操作。浏览器仍不提供任意主机路径 API、账号 manifest 或 Credential 的文件上传；批量导出也仍使用 Cobra/TUI/MCP。完整对照见[浏览器能力矩阵](../docs/release/browser-capability-matrix.md)。
 
 ## 测试与发布
 

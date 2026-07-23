@@ -18,12 +18,12 @@ Status date: 2026-07-24. This matrix describes the current local product rather 
 | Credentials and proxy policies | Supported | Supported | Restricted by profile policy | Supported | Browser fields are write-only; exact confirmation remains required for sensitive actions. |
 | Preferences and language | Supported | Supported | Supported where policy permits | Supported | `display.language` accepts only `en` and `zh-CN`; browser offers both locales. |
 | Backup, integrity, GC, diagnostics and diagnostic bundle | Supported | Supported | Supported where policy permits | Supported | The real web command wires maintenance facades. Browser supports backup create/verify, integrity, GC plan plus exact-confirmation apply, diagnostics, and opaque one-shot diagnostic-bundle download. |
-| Backup restore / arbitrary upload | Supported | Supported | Supported within policy | Not supported | Use confirmed Cobra/TUI flow; no arbitrary host-path API exists. |
+| Backup restore / arbitrary upload | Supported | Supported | Supported within policy | Restore archive supported; arbitrary upload not supported | Browser accepts one restore archive at a time (maximum 2 GiB), stages it privately behind an opaque handle, and requires prepare plus an exact one-time confirmation to commit. A successful restore closes the server; relaunch `wechat-article web`. No arbitrary host-path API, account-manifest upload, or Credential file-upload API exists. |
 | Accessibility | Terminal accessibility modes | Keyboard-first terminal UI | Client-defined | Supported baseline | Browser has labelled controls, visible focus, keyboard navigation and live status; report gaps with diagnostics. |
 | Transport / network surface | Local process outbound only | Local process outbound only | stdio only; no TCP | Random `127.0.0.1` loopback only | Browser uses one-time token, HttpOnly session, Host/Origin/CSRF checks and restrictive headers. |
 
 ## Completion rule
 
-The browser workspace must remain “not complete” until the remaining partial or unsupported workflows—especially browser restore/archive upload—have an implemented user workflow and corresponding browser/API release evidence. It must not be advertised as a replacement for Cobra, TUI, or MCP before that point.
+The browser workspace must remain “not complete” until the remaining partial or unsupported workflows—especially account-manifest/Credential browser file uploads and batch export—have implemented user workflows and corresponding browser/API release evidence. It must not be advertised as a replacement for Cobra, TUI, or MCP before that point.
 
 The clean-room candidate-binary receipt exercises loopback startup, authenticated embedded assets, required security headers, bounded browser API reads, a representative browser mutation, and no retired-domain observation using the sanitized loopback fixture. See [clean-room receipts](./clean-room-receipts.md).
