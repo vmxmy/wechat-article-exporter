@@ -67,6 +67,33 @@ func TestSaveArticlePageRejectsMalformedItemWithoutPartialWrite(t *testing.T) {
 	}
 }
 
+func TestSaveArticlePageLinksAlbumsToExistingCanonicalArticle(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	ctx := context.Background()
+	canonicalURL := "https://mp.weixin.qq.com/s/single"
+	provisional, err := database.SaveProvisionalArticle(ctx, SingleArticleInput{URL: canonicalURL, Title: "Single"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, err := database.SaveAccount(ctx, domain.Account{FakeID: "fixture-a", Name: "Fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SaveArticlePage(ctx, ArticlePageCommit{AccountFakeID: account.FakeID, Articles: []domain.Article{{
+		ID: "article-discovered", Aid: "aid-a", Title: "Discovered", CanonicalURL: canonicalURL,
+		Albums: []domain.Album{{ID: "album-a", UpstreamID: "upstream-a", Name: "Album"}},
+	}}}); err != nil {
+		t.Fatalf("SaveArticlePage() error = %v", err)
+	}
+	var articleID domain.ArticleID
+	if err := database.db.QueryRow(`SELECT article_id FROM article_albums WHERE album_id='album-a'`).Scan(&articleID); err != nil {
+		t.Fatal(err)
+	}
+	if articleID != provisional.ID {
+		t.Fatalf("album article ID = %q, want existing canonical article %q", articleID, provisional.ID)
+	}
+}
+
 func TestSaveArticlePageTracksPaginationCompletionAndAllowsTotalCorrection(t *testing.T) {
 	database := openTestDatabase(t, "profile-a")
 	ctx := context.Background()

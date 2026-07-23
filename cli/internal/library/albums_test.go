@@ -62,3 +62,33 @@ ORDER BY aa.ordinal`)
 		t.Fatalf("ordered = %#v", ordered)
 	}
 }
+
+func TestSaveAlbumPageLinksExistingCanonicalArticle(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	ctx := context.Background()
+	canonicalURL := "https://mp.weixin.qq.com/s/single"
+	provisional, err := database.SaveProvisionalArticle(ctx, SingleArticleInput{URL: canonicalURL, Title: "Single"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, err := database.SaveAccount(ctx, domain.Account{FakeID: "fixture-a", Name: "Fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.SaveAlbumPage(ctx, AlbumPageCommit{
+		Album: domain.Album{ID: "album-a", AccountID: account.ID, UpstreamID: "upstream-a", Name: "Album"},
+		Articles: []AlbumArticleCommit{{Article: domain.Article{
+			ID: "article-discovered", AccountID: account.ID, Aid: "aid-a", Title: "Discovered", CanonicalURL: canonicalURL,
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("SaveAlbumPage() error = %v", err)
+	}
+	var articleID domain.ArticleID
+	if err := database.db.QueryRow(`SELECT article_id FROM article_albums WHERE album_id='album-a'`).Scan(&articleID); err != nil {
+		t.Fatal(err)
+	}
+	if articleID != provisional.ID {
+		t.Fatalf("album article ID = %q, want existing canonical article %q", articleID, provisional.ID)
+	}
+}

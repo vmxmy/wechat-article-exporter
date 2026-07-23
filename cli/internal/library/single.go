@@ -104,7 +104,8 @@ func (database *Database) SaveProvisionalArticle(ctx context.Context, input Sing
 		article.Title = canonicalURL
 	}
 	if err := database.WithTx(ctx, func(transaction *sql.Tx) error {
-		return upsertArticleTx(ctx, transaction, database.profileID, article, time.Now())
+		_, err := upsertArticleTx(ctx, transaction, database.profileID, article, time.Now())
+		return err
 	}); err != nil {
 		return domain.Article{}, err
 	}

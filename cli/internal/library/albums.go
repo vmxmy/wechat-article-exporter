@@ -79,12 +79,13 @@ updated_at=excluded.updated_at`, page.Album.ID, database.profileID, page.Album.A
 			if article.AccountID == "" {
 				article.AccountID = page.Album.AccountID
 			}
-			if err := upsertArticleTx(ctx, transaction, database.profileID, article, fetchedAt); err != nil {
+			storedID, err := upsertArticleTx(ctx, transaction, database.profileID, article, fetchedAt)
+			if err != nil {
 				return err
 			}
 			if _, err := transaction.ExecContext(ctx, `INSERT INTO article_albums(article_id, album_id, ordinal)
 VALUES(?, ?, ?) ON CONFLICT(article_id, album_id) DO UPDATE SET ordinal=excluded.ordinal`,
-				article.ID, page.Album.ID, entry.Ordinal); err != nil {
+				storedID, page.Album.ID, entry.Ordinal); err != nil {
 				return err
 			}
 			seen[key] = struct{}{}

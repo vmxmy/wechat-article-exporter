@@ -51,9 +51,11 @@ func (database *Database) SaveArticlePage(ctx context.Context, page ArticlePageC
 		}
 		for _, article := range validated {
 			article.AccountID = accountID
-			if err := upsertArticleTx(ctx, transaction, database.profileID, article, fetchedAt); err != nil {
+			storedID, err := upsertArticleTx(ctx, transaction, database.profileID, article, fetchedAt)
+			if err != nil {
 				return err
 			}
+			article.ID = storedID
 			if err := upsertArticleAlbumsTx(ctx, transaction, database.profileID, accountID, article, fetchedAt); err != nil {
 				return err
 			}
@@ -84,7 +86,7 @@ func validateArticleForCommit(article domain.Article) (domain.Article, error) {
 	return article, nil
 }
 
-func upsertArticleTx(ctx context.Context, tx *sql.Tx, profileID domain.ProfileID, article domain.Article, now time.Time) error {
+func upsertArticleTx(ctx context.Context, tx *sql.Tx, profileID domain.ProfileID, article domain.Article, now time.Time) (domain.ArticleID, error) {
 	contentStatus := "missing"
 	if article.HasContent {
 		contentStatus = "available"
@@ -107,7 +109,14 @@ updated_at=excluded.updated_at`, article.ID, profileID, article.AccountID, artic
 		nullableTime(article.PublishedAt), nullableTime(article.UpdatedAt), article.MessageType, article.State, article.Deleted,
 		article.Paid, article.Single, article.Original, article.WeCoinCount, article.MediaDurationSeconds,
 		contentStatus, now.UnixMilli(), now.UnixMilli())
-	return err
+	if err != nil {
+		return "", err
+	}
+	var storedID domain.ArticleID
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM articles WHERE profile_id=? AND canonical_url=?`, profileID, article.CanonicalURL).Scan(&storedID); err != nil {
+		return "", err
+	}
+	return storedID, nil
 }
 
 func upsertArticleAlbumsTx(
