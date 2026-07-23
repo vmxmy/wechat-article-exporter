@@ -34,6 +34,7 @@ const (
 // always a random IPv4 loopback listener.
 type Options struct {
 	Application        application.Application
+	Preview            application.WorkspaceArticlePreviewRenderer
 	Exports            application.WorkspaceExportService
 	Maintenance        *application.MaintenanceService
 	StorageMaintenance *application.MaintenanceStorageService
@@ -94,7 +95,7 @@ func New(options Options) (*Server, error) {
 	}
 	return &Server{
 		application: options.Application, exports: options.Exports, maintenance: options.Maintenance, storageMaintenance: options.StorageMaintenance, sessionTTL: options.SessionTTL, shutdownTimeout: options.ShutdownTimeout,
-		workspace: application.NewWorkspace(options.Application), now: options.Now, bootstrapToken: bootstrap,
+		workspace: application.NewWorkspaceWithPreview(options.Application, options.Preview), now: options.Now, bootstrapToken: bootstrap,
 		sessions: make(map[string]session), serveCompleted: make(chan struct{}),
 	}, nil
 }

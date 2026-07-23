@@ -158,6 +158,50 @@ func (extensions *workspaceExtensions) PreviewArticle(ctx context.Context, artic
 	return tui.PreviewDocument{Title: article.Title, Format: "markdown", Text: rendered.Markdown}, nil
 }
 
+// RenderArticlePreview keeps object-store reads and HTML rendering in the
+// local runtime. The web adapter receives only the completed self-contained
+// document through application.WorkspaceArticlePreviewRenderer.
+func (extensions *workspaceExtensions) RenderArticlePreview(ctx context.Context, articleID domain.ArticleID) (application.WorkspaceRenderedArticlePreview, error) {
+	active, err := extensions.active()
+	if err != nil {
+		return application.WorkspaceRenderedArticlePreview{}, err
+	}
+	article, normalized, comments, assets, err := loadWorkspaceArticle(ctx, active, articleID)
+	if err != nil {
+		return application.WorkspaceRenderedArticlePreview{}, err
+	}
+	rendered, err := processor.Render(normalized, processor.RenderOptions{
+		ResourceMap: dataResourceMap(assets), ResourcePolicy: processor.ResourceRewriteStrict,
+		IncludeComments: true, Comments: comments,
+	})
+	if err != nil {
+		return application.WorkspaceRenderedArticlePreview{}, err
+	}
+	return application.WorkspaceRenderedArticlePreview{ArticleID: article.ID, HTML: []byte(stripPreviewStyleElements(rendered.HTML))}, nil
+}
+
+// The preview endpoint uses a CSP that disallows inline styles. Processor's
+// general export HTML includes a convenience stylesheet, so remove it for the
+// browser handoff rather than weakening the document policy.
+func stripPreviewStyleElements(document string) string {
+	for {
+		start := strings.Index(strings.ToLower(document), "<style")
+		if start < 0 {
+			return document
+		}
+		openEnd := strings.Index(document[start:], ">")
+		if openEnd < 0 {
+			return document[:start]
+		}
+		endStart := strings.Index(strings.ToLower(document[start+openEnd+1:]), "</style>")
+		if endStart < 0 {
+			return document[:start] + document[start+openEnd+1:]
+		}
+		end := start + openEnd + 1 + endStart + len("</style>")
+		document = document[:start] + document[end:]
+	}
+}
+
 func (extensions *workspaceExtensions) OpenHTMLPreview(ctx context.Context, articleID domain.ArticleID) error {
 	active, err := extensions.active()
 	if err != nil {

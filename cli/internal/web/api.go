@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
@@ -59,6 +60,8 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		server.articles(writer, request)
 	case "/api/v1/articles/preview":
 		server.articlePreview(writer, request)
+	case "/api/v1/articles/preview/document":
+		server.articlePreviewDocument(writer, request)
 	case "/api/v1/albums":
 		server.albums(writer, request)
 	case "/api/v1/saved-queries":
@@ -158,7 +161,34 @@ func (server *Server) articlePreview(writer http.ResponseWriter, request *http.R
 		server.workspaceError(writer, err)
 		return
 	}
+	if value.Available {
+		value.DocumentURL = "/api/v1/articles/preview/document?articleId=" + url.QueryEscape(string(value.ArticleID))
+	}
 	writeAPI(writer, http.StatusOK, value)
+}
+
+func (server *Server) articlePreviewDocument(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writer.Header().Set("Allow", http.MethodGet)
+		server.apiError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "method is not allowed")
+		return
+	}
+	articleID := domain.ArticleID(strings.TrimSpace(request.URL.Query().Get("articleId")))
+	if articleID == "" {
+		server.apiError(writer, http.StatusBadRequest, "invalid_argument", "article identifier is required")
+		return
+	}
+	preview, err := server.workspace.RenderArticlePreview(request.Context(), articleID)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+	writer.Header().Set("Content-Disposition", "inline; filename=article-preview.html")
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; img-src data:; media-src data:; style-src 'none'; font-src data:")
+	writer.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = writer.Write(preview.HTML)
 }
 
 func (server *Server) albums(writer http.ResponseWriter, request *http.Request) {

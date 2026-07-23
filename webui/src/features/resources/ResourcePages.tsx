@@ -106,18 +106,52 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
 
 export function SavedQueriesPage({ messages, locale }: { readonly messages: MessageCatalog; readonly locale: Locale }) {
   const [pageIndex, setPageIndex] = useState(0)
+  const [selected, setSelected] = useState<readonly string[]>([])
+  const [name, setName] = useState('')
+  const [queryText, setQueryText] = useState('{\n  "keyword": ""\n}')
+  const [notice, setNotice] = useState<string>()
   const query = useSavedQueryPage({ page: pageIndex + 1, pageSize })
+  const mutations = useWorkspaceMutations()
   const columns = useMemo<ColumnDef<SavedQueryRecord>[]>(() => [
     { accessorKey: 'name', header: messages.resources.savedQueries.columns.name },
     { accessorKey: 'query', header: messages.resources.savedQueries.columns.query, cell: ({ getValue }) => formatQuery(getValue<Readonly<Record<string, unknown>> | undefined>()) },
     { accessorKey: 'updatedAt', header: messages.resources.savedQueries.columns.updated, cell: ({ getValue }) => formatDate(getValue<string>(), locale) }
   ], [locale, messages])
   const actions = messages.resources.savedQueries.actions
+  const selectedQuery = selected.length === 1 ? query.data?.data.find((item) => item.name === selected[0]) : undefined
+  const parseInput = () => {
+    const trimmedName = name.trim()
+    if (!trimmedName) throw new Error('name')
+    const parsed: unknown = JSON.parse(queryText)
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error('query')
+    return { name: trimmedName, query: parsed as Readonly<Record<string, unknown>> }
+  }
+  const save = () => {
+    try {
+      const input = parseInput()
+      mutations.saveSavedQuery.mutate(input, { onSuccess: () => { setNotice(actions.saved(input.name)) }, onError: () => setNotice(actions.actionFailed) })
+    } catch {
+      setNotice(actions.invalidQuery)
+    }
+  }
+  const edit = () => {
+    if (!selectedQuery) return setNotice(actions.selectOne)
+    setName(selectedQuery.name)
+    setQueryText(JSON.stringify(selectedQuery.query, null, 2))
+    setNotice(actions.editing(selectedQuery.name))
+  }
+  const remove = () => {
+    if (!selectedQuery) return setNotice(actions.selectOne)
+    if (!window.confirm(actions.deleteConfirm(selectedQuery.name))) return
+    mutations.deleteSavedQuery.mutate(selectedQuery.name, { onSuccess: () => { setSelected([]); setNotice(actions.deleted(selectedQuery.name)) }, onError: () => setNotice(actions.actionFailed) })
+  }
   return (
     <>
-      <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.savedQueries} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} />
-      <UnavailableActionPanel messages={messages} title={actions.title} description={actions.description} availabilityNote={messages.unavailableActions.apiUnavailable}>
-        <Button label={actions.create} variant="secondary" isDisabled /><Button label={actions.edit} variant="secondary" isDisabled /><Button label={actions.remove} variant="secondary" isDisabled />
+      <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.savedQueries} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
+      <UnavailableActionPanel messages={messages} title={actions.title} description={actions.description} showConfirmationNote>
+        <div className="account-action-form"><TextInput label={actions.name} value={name} onChange={setName} /><TextInput label={actions.query} value={queryText} onChange={setQueryText} /></div>
+        <Button label={actions.create} variant="primary" isLoading={mutations.saveSavedQuery.isPending} onClick={save} /><Button label={actions.edit} variant="secondary" isDisabled={!selectedQuery} onClick={edit} /><Button label={actions.remove} variant="secondary" isLoading={mutations.deleteSavedQuery.isPending} isDisabled={!selectedQuery} onClick={remove} />
+        {notice ? <p role="status">{notice}</p> : null}
       </UnavailableActionPanel>
     </>
   )

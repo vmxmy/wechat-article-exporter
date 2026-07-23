@@ -110,7 +110,18 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   const preview = () => {
     if (!selectedArticle) return
     if (selectedArticle.hasContent === false) return setNotice(messages.articles.actions.previewUnavailable)
-    void getArticlePreview(selectedArticle.id).then((handoff) => setNotice(handoff.available ? `${messages.articles.actions.preview}: ${handoff.title}` : messages.articles.actions.previewUnavailable)).catch(() => setNotice(messages.articles.actions.failed))
+    const previewWindow = window.open('', '_blank')
+    void getArticlePreview(selectedArticle.id).then((handoff) => {
+      if (!handoff.available || !handoff.documentUrl || !handoff.documentUrl.startsWith('/api/v1/articles/preview/document?')) {
+        previewWindow?.close()
+        setNotice(messages.articles.actions.previewUnavailable)
+        return
+      }
+      if (!previewWindow) return setNotice(messages.articles.actions.previewBlocked)
+      previewWindow.opener = null
+      previewWindow.location.replace(handoff.documentUrl)
+      setNotice(`${messages.articles.actions.preview}: ${handoff.title}`)
+    }).catch(() => { previewWindow?.close(); setNotice(messages.articles.actions.failed) })
   }
 
   return (

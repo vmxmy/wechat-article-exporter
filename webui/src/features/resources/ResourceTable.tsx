@@ -32,6 +32,13 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
     cell: ({ row }) => <CheckboxInput label={messages.selectRow(row.id)} isLabelHidden value={row.getIsSelected()} onChange={() => row.toggleSelected()} />
   }), [messages])
   useEffect(() => setRowSelection({}), [pageIndex])
+  const updateSelection = (updater: Record<string, boolean> | ((current: Record<string, boolean>) => Record<string, boolean>)) => {
+    setRowSelection((current) => {
+      const next = typeof updater === 'function' ? updater(current) : updater
+      onSelectionChange?.(Object.entries(next).filter(([, selected]) => selected).map(([id]) => id))
+      return next
+    })
+  }
   // TanStack Table deliberately returns a mutable instance; it is rendered
   // directly here rather than being memoized or passed to a memoized child.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -42,14 +49,13 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
     manualPagination: true,
     state: { columnVisibility, rowSelection },
     onColumnVisibilityChange: setColumnVisibility,
-    onRowSelectionChange: setRowSelection,
+    onRowSelectionChange: updateSelection,
     getRowId: (row, index) => row.id ?? row.name ?? String(index),
     enableRowSelection: true
   })
   const totalPages = query.data ? Math.max(1, Math.ceil(query.data.pagination.total / query.data.pagination.pageSize)) : 1
   const selectedCount = Object.values(rowSelection).filter(Boolean).length
   const visibleColumns = useMemo(() => table.getAllLeafColumns().filter((column) => column.id !== 'select'), [table])
-  useEffect(() => { onSelectionChange?.(Object.entries(rowSelection).filter(([, selected]) => selected).map(([id]) => id)) }, [onSelectionChange, rowSelection])
 
   return (
     <section aria-labelledby={`${eyebrow.toLowerCase().replaceAll(' ', '-')}-title`}>

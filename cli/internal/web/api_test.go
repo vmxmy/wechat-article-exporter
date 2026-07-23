@@ -190,7 +190,7 @@ func TestArticlePreviewUsesSafeWorkspaceHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if preview.ArticleID != "article-1" || preview.Title != "Fixture" || !preview.Available {
+	if preview.ArticleID != "article-1" || preview.Title != "Fixture" || !preview.Available || preview.DocumentURL != "/api/v1/articles/preview/document?articleId=article-1" {
 		t.Fatalf("preview = %#v", preview)
 	}
 	response = get(t, client, base+"/api/v1/articles/preview")
@@ -198,6 +198,70 @@ func TestArticlePreviewUsesSafeWorkspaceHandoff(t *testing.T) {
 		t.Fatalf("missing article ID status=%d body=%s", response.StatusCode, readResponse(t, response))
 	}
 	assertAPIError(t, response, "invalid_argument")
+}
+
+func TestSavedQueryCRUDUsesWorkspaceFacadeAndExactDeleteConfirmation(t *testing.T) {
+	app := &apiApplication{}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+	mutate := func(method, path, body string) *http.Response {
+		request := requestWith(t, method, base+path, strings.NewReader(body), map[string]string{"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf})
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+
+	response := mutate(http.MethodPost, "/api/v1/saved-queries", `{"name":" recent ","query":{"keyword":" fixture ","offset":25,"limit":10}}`)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	response.Body.Close()
+	if app.savedName != "recent" || app.savedQuery.Keyword != "fixture" || app.savedQuery.Offset != 0 || app.savedQuery.Limit != 0 {
+		t.Fatalf("saved query was not normalized: name=%q query=%#v", app.savedName, app.savedQuery)
+	}
+
+	response = mutate(http.MethodDelete, "/api/v1/saved-queries", `{"name":"recent","confirm":"wrong"}`)
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("wrong confirmation status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "invalid_argument")
+	response = mutate(http.MethodDelete, "/api/v1/saved-queries", `{"name":"recent","confirm":"delete-saved-query:recent"}`)
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	response.Body.Close()
+	if app.deletedSavedName != "recent" {
+		t.Fatalf("deleted saved query = %q", app.deletedSavedName)
+	}
+}
+
+func TestArticlePreviewDocumentRequiresRendererAndSetsRestrictiveHeaders(t *testing.T) {
+	app := &apiApplication{article: domain.Article{ID: "article-1", Title: "Fixture", HasContent: true}}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+	response := get(t, client, base+"/api/v1/articles/preview/document?articleId=article-1")
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("missing renderer status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "unavailable")
+}
+
+func TestArticlePreviewDocumentUsesStrictContentSecurityPolicy(t *testing.T) {
+	app := &apiApplication{article: domain.Article{ID: "article-1", Title: "Fixture", HasContent: true}}
+	server, client := startAPIApplicationServerWithPreview(t, app, previewRenderer{articleID: "article-1", html: "<!doctype html><p>fixture</p>"})
+	base := authorizeAPI(t, client, server.URL())
+	response := get(t, client, base+"/api/v1/articles/preview/document?articleId=article-1")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	policy := response.Header.Get("Content-Security-Policy")
+	response.Body.Close()
+	if strings.Contains(policy, "unsafe-inline") || !strings.Contains(policy, "style-src 'none'") || !strings.Contains(policy, "default-src 'none'") {
+		t.Fatalf("unsafe preview policy = %q", policy)
+	}
 }
 
 func applicationLoginFlow() wechat.LoginFlow {
@@ -263,8 +327,12 @@ func TestReadAPIAdaptsExistingBrowserClientDTO(t *testing.T) {
 }
 
 func startAPIApplicationServer(t *testing.T, app application.Application) (*Server, *http.Client) {
+	return startAPIApplicationServerWithPreview(t, app, nil)
+}
+
+func startAPIApplicationServerWithPreview(t *testing.T, app application.Application, preview application.WorkspaceArticlePreviewRenderer) (*Server, *http.Client) {
 	t.Helper()
-	server, err := New(Options{Application: app, Now: time.Now})
+	server, err := New(Options{Application: app, Preview: preview, Now: time.Now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,6 +348,15 @@ func startAPIApplicationServer(t *testing.T, app application.Application) (*Serv
 		}
 	})
 	return server, newTestClient(t)
+}
+
+type previewRenderer struct {
+	articleID domain.ArticleID
+	html      string
+}
+
+func (renderer previewRenderer) RenderArticlePreview(context.Context, domain.ArticleID) (application.WorkspaceRenderedArticlePreview, error) {
+	return application.WorkspaceRenderedArticlePreview{ArticleID: renderer.articleID, HTML: []byte(renderer.html)}, nil
 }
 
 func newTestClient(t *testing.T) *http.Client {
@@ -335,6 +412,9 @@ type apiApplication struct {
 	albumRequest     application.WorkspaceAlbumTraversalRequest
 	albumBatch       bool
 	loggedOut        bool
+	savedName        string
+	savedQuery       domain.ArticleQuery
+	deletedSavedName string
 }
 
 func (app *apiApplication) BeginLogin(_ context.Context, id string) (wechat.LoginFlow, error) {
@@ -364,6 +444,14 @@ func (app *apiApplication) SynchronizeAccount(_ context.Context, request domain.
 func (app *apiApplication) StartDownload(_ context.Context, request domain.DownloadRequest) (domain.Job, error) {
 	app.downloadRequests = append(app.downloadRequests, request)
 	return app.job, nil
+}
+func (app *apiApplication) SaveArticleQuery(_ context.Context, name string, query domain.ArticleQuery) (domain.SavedArticleQuery, error) {
+	app.savedName, app.savedQuery = name, query
+	return domain.SavedArticleQuery{Name: name, Query: query}, nil
+}
+func (app *apiApplication) DeleteSavedArticleQuery(_ context.Context, name string) (bool, error) {
+	app.deletedSavedName = name
+	return true, nil
 }
 func (app *apiApplication) SynchronizeAlbum(_ context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
 	app.albumRequest = application.WorkspaceAlbumTraversalRequest{AccountID: accountID, AlbumID: albumID}

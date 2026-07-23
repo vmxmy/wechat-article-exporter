@@ -208,9 +208,26 @@ type WorkspaceAlbumTraversalRequest struct {
 // contain a filesystem path, object digest, or arbitrary HTML; a later local
 // preview service may resolve the opaque article identity into sanitized HTML.
 type WorkspaceArticlePreview struct {
-	ArticleID domain.ArticleID `json:"articleId"`
-	Title     string           `json:"title"`
-	Available bool             `json:"available"`
+	ArticleID   domain.ArticleID `json:"articleId"`
+	Title       string           `json:"title"`
+	Available   bool             `json:"available"`
+	DocumentURL string           `json:"documentUrl,omitempty"`
+}
+
+// WorkspaceRenderedArticlePreview is an already-sanitized, self-contained
+// local HTML document. It is deliberately available only to the local web
+// adapter, which serves it with a restrictive CSP. No filesystem path,
+// object digest, or remote resource URL crosses this boundary.
+type WorkspaceRenderedArticlePreview struct {
+	ArticleID domain.ArticleID
+	HTML      []byte
+}
+
+// WorkspaceArticlePreviewRenderer is supplied by the local runtime when it
+// can render an article from the object store. The application package owns
+// the capability boundary while the runtime retains its filesystem access.
+type WorkspaceArticlePreviewRenderer interface {
+	RenderArticlePreview(context.Context, domain.ArticleID) (WorkspaceRenderedArticlePreview, error)
 }
 
 // WorkspaceArticleLookup is the typed optional application capability needed
@@ -238,6 +255,14 @@ type WorkspaceReader interface {
 	SavedArticleQueries(context.Context, WorkspacePageRequest) (WorkspacePage[domain.SavedArticleQuery], error)
 	Jobs(context.Context, WorkspaceJobQuery) (WorkspacePage[domain.Job], error)
 	ArticlePreview(context.Context, domain.ArticleID) (WorkspaceArticlePreview, error)
+}
+
+// WorkspaceSavedQueryController is the mutable saved-query contract exposed
+// to local presentation adapters. Saving an existing name is an intentional
+// update, preserving the established library upsert semantics.
+type WorkspaceSavedQueryController interface {
+	SaveArticleQuery(context.Context, string, domain.ArticleQuery) (domain.SavedArticleQuery, error)
+	DeleteSavedArticleQuery(context.Context, string, string) error
 }
 
 // WorkspaceController keeps supported controls tied to the same durable jobs
@@ -276,9 +301,16 @@ type WorkspaceMaintenanceService interface {
 
 // Workspace is the application-owned adapter facade. It only delegates to
 // Application; it never receives ProfileRuntime, SQLite, or host paths.
-type Workspace struct{ application Application }
+type Workspace struct {
+	application Application
+	preview     WorkspaceArticlePreviewRenderer
+}
 
 func NewWorkspace(application Application) *Workspace { return &Workspace{application: application} }
+
+func NewWorkspaceWithPreview(application Application, preview WorkspaceArticlePreviewRenderer) *Workspace {
+	return &Workspace{application: application, preview: preview}
+}
 
 func (workspace *Workspace) Runtime(ctx context.Context) (WorkspaceRuntime, error) {
 	status, err := workspace.application.RuntimeStatus(ctx)
@@ -442,6 +474,63 @@ func (workspace *Workspace) ArticlePreview(ctx context.Context, id domain.Articl
 	return WorkspaceArticlePreview{ArticleID: article.ID, Title: article.Title, Available: article.HasContent}, nil
 }
 
+func (workspace *Workspace) RenderArticlePreview(ctx context.Context, id domain.ArticleID) (WorkspaceRenderedArticlePreview, error) {
+	if strings.TrimSpace(string(id)) == "" {
+		return WorkspaceRenderedArticlePreview{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "article identifier is required"}
+	}
+	if workspace.preview == nil {
+		return WorkspaceRenderedArticlePreview{}, workspaceError(fmt.Errorf("render article preview: %w", ErrUnavailable))
+	}
+	preview, err := workspace.preview.RenderArticlePreview(ctx, id)
+	if err != nil {
+		return WorkspaceRenderedArticlePreview{}, workspaceError(err)
+	}
+	if preview.ArticleID != id || len(preview.HTML) == 0 {
+		return WorkspaceRenderedArticlePreview{}, &WorkspaceError{Code: WorkspaceErrorUnavailable, Message: "article preview is not available"}
+	}
+	return WorkspaceRenderedArticlePreview{ArticleID: preview.ArticleID, HTML: append([]byte(nil), preview.HTML...)}, nil
+}
+
+func (workspace *Workspace) SaveArticleQuery(ctx context.Context, name string, query domain.ArticleQuery) (domain.SavedArticleQuery, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return domain.SavedArticleQuery{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "saved query name is required"}
+	}
+	item, err := workspace.application.SaveArticleQuery(ctx, name, workspaceArticleQuery(query))
+	return item, workspaceError(err)
+}
+
+func (workspace *Workspace) DeleteSavedArticleQuery(ctx context.Context, name, confirmation string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "saved query name is required"}
+	}
+	if confirmation != "delete-saved-query:"+name {
+		return &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "saved query removal requires exact confirmation"}
+	}
+	deleted, err := workspace.application.DeleteSavedArticleQuery(ctx, name)
+	if err != nil {
+		return workspaceError(err)
+	}
+	if !deleted {
+		return &WorkspaceError{Code: WorkspaceErrorNotFound, Message: "saved query was not found"}
+	}
+	return nil
+}
+
+func workspaceArticleQuery(query domain.ArticleQuery) domain.ArticleQuery {
+	query.AccountID = domain.AccountID(strings.TrimSpace(string(query.AccountID)))
+	query.AlbumID = domain.AlbumID(strings.TrimSpace(string(query.AlbumID)))
+	query.Keyword = strings.TrimSpace(query.Keyword)
+	query.Author = strings.TrimSpace(query.Author)
+	query.State = strings.TrimSpace(query.State)
+	query.MessageTypes = append([]int(nil), query.MessageTypes...)
+	query.Sorts = append([]domain.ArticleSort(nil), query.Sorts...)
+	// Pagination controls the listing request, never the persisted predicate.
+	query.Offset, query.Limit = 0, 0
+	return query
+}
+
 func (workspace *Workspace) CancelJob(ctx context.Context, id domain.JobID) (domain.Job, error) {
 	job, err := workspace.application.CancelJob(ctx, id)
 	return job, workspaceError(err)
@@ -459,3 +548,4 @@ func workspacePage[T any](page domain.Page[T]) WorkspacePage[T] {
 
 var _ WorkspaceReader = (*Workspace)(nil)
 var _ WorkspaceController = (*Workspace)(nil)
+var _ WorkspaceSavedQueryController = (*Workspace)(nil)

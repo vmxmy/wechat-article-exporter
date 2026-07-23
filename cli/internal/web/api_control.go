@@ -21,6 +21,15 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 		return true
 	}
 	switch request.URL.Path {
+	case "/api/v1/saved-queries":
+		switch request.Method {
+		case http.MethodPost:
+			server.savedQuerySave(writer, request)
+		case http.MethodDelete:
+			server.savedQueryDelete(writer, request)
+		default:
+			return false
+		}
 	case "/api/v1/export-directories/authorize":
 		server.exportDirectoryAuthorize(writer, request)
 	case "/api/v1/export-directories":
@@ -102,6 +111,45 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 		}
 	}
 	return true
+}
+
+func (server *Server) savedQuerySave(writer http.ResponseWriter, request *http.Request) {
+	if !server.apiMutation(writer, request, http.MethodPost) {
+		return
+	}
+	var input struct {
+		Name  string              `json:"name"`
+		Query domain.ArticleQuery `json:"query"`
+	}
+	if err := decodeControl(request, &input); err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	item, err := server.workspace.SaveArticleQuery(request.Context(), input.Name, input.Query)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusOK, item)
+}
+
+func (server *Server) savedQueryDelete(writer http.ResponseWriter, request *http.Request) {
+	if !server.apiMutation(writer, request, http.MethodDelete) {
+		return
+	}
+	var input struct {
+		Name         string `json:"name"`
+		Confirmation string `json:"confirm"`
+	}
+	if err := decodeControl(request, &input); err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	if err := server.workspace.DeleteSavedArticleQuery(request.Context(), input.Name, input.Confirmation); err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (server *Server) apiMutation(writer http.ResponseWriter, request *http.Request, method string) bool {
