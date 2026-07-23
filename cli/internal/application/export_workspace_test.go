@@ -235,7 +235,7 @@ func TestWorkspaceExportDirectoryTokensFailClosedAfterReplacementOrSymlinkRace(t
 		t.Fatal(err)
 	}
 	rootPath := filepath.Join(temporary, "Downloads", workspaceDefaultExportDirectory)
-	childPath := filepath.Join(rootPath, "issued-child")
+	var childPath string
 
 	assertTokenRejectedBeforeExport := func(name string, token WorkspaceDirectoryHandle) {
 		t.Helper()
