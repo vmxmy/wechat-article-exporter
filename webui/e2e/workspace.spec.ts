@@ -28,6 +28,26 @@ test('sanitized account and article selections remain browser-local', async ({ p
   await expect(page.getByText('1 selected', { exact: false })).toBeVisible()
   await page.getByRole('textbox', { name: 'Search articles' }).fill('Sanitized')
   await expect(page.getByRole('cell', { name: 'Sanitized article one', exact: true })).toBeVisible()
+  await expect(page.getByText('0 selected', { exact: false })).toBeVisible()
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('article selections persist across server pages and hand off all selected stable IDs for export', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/articles')
+
+  await page.getByRole('checkbox', { name: 'Select Sanitized article one' }).check()
+  await page.getByRole('button', { name: 'Next page' }).click()
+  await expect(page.getByRole('cell', { name: 'Sanitized article three', exact: true })).toBeVisible()
+  await expect(page.getByText('1 selected', { exact: false })).toBeVisible()
+
+  await page.getByRole('checkbox', { name: 'Select Sanitized article three' }).check()
+  await expect(page.getByText('2 selected', { exact: false })).toBeVisible()
+  await page.getByRole('button', { name: 'Export selected' }).click()
+
+  await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Selection: 2 explicit article IDs' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Article IDs' })).toHaveValue('article-fixture-1\narticle-fixture-3')
   await expectOnlyLoopbackRequests(page)
 })
 

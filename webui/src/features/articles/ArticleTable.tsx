@@ -2,7 +2,7 @@ import { Button } from '@astryxdesign/core/Button'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { TextInput } from '@astryxdesign/core/TextInput'
-import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type SortingState, type VisibilityState } from '@tanstack/react-table'
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type RowSelectionState, type SortingState, type Updater, type VisibilityState } from '@tanstack/react-table'
 import { useEffect, useMemo, useState } from 'react'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { getArticlePreview, parseArticleQuery, saveArticleQueryHandoff, saveExportHandoff, type ArticleQuery, type ArticleRecord, type ArticleSort } from '../../lib/api'
@@ -16,6 +16,7 @@ interface ArticleTableProps {
 }
 
 const pageSize = 25
+const maximumSelectedArticleIDs = 250
 
 export function ArticleTable({ locale, messages }: ArticleTableProps) {
   const [pageIndex, setPageIndex] = useState(0)
@@ -31,7 +32,6 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
     const timeout = window.setTimeout(() => setQuery((current) => ({ ...current, keyword: search.trim() || undefined })), 250)
     return () => window.clearTimeout(timeout)
   }, [search])
-  useEffect(() => setRowSelection({}), [pageIndex, query, sort.id, sort.desc])
   const activeSort: ArticleSort = { field: sort.id, direction: sort.desc ? 'desc' : 'asc' }
   const articlePage = useArticlePage({
     page: pageIndex + 1,
@@ -47,11 +47,18 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
     try {
       const next = parseArticleQuery({ ...filters, keyword: search.trim() || undefined })
       setPageIndex(0)
+      setRowSelection({})
       setQuery(next)
       setNotice(undefined)
     } catch { setNotice(messages.articles.filters.invalid) }
   }
-  const resetFilters = () => { setFilters({}); setSearch(''); setPageIndex(0); setQuery({}) }
+  const resetFilters = () => { setFilters({}); setSearch(''); setPageIndex(0); setRowSelection({}); setQuery({}) }
+  const updateRowSelection = (updater: Updater<RowSelectionState>) => {
+    setRowSelection((current) => {
+      const next = selectedArticleIDs(typeof updater === 'function' ? updater(current) : updater)
+      return Object.keys(next).length <= maximumSelectedArticleIDs ? next : current
+    })
+  }
 
   const columns = useMemo<ColumnDef<ArticleRecord>[]>(() => [
     {
@@ -103,9 +110,10 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
     onSortingChange: (updater) => {
       setSorting((current) => typeof updater === 'function' ? updater(current) : updater)
       setPageIndex(0)
+      setRowSelection({})
     },
     onColumnVisibilityChange: setColumnVisibility,
-    onRowSelectionChange: setRowSelection,
+    onRowSelectionChange: updateRowSelection,
     getRowId: (row) => row.id,
     enableRowSelection: true
   })
@@ -172,6 +180,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
           onChange={(value) => {
             setSearch(value)
             setPageIndex(0)
+            setRowSelection({})
           }}
         />
         <span className="selection-count" aria-live="polite">{selectedCount} {messages.articles.selected}</span>
@@ -318,6 +327,10 @@ function parseOptionalBoolean(value: string) { return value === '' ? undefined :
 function numberText(value: number | undefined) { return value === undefined ? '' : String(value) }
 function parseOptionalNumber(value: string) { const parsed = Number(value); return value.trim() && Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined }
 function parseMessageTypes(value: string) { return value.trim() ? value.split(',').map((item) => Number(item.trim())).filter((item) => Number.isInteger(item) && item >= 0) : undefined }
+
+function selectedArticleIDs(selection: RowSelectionState): RowSelectionState {
+  return Object.fromEntries(Object.entries(selection).filter(([, selected]) => selected))
+}
 
 const booleanFilters: ReadonlyArray<{ readonly field: 'deleted' | 'original' | 'paid'; readonly label: 'deleted' | 'original' | 'paid' }> = [
   { field: 'deleted', label: 'deleted' }, { field: 'original', label: 'original' }, { field: 'paid', label: 'paid' }
