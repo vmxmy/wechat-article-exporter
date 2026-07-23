@@ -3,6 +3,7 @@ import {
   getAccountPage,
   getAlbumPage,
   getArticlePage,
+  getArticleResourceSummary,
   getExportManifest,
   getExportPage,
   getJobDetail,
@@ -30,6 +31,7 @@ export const queryKeys = {
   snapshot: ['snapshot'] as const,
   accounts: (params: PageParams) => ['accounts', params] as const,
   articles: (params: ArticlePageParams) => ['articles', params] as const,
+  articleResourceSummary: (id: string) => ['articles', id, 'resources'] as const,
   albums: (params: PageParams) => ['albums', params] as const,
   jobs: (params: PageParams) => ['jobs', params] as const,
   jobDetail: (id: string) => ['jobs', id, 'detail'] as const,
@@ -67,6 +69,14 @@ export function useAccountPage(params: PageParams) {
 
 export function useArticlePage(params: ArticlePageParams) {
   return usePageQuery(queryKeys.articles(params), ({ signal }) => getArticlePage(params, signal))
+}
+
+export function useArticleResourceSummary(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.articleResourceSummary(id ?? ''),
+    queryFn: ({ signal }) => getArticleResourceSummary(id ?? '', signal),
+    enabled: Boolean(id)
+  })
 }
 
 export function useAlbumPage(params: PageParams) {

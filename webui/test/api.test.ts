@@ -3,6 +3,7 @@ import {
   ApiError,
   deleteSavedQuery,
   getAccountPage,
+  getArticleResourceSummary,
   getDiagnosticBundleDownloadURL,
   getExportArtifactDownloadURL,
   getRuntimeStatus,
@@ -48,6 +49,20 @@ describe('browser API client', () => {
       '/api/v1/accounts?offset=10&limit=10&keyword=a+%26+b&sort=name%3Aasc',
       expect.any(Object)
     )
+  })
+
+  it('loads a resource summary without requesting resource URLs, digests, or paths', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      apiVersion: 'v1',
+      data: { articleId: 'article / fixture', total: 4, available: 3, missing: 1, complete: false }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getArticleResourceSummary('article / fixture')).resolves.toEqual({ articleId: 'article / fixture', total: 4, available: 3, missing: 1, complete: false })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/articles/article%20%2F%20fixture/resources', expect.objectContaining({
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' }
+    }))
   })
 
   it('adds the CSRF proof and scoped confirmation for saved-query deletion', async () => {

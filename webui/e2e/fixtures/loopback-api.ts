@@ -12,6 +12,7 @@ export interface LoopbackFixture {
   readonly diagnosticBundleRequests: readonly unknown[]
   readonly credentialRemovals: readonly unknown[]
   readonly proxyRemovals: readonly unknown[]
+  readonly resourceDownloads: readonly unknown[]
 }
 
 export async function installLoopbackFixture(page: Page): Promise<LoopbackFixture> {
@@ -23,6 +24,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
   const diagnosticBundleRequests: unknown[] = []
   const credentialRemovals: unknown[] = []
   const proxyRemovals: unknown[] = []
+  const resourceDownloads: unknown[] = []
   let loginState = 'unauthenticated'
   let directory = { token: 'dir-sanitized', label: 'Sanitized exports' }
   let backupID = ''
@@ -53,6 +55,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       diagnosticBundleRequests,
       credentialRemovals,
       proxyRemovals,
+      resourceDownloads,
       onLoginState: (state) => { loginState = state },
       onDirectory: (next) => { directory = next },
       onBackupID: (id) => { backupID = id },
@@ -61,7 +64,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       ,onSavedQueries: (next) => { savedQueries = next }
     })
   })
-  return { requests, controls, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, proxyRemovals }
+  return { requests, controls, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, proxyRemovals, resourceDownloads }
 }
 
 export async function expectOnlyLoopbackRequests(page: Page) {
@@ -87,6 +90,7 @@ interface State {
   readonly diagnosticBundleRequests: unknown[]
   readonly credentialRemovals: unknown[]
   readonly proxyRemovals: unknown[]
+  readonly resourceDownloads: unknown[]
   readonly onLoginState: (state: string) => void
   readonly onDirectory: (directory: { readonly token: string; readonly label: string }) => void
   readonly onBackupID: (id: string) => void
@@ -118,6 +122,8 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/accounts/manifest/upload') return json(route, { handle: 'account-manifest-upload-fixture', sizeBytes: 24, sha256: 'e'.repeat(64), expiresAt: '2026-07-24T09:45:00.000Z' })
   if (url.pathname === '/api/v1/accounts/manifest/import') { state.accountManifestImports.push(body); return json(route, { report: { added: 1, merged: 2, unchanged: 3 } }) }
   if (url.pathname === '/api/v1/articles') return page(route, [{ id: 'article-fixture-1', title: 'Sanitized article one', accountId: 'account-fixture', accountName: 'Fixture Account', author: 'Fixture Author', publishedAt: now, state: 'ready' }, { id: 'article-fixture-2', title: 'Sanitized article two', accountId: 'account-fixture', accountName: 'Fixture Account', author: 'Fixture Author', publishedAt: now, state: 'queued' }])
+  if (url.pathname === '/api/v1/articles/article-fixture-1/resources' && method === 'GET') return json(route, { articleId: 'article-fixture-1', total: 4, available: 3, missing: 1, complete: false, url: 'https://sensitive.example/resource', digest: 'sensitive-resource-digest', path: '/sensitive/resource/path', resourceId: 'sensitive-resource-id' })
+  if (url.pathname === '/api/v1/articles/resources' && method === 'POST') { state.resourceDownloads.push(body); return json(route, { id: 'job-resources-fixture', kind: 'resources', state: 'queued', createdAt: now, updatedAt: now }) }
   if (url.pathname === '/api/v1/albums') return page(route, [{ id: 'album-fixture-1', accountId: 'account-fixture', name: 'Sanitized album', articleCount: 2, paid: false, description: 'Sanitized album description' }])
   if (url.pathname === '/api/v1/saved-queries' && method === 'GET') return page(route, state.savedQueries)
   if (url.pathname === '/api/v1/saved-queries' && method === 'POST') {

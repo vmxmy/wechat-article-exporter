@@ -31,6 +31,26 @@ test('sanitized account and article selections remain browser-local', async ({ p
   await expectOnlyLoopbackRequests(page)
 })
 
+test('article resource completeness only exposes aggregate counts and queues missing or forced downloads', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/articles')
+  await page.getByRole('checkbox', { name: 'Select Sanitized article one' }).check()
+  await expect(page.getByRole('heading', { name: 'Resource availability' })).toBeVisible()
+  await expect(page.getByText('4 resources · 3 available · 1 missing')).toBeVisible()
+  await expect(page.locator('body')).not.toContainText('https://sensitive.example/resource')
+  await expect(page.locator('body')).not.toContainText('sensitive-resource-digest')
+  await expect(page.locator('body')).not.toContainText('/sensitive/resource/path')
+  await expect(page.locator('body')).not.toContainText('sensitive-resource-id')
+  await page.getByRole('button', { name: 'Complete missing resources' }).click()
+  await expect.poll(() => fixture.resourceDownloads).toEqual([{ articleIds: ['article-fixture-1'], force: false }])
+  await page.getByRole('button', { name: 'Re-download resources' }).click()
+  await expect.poll(() => fixture.resourceDownloads).toEqual([
+    { articleIds: ['article-fixture-1'], force: false },
+    { articleIds: ['article-fixture-1'], force: true }
+  ])
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('account manifest controls download and import locally without retaining file details', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/accounts')

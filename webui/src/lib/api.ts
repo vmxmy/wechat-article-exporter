@@ -89,6 +89,13 @@ export interface ArticleRecord {
 
 export type ArticleDownloadKind = 'article' | 'metadata' | 'comments' | 'resources'
 export interface ArticlePreview { readonly articleId: string; readonly title: string; readonly available: boolean; readonly documentUrl?: string }
+export interface ArticleResourceSummary {
+  readonly articleId: string
+  readonly total: number
+  readonly available: number
+  readonly missing: number
+  readonly complete: boolean
+}
 
 export interface AlbumRecord {
   readonly id: string
@@ -448,6 +455,9 @@ export async function downloadArticles(articleIds: readonly string[], kind: Arti
 }
 export async function getArticlePreview(articleId: string, signal?: AbortSignal): Promise<ArticlePreview> {
   return request<ArticlePreview>(`${apiBase}/articles/preview?articleId=${encodeURIComponent(articleId)}`, { signal })
+}
+export async function getArticleResourceSummary(articleId: string, signal?: AbortSignal): Promise<ArticleResourceSummary> {
+  return request<ArticleResourceSummary>(`${apiBase}/articles/${encodeURIComponent(articleId)}/resources`, { signal })
 }
 export async function saveSavedQuery(input: SavedQueryInput): Promise<SavedQueryRecord> { return mutate<SavedQueryRecord>('saved-queries', 'POST', input) }
 export async function deleteSavedQuery(name: string): Promise<void> {

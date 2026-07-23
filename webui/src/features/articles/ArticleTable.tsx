@@ -6,7 +6,7 @@ import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type Sortin
 import { useEffect, useMemo, useState } from 'react'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { getArticlePreview, parseArticleQuery, saveArticleQueryHandoff, saveExportHandoff, type ArticleQuery, type ArticleRecord, type ArticleSort } from '../../lib/api'
-import { useArticlePage } from '../../lib/queries'
+import { useArticlePage, useArticleResourceSummary } from '../../lib/queries'
 import { useWorkspaceMutations } from '../../lib/queries'
 
 interface ArticleTableProps {
@@ -113,9 +113,10 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   const selectedCount = Object.values(rowSelection).filter(Boolean).length
   const selectedIDs = Object.entries(rowSelection).filter(([, selected]) => selected).map(([id]) => id)
   const selectedArticle = selectedIDs.length === 1 ? articlePage.data?.data.find((article) => article.id === selectedIDs[0]) : undefined
-  const startDownload = (kind: 'article' | 'metadata' | 'comments' | 'resources') => {
+  const resourceSummary = useArticleResourceSummary(selectedArticle?.id)
+  const startDownload = (kind: 'article' | 'metadata' | 'comments' | 'resources', force = false) => {
     if (selectedIDs.length === 0) return
-    mutations.downloadArticles.mutate({ articleIds: selectedIDs, kind, force: false }, {
+    mutations.downloadArticles.mutate({ articleIds: selectedIDs, kind, force }, {
       onSuccess: (job) => setNotice(`${kind}: ${job.id}`),
       onError: () => setNotice(messages.articles.actions.failed)
     })
@@ -254,18 +255,33 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
       </nav>
       <section className="unavailable-actions" aria-labelledby="article-actions-title">
         <div><h2 id="article-actions-title">{messages.articles.actions.title}</h2><p>{messages.articles.actions.description}</p></div>
+        {selectedArticle ? <ResourceSummary summary={resourceSummary} messages={messages} /> : null}
         <div className="action-button-group">
           <Button label={messages.articles.actions.preview} variant="secondary" isDisabled={!selectedArticle} onClick={preview} />
           <Button label={messages.articles.actions.download} variant="primary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('article')} />
           <Button label={messages.articles.actions.metadata} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('metadata')} />
           <Button label={messages.articles.actions.comments} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('comments')} />
           <Button label={messages.articles.actions.resources} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('resources')} />
+          <Button label={messages.articles.actions.forceResources} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={!selectedArticle} onClick={() => startDownload('resources', true)} />
           <Button label={messages.articles.actions.exportSelected} variant="primary" isDisabled={selectedIDs.length === 0} onClick={() => handoffExport('selected')} />
           <Button label={messages.articles.actions.exportMatching} variant="secondary" onClick={() => handoffExport('matching')} />
           <Button label={messages.articles.actions.saveQuery} variant="secondary" onClick={saveCurrentQuery} />
         </div>
         {notice ? <p role="status">{notice}</p> : null}
       </section>
+    </section>
+  )
+}
+
+function ResourceSummary({ summary, messages }: { readonly summary: ReturnType<typeof useArticleResourceSummary>; readonly messages: MessageCatalog }) {
+  if (summary.isLoading) return <p role="status">{messages.articles.actions.resourcesLoading}</p>
+  if (summary.isError) return <p role="status">{messages.articles.actions.resourcesUnavailable}</p>
+  if (!summary.data) return null
+  return (
+    <section aria-label={messages.articles.actions.resourcesSummaryTitle}>
+      <h3>{messages.articles.actions.resourcesSummaryTitle}</h3>
+      <p>{messages.articles.actions.resourcesSummary(summary.data.total, summary.data.available, summary.data.missing)}</p>
+      {summary.data.complete ? <p>{messages.articles.actions.resourcesComplete}</p> : null}
     </section>
   )
 }
