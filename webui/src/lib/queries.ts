@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getAccountPage,
   getAlbumPage,
@@ -9,6 +9,8 @@ import {
   getSessionStatus,
   getStorageStatus,
   getWorkspaceSnapshot,
+  beginLogin, completeLogin, controlJob, deleteAccounts, ingestURL, pollLogin, saveAccount, searchAccounts, syncAccount, updateAccount,
+  type AccountInput,
   type ArticlePageParams,
   type PageParams
 } from './api'
@@ -61,6 +63,26 @@ export function useJobPage(params: PageParams) {
 
 export function useSavedQueryPage(params: PageParams) {
   return usePageQuery(queryKeys.savedQueries(params), ({ signal }) => getSavedQueryPage(params, signal))
+}
+
+export function useWorkspaceMutations() {
+  const client = useQueryClient()
+  const refresh = () => client.invalidateQueries()
+  return {
+    beginLogin: useMutation({ mutationFn: beginLogin }),
+    pollLogin: useMutation({ mutationFn: pollLogin }),
+    completeLogin: useMutation({ mutationFn: completeLogin, onSuccess: refresh }),
+    saveAccount: useMutation({ mutationFn: (input: AccountInput) => saveAccount(input), onSuccess: refresh }),
+    updateAccount: useMutation({ mutationFn: ({ id, input }: { id: string; input: AccountInput }) => updateAccount(id, input), onSuccess: refresh }),
+    deleteAccounts: useMutation({ mutationFn: (ids: readonly string[]) => deleteAccounts(ids), onSuccess: refresh }),
+    syncAccount: useMutation({ mutationFn: syncAccount, onSuccess: refresh }),
+    ingestURL: useMutation({ mutationFn: ({ url, force }: { url: string; force: boolean }) => ingestURL(url, force), onSuccess: refresh }),
+    controlJob: useMutation({ mutationFn: ({ id, action }: { id: string; action: 'cancel' | 'pause' | 'resume' | 'retry' }) => controlJob(id, action), onSuccess: refresh })
+  }
+}
+
+export function useAccountSearch(params: PageParams) {
+  return useQuery({ queryKey: ['account-search', params], queryFn: ({ signal }) => searchAccounts(params, signal), placeholderData: keepPreviousData, enabled: false })
 }
 
 function usePageQuery<T>(queryKey: readonly unknown[], queryFn: ({ signal }: { signal: AbortSignal }) => Promise<T>, polling?: typeof snapshotPolling) {

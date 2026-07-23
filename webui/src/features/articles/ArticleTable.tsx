@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Locale, MessageCatalog } from '../../i18n'
 import type { ArticleRecord } from '../../lib/api'
 import { useArticlePage } from '../../lib/queries'
+import { UnavailableActionPanel } from '../actions/UnavailableActionPanel'
 
 interface ArticleTableProps {
   readonly locale: Locale
@@ -178,6 +179,11 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
         <span>{messages.articles.page(pageIndex + 1, totalPages)}</span>
         <Button label={messages.articles.next} variant="secondary" size="sm" isDisabled={pageIndex + 1 >= totalPages} onClick={() => setPageIndex((current) => current + 1)} />
       </nav>
+      <UnavailableActionPanel messages={messages} title={messages.articles.actions.title} description={messages.articles.actions.description} availabilityNote={messages.unavailableActions.apiUnavailable}>
+        <Button label={messages.articles.actions.preview} variant="secondary" isDisabled />
+        <Button label={messages.articles.actions.download} variant="secondary" isDisabled />
+        <Button label={messages.articles.actions.saveQuery} variant="secondary" isDisabled />
+      </UnavailableActionPanel>
     </section>
   )
 }

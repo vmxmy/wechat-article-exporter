@@ -22,7 +22,7 @@ export interface PaginatedResponse<T> {
 }
 
 interface ApiEnvelope<T> {
-  readonly version: string
+  readonly apiVersion: string
   readonly data: T
 }
 
@@ -132,6 +132,10 @@ export interface WorkspaceSnapshot {
   readonly checkedAt?: string
 }
 
+export interface LoginFlow { readonly sessionId: string; readonly qrCode?: string; readonly expiresAt?: string }
+export interface LoginPollResult { readonly state: string; readonly accountCount: number }
+export interface AccountInput { readonly fakeid: string; readonly name: string; readonly alias?: string; readonly description?: string }
+
 export interface ArticlePageParams extends PageParams {
   readonly search: string
   readonly sort: string
@@ -152,6 +156,25 @@ export async function getStorageStatus(signal?: AbortSignal): Promise<StorageSta
 
 export async function getWorkspaceSnapshot(signal?: AbortSignal): Promise<WorkspaceSnapshot> {
   return request<WorkspaceSnapshot>(`${apiBase}/events/snapshot`, { signal })
+}
+
+export async function getCSRFToken(): Promise<string> {
+  const status = await request<{ readonly csrfToken: string }>(`${apiBase}/status`, {})
+  return status.csrfToken
+}
+
+export async function beginLogin(sessionId: string): Promise<LoginFlow> { return mutate<LoginFlow>('login/begin', 'POST', { sessionId }) }
+export async function pollLogin(): Promise<LoginPollResult> { return mutate<LoginPollResult>('login/poll', 'POST', {}) }
+export async function completeLogin(): Promise<SessionStatus> { return mutate<SessionStatus>('login/complete', 'POST', {}) }
+export async function searchAccounts(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<AccountRecord>> { return getPage<AccountRecord>('accounts/search', params, signal) }
+export async function saveAccount(input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>('accounts', 'POST', input) }
+export async function updateAccount(id: string, input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>(`accounts/${encodeURIComponent(id)}`, 'PATCH', input) }
+export async function deleteAccounts(ids: readonly string[]): Promise<void> { await mutate('accounts', 'DELETE', { ids, confirm: `delete-accounts:${ids.join(',')}` }) }
+export async function syncAccount(id: string): Promise<JobRecord> { return mutate<JobRecord>(`accounts/${encodeURIComponent(id)}/sync`, 'POST', { incremental: true }) }
+export async function ingestURL(url: string, force = false): Promise<JobRecord> { return mutate<JobRecord>('ingest/url', 'POST', { url, force }) }
+export async function controlJob(id: string, action: 'cancel' | 'pause' | 'resume' | 'retry'): Promise<JobRecord> {
+  const confirm = action === 'resume' ? undefined : `${action}-job:${id}`
+  return mutate<JobRecord>(`jobs/${encodeURIComponent(id)}/${action}`, 'POST', confirm ? { confirm } : {})
 }
 
 export async function getAccountPage(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<AccountRecord>> {
@@ -215,8 +238,17 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   return isApiEnvelope(body) ? body.data : body
 }
 
+async function mutate<T>(resource: string, method: 'POST' | 'PATCH' | 'DELETE', body: unknown): Promise<T> {
+  const csrfToken = await getCSRFToken()
+  return request<T>(`${apiBase}/${resource}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+    body: JSON.stringify(body)
+  })
+}
+
 function isApiEnvelope<T>(value: T | ApiEnvelope<T>): value is ApiEnvelope<T> {
-  return typeof value === 'object' && value !== null && 'data' in value && 'version' in value
+  return typeof value === 'object' && value !== null && 'data' in value && 'apiVersion' in value
 }
 
 async function readErrorMessage(response: Response): Promise<string> {

@@ -4,6 +4,8 @@ import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from '@astryxdes
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { useEffect, useState } from 'react'
 import { ArticleTable } from '../features/articles/ArticleTable'
+import { ImportPage } from '../features/import/ImportPage'
+import { LoginPage } from '../features/login/LoginPage'
 import { AccountsPage, AlbumsPage, JobsPage, SavedQueriesPage } from '../features/resources/ResourcePages'
 import { type Locale, type MessageCatalog, useMessages } from '../i18n'
 import { useRuntimeStatus, useWorkspaceSnapshot } from '../lib/queries'
@@ -15,11 +17,13 @@ interface WorkspaceProps {
 
 const navigation = [
   { group: 'workspace', href: '/', key: 'overview' },
+  { group: 'workspace', href: '/login', key: 'login' },
   { group: 'library', href: '/accounts', key: 'accounts' },
   { group: 'library', href: '/articles', key: 'articles' },
   { group: 'library', href: '/albums', key: 'albums' },
   { group: 'library', href: '/saved-queries', key: 'savedQueries' },
-  { group: 'operations', href: '/jobs', key: 'jobs' }
+  { group: 'operations', href: '/jobs', key: 'jobs' },
+  { group: 'operations', href: '/import', key: 'import' }
 ] as const
 
 export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
@@ -86,6 +90,8 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
 
 function renderPage(path: string, locale: Locale, messages: MessageCatalog) {
   if (path === '/accounts') return <AccountsPage locale={locale} messages={messages} />
+  if (path === '/login') return <LoginPage messages={messages} />
+  if (path === '/import') return <ImportPage messages={messages} />
   if (path === '/articles') return <ArticleTable locale={locale} messages={messages} />
   if (path === '/albums') return <AlbumsPage messages={messages} />
   if (path === '/saved-queries') return <SavedQueriesPage locale={locale} messages={messages} />

@@ -2,7 +2,7 @@ import { Button } from '@astryxdesign/core/Button'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type VisibilityState } from '@tanstack/react-table'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { MessageCatalog } from '../../i18n'
 import type { PaginatedResponse } from '../../lib/api'
 
@@ -19,9 +19,10 @@ export interface ResourceTableProps<T> {
   }
   readonly pageIndex: number
   readonly onPageChange: (pageIndex: number) => void
+  readonly onSelectionChange?: (ids: readonly string[]) => void
 }
 
-export function ResourceTable<T extends { readonly id?: string; readonly name?: string }>({ eyebrow, messages, columns, query, pageIndex, onPageChange }: ResourceTableProps<T>) {
+export function ResourceTable<T extends { readonly id?: string; readonly name?: string }>({ eyebrow, messages, columns, query, pageIndex, onPageChange, onSelectionChange }: ResourceTableProps<T>) {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({})
   const selectionColumn = useMemo<ColumnDef<T>>(() => ({
@@ -47,6 +48,7 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
   const totalPages = query.data ? Math.max(1, Math.ceil(query.data.pagination.total / query.data.pagination.pageSize)) : 1
   const selectedCount = Object.values(rowSelection).filter(Boolean).length
   const visibleColumns = useMemo(() => table.getAllLeafColumns().filter((column) => column.id !== 'select'), [table])
+  useEffect(() => { onSelectionChange?.(Object.entries(rowSelection).filter(([, selected]) => selected).map(([id]) => id)) }, [onSelectionChange, rowSelection])
 
   return (
     <section aria-labelledby={`${eyebrow.toLowerCase().replaceAll(' ', '-')}-title`}>

@@ -16,7 +16,7 @@ for (const asset of assets) {
   if (!isFingerprintedAsset(asset)) {
     throw new Error(`Vite manifest contains a non-fingerprinted asset: ${asset}`)
   }
-  if (!asset.startsWith('assets/') || asset.includes('..') || asset.startsWith('/')) {
+  if (!isLocalAssetPath(asset)) {
     throw new Error(`Vite manifest contains an unsafe asset path: ${asset}`)
   }
   try {
@@ -47,9 +47,13 @@ if (gzipBytes > gzipBudgetBytes) {
 
 function isFingerprintedAsset(asset) {
   const file = asset.split('/').at(-1) ?? ''
-  const dash = file.lastIndexOf('-')
-  const dot = file.lastIndexOf('.')
-  return dash > 0 && dot > dash + 8 && /^[A-Za-z0-9_]+$/.test(file.slice(dash + 1, dot))
+  // Vite hashes use a URL-safe alphabet. They may contain both underscores
+  // and hyphens (for example, index-Dlmg_X-D.js).
+  return /^.+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(file)
+}
+
+function isLocalAssetPath(asset) {
+  return /^assets\/[^/\\]+$/.test(asset) && !asset.includes('..')
 }
 
 function hasRemoteReference(contents) {
