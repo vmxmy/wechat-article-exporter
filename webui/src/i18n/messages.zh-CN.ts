@@ -154,6 +154,19 @@ export const zhCN = {
     artifactAction: '产物下载不可用',
     openAction: '打开文件夹不可用'
   },
+  settings: {
+    title: '设置与维护',
+    description: '管理浏览器安全的本地设置，并执行明确的维护检查。此处绝不显示密钥值或本机路径。',
+    loading: '正在加载本地设置…', unavailable: '一项本地维护能力暂不可用。', retry: '重试', actionFailed: '无法完成本地维护操作。',
+    credentials: { title: '凭据', description: '仅列出元数据。输入的凭据字段只写入，导入后会从浏览器中清除。', empty: '没有可用的凭据元数据。', import: '导入凭据', remove: '移除', nickname: '昵称', cookie: 'Cookie（仅写入）', optional: '可选', imported: '已导入凭据。密钥值未保留在浏览器中。', columns: { account: '账号', kind: '类型', status: '状态', updated: '更新时间' } },
+    proxies: { title: '代理', description: '代理授权仅写入。credential-trusted 路由必须先披露，并在创建前输入精确确认值。', empty: '尚未配置代理路由。', add: '添加代理', remove: '移除', enable: '启用', disable: '停用', test: '测试', name: '名称', endpoint: '端点', authorization: '授权信息（仅写入）', trust: '信任等级', publicOnly: '仅公开', credentialTrusted: '凭据可信', priority: '优先级', classes: '请求类别', disclosure: '凭据披露', disclosureRequired: '此路由可能接收：', confirmation: '精确确认值', confirmationHint: '请原样复制此值；它仅适用于当前拟创建的凭据可信路由。', health: '健康状态', probe: '测试结果', enabled: '已启用', disabled: '已停用', columns: { name: '名称', endpoint: '端点', trust: '信任', priority: '优先级', health: '健康', state: '状态', actions: '操作' } },
+    preferences: { title: '偏好设置', description: '只能编辑安全的设置。导出目标和其他本机路径会被刻意隐藏。', save: '保存偏好设置', saved: '偏好设置已保存。', downloadConcurrency: '下载并发数', forceContent: '强制下载正文', metadataOverrides: '元数据覆盖正文', directFirst: '优先尝试直连', fallbackEnabled: '允许代理回退', language: '显示语言', namingTemplate: '导出命名模板', maximumNameBytes: '文件名最大字节数', collisionPolicy: '冲突策略' },
+    backups: { title: '备份', description: '创建本地备份，并使用不透明的备份 ID 验证。此浏览器工作区不支持恢复。', create: '创建备份', created: '备份已创建。', verify: '验证备份', backupId: '备份 ID', valid: '备份验证通过。', invalid: '备份验证报告了失败项。', restoreTitle: '恢复', restoreUnsupported: '此处明确不支持恢复。请使用受支持的本地 CLI 恢复流程。' },
+    integrity: { title: '完整性', description: '读取本地存储的安全完整性报告。', checked: '检查时间', issues: '个问题', noIssues: '未报告完整性问题。', columns: { kind: '类型', message: '信息', repairable: '可修复', recommendation: '建议' } },
+    gc: { title: '垃圾回收', description: '请先生成计划。应用时必须输入该计划返回的一次性精确确认值。', plan: '生成 GC 计划', apply: '一次性应用此计划', planned: 'GC 计划已生成。', planExpired: '此计划可能已过期。重试前请生成新计划。', generated: '生成时间', expires: '过期时间', confirmation: '一次性精确确认值', totals: '计划回收量', result: 'GC 已完成。', categories: { objects: '未引用对象', temporary: '临时文件', debug: '过期调试捕获', logs: '已完成任务日志' } },
+    diagnostics: { title: '诊断', description: '仅显示安全摘要；详细路径、密钥和原始后端错误均被排除。', collected: '收集时间', empty: '未报告诊断检查。', columns: { check: '检查项', status: '状态', summary: '摘要' } },
+    common: { yes: '是', no: '否', bytes: (count: number) => `${new Intl.NumberFormat().format(count)} B`, countBytes: (count: number, bytes: number) => `${count} 项 · ${new Intl.NumberFormat().format(bytes)} B` }
+  },
   articles: {
     title: '文章',
     description: '本地资料库的服务端分页视图。排序、已选行和可见列保留在浏览器；记录继续留在本地运行时。',

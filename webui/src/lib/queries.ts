@@ -12,6 +12,7 @@ import {
   getStorageStatus,
   getWorkspaceSnapshot,
   authorizeDefaultExportDirectory, beginLogin, completeLogin, controlJob, createExportDirectory, deleteAccounts, ingestURL, pollLogin, saveAccount, searchAccounts, startExport, syncAccount, updateAccount, verifyExport,
+  addProxy, applyGarbageCollection, createBackup, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importCredential, patchPreferences, planGarbageCollection, removeCredential, removeProxy, setProxyEnabled, testProxy, verifyBackup,
   type AccountInput,
   type ArticlePageParams,
   type PageParams
@@ -28,7 +29,12 @@ export const queryKeys = {
   jobs: (params: PageParams) => ['jobs', params] as const,
   exports: (params: PageParams) => ['exports', params] as const,
   exportManifest: (id: string) => ['exports', id, 'manifest'] as const,
-  savedQueries: (params: PageParams) => ['saved-queries', params] as const
+  savedQueries: (params: PageParams) => ['saved-queries', params] as const,
+  credentials: ['maintenance', 'credentials'] as const,
+  proxies: ['maintenance', 'proxies'] as const,
+  preferences: ['maintenance', 'preferences'] as const,
+  integrity: ['maintenance', 'integrity'] as const,
+  diagnostics: ['maintenance', 'diagnostics'] as const
 }
 
 const snapshotPolling = { refetchInterval: 5_000, refetchIntervalInBackground: false } as const
@@ -77,6 +83,12 @@ export function useSavedQueryPage(params: PageParams) {
   return usePageQuery(queryKeys.savedQueries(params), ({ signal }) => getSavedQueryPage(params, signal))
 }
 
+export function useCredentials() { return useQuery({ queryKey: queryKeys.credentials, queryFn: ({ signal }) => getCredentials(signal) }) }
+export function useProxies() { return useQuery({ queryKey: queryKeys.proxies, queryFn: ({ signal }) => getProxies(signal) }) }
+export function usePreferences() { return useQuery({ queryKey: queryKeys.preferences, queryFn: ({ signal }) => getPreferences(signal) }) }
+export function useIntegrity() { return useQuery({ queryKey: queryKeys.integrity, queryFn: ({ signal }) => getIntegrity(signal) }) }
+export function useDiagnostics() { return useQuery({ queryKey: queryKeys.diagnostics, queryFn: ({ signal }) => getDiagnostics(signal) }) }
+
 export function useWorkspaceMutations() {
   const client = useQueryClient()
   const refresh = () => client.invalidateQueries()
@@ -94,6 +106,17 @@ export function useWorkspaceMutations() {
     createExportDirectory: useMutation({ mutationFn: ({ parentToken, name }: { parentToken: string; name: string }) => createExportDirectory(parentToken, name) }),
     startExport: useMutation({ mutationFn: startExport, onSuccess: refresh }),
     verifyExport: useMutation({ mutationFn: verifyExport, onSuccess: refresh })
+    ,importCredential: useMutation({ mutationFn: importCredential, onSuccess: refresh })
+    ,removeCredential: useMutation({ mutationFn: removeCredential, onSuccess: refresh })
+    ,addProxy: useMutation({ mutationFn: addProxy, onSuccess: refresh })
+    ,removeProxy: useMutation({ mutationFn: removeProxy, onSuccess: refresh })
+    ,setProxyEnabled: useMutation({ mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => setProxyEnabled(id, enabled), onSuccess: refresh })
+    ,testProxy: useMutation({ mutationFn: testProxy, onSuccess: refresh })
+    ,patchPreferences: useMutation({ mutationFn: patchPreferences, onSuccess: refresh })
+    ,createBackup: useMutation({ mutationFn: createBackup })
+    ,verifyBackup: useMutation({ mutationFn: verifyBackup })
+    ,planGarbageCollection: useMutation({ mutationFn: planGarbageCollection })
+    ,applyGarbageCollection: useMutation({ mutationFn: ({ planId, confirmation }: { planId: string; confirmation: string }) => applyGarbageCollection(planId, confirmation), onSuccess: refresh })
   }
 }
 

@@ -214,6 +214,90 @@ export interface LoginFlow { readonly sessionId: string; readonly qrCode?: strin
 export interface LoginPollResult { readonly state: string; readonly accountCount: number }
 export interface AccountInput { readonly fakeid: string; readonly name: string; readonly alias?: string; readonly description?: string }
 
+// Maintenance responses intentionally mirror the browser-safe DTO boundary.
+// Secret values are accepted by write-only inputs only and never modelled here.
+export interface CredentialMetadata {
+  readonly id: string
+  readonly accountId: string
+  readonly kind: string
+  readonly status: string
+  readonly validatedAt?: string
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+export interface CredentialImportInput {
+  readonly nickname?: string
+  readonly biz?: string
+  readonly uin?: string
+  readonly key?: string
+  readonly passTicket?: string
+  readonly wapSid2?: string
+  readonly appMsgToken?: string
+  readonly cookie?: string
+  readonly expiresAt?: string
+}
+
+export type ProxyTrust = 'public-only' | 'credential-trusted'
+export type ProxyRequestClass = 'public_content' | 'public_resource' | 'management_session' | 'article_credential' | 'engagement_metrics' | 'comments' | 'paid_content'
+
+export interface ProxyHealth {
+  readonly state: string
+  readonly consecutiveFailures: number
+  readonly cooldownUntil?: string
+  readonly lastSampleAt?: string
+  readonly lastSuccessAt?: string
+  readonly lastLatency?: number
+  readonly lastStatusCode?: number
+  readonly lastErrorClass?: string
+}
+
+export interface ProxyRoute {
+  readonly id: string
+  readonly name: string
+  readonly endpoint: string
+  readonly authorizationConfigured: boolean
+  readonly trust: ProxyTrust
+  readonly classes: readonly ProxyRequestClass[]
+  readonly priority: number
+  readonly enabled: boolean
+  readonly health: ProxyHealth
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+export interface ProxyInput {
+  readonly name: string
+  readonly endpoint: string
+  readonly authorization?: string
+  readonly trust: ProxyTrust
+  readonly classes: readonly ProxyRequestClass[]
+  readonly priority: number
+  readonly confirm?: string
+}
+
+export interface ProxyDisclosure { readonly required: boolean; readonly confirmation?: string; readonly secrets?: readonly string[] }
+export interface ProxyProbeResult { readonly route: ProxyRoute; readonly latency: number; readonly statusCode?: number; readonly responseValid: boolean; readonly credentialEligible: boolean; readonly errorClass?: string }
+
+export interface Preferences {
+  readonly sync: { readonly range: string; readonly datePoint?: string; readonly pageDelay: number; readonly jitter: number; readonly pageSize: number; readonly incremental: boolean; readonly unsafePacingSaved: boolean }
+  readonly download: { readonly concurrency: number; readonly forceContent: boolean; readonly metadataOverridesContent: boolean }
+  readonly export: { readonly namingTemplate: string; readonly maximumNameBytes: number; readonly collisionPolicy: string; readonly excelIncludeContent: boolean; readonly jsonIncludeContent: boolean; readonly jsonIncludeComments: boolean; readonly htmlIncludeComments: boolean }
+  readonly display: { readonly noColor: boolean; readonly ascii: boolean; readonly plain: boolean; readonly hideDeleted: boolean; readonly language?: string }
+  readonly proxy: { readonly directFirst: boolean; readonly fallbackEnabled: boolean }
+}
+
+export type PreferencesPatch = Partial<Preferences>
+export interface BackupReceipt { readonly id: string; readonly createdAt: string; readonly sha256: string; readonly bytes: number; readonly objects: number; readonly omitted?: readonly string[] }
+export interface BackupVerification { readonly backupId: string; readonly valid: boolean; readonly sha256?: string; readonly failures?: readonly string[] }
+export interface IntegrityIssue { readonly kind: string; readonly articleId?: string; readonly resourceId?: string; readonly objectDigest?: string; readonly message: string; readonly repairable: boolean; readonly recommendation?: string }
+export interface IntegrityReport { readonly checkedAt: string; readonly issues: readonly IntegrityIssue[] }
+export interface ReclaimableStorage { readonly count: number; readonly bytes: number }
+export interface GarbageCollectionPlan { readonly id: string; readonly generatedAt: string; readonly expiresAt?: string; readonly unreferencedObjects: ReclaimableStorage; readonly temporaryFiles: ReclaimableStorage; readonly expiredDebugCaptures: ReclaimableStorage; readonly completedJobLogs: ReclaimableStorage; readonly confirmation: string }
+export interface GarbageCollectionResult { readonly deletedObjects: ReclaimableStorage; readonly deletedTemporaryFiles: ReclaimableStorage; readonly deletedDebugCaptures: ReclaimableStorage; readonly deletedCompletedJobLogs: ReclaimableStorage; readonly skipped: number }
+export interface DiagnosticCheck { readonly name: string; readonly status: string; readonly summary?: string }
+export interface DiagnosticsReport { readonly collectedAt: string; readonly checks: readonly DiagnosticCheck[] }
+
 export interface ArticlePageParams extends PageParams {
   readonly search: string
   readonly sort: string
@@ -306,6 +390,24 @@ export async function getExportManifest(id: string, signal?: AbortSignal): Promi
 export async function verifyExport(id: string): Promise<ExportVerification> {
   return mutate<ExportVerification>(`exports/${encodeURIComponent(id)}/verify`, 'POST', { confirm: `verify-export:${id}` })
 }
+
+export async function getCredentials(signal?: AbortSignal): Promise<readonly CredentialMetadata[]> { return request(`${apiBase}/settings/credentials`, { signal }) }
+export async function importCredential(input: CredentialImportInput): Promise<CredentialMetadata> { return mutate('settings/credentials/import', 'POST', input) }
+export async function removeCredential(id: string): Promise<void> { await mutate(`settings/credentials/remove`, 'POST', { id }) }
+export async function getProxies(signal?: AbortSignal): Promise<readonly ProxyRoute[]> { return request(`${apiBase}/settings/proxies`, { signal }) }
+export async function getProxyDisclosure(input: ProxyInput): Promise<ProxyDisclosure> { return mutate('settings/proxies/disclosure', 'POST', input) }
+export async function addProxy(input: ProxyInput): Promise<ProxyRoute> { return mutate('settings/proxies', 'POST', input) }
+export async function removeProxy(id: string): Promise<ProxyRoute> { return mutate(`settings/proxies/${encodeURIComponent(id)}/remove`, 'POST', {}) }
+export async function setProxyEnabled(id: string, enabled: boolean): Promise<ProxyRoute> { return mutate(`settings/proxies/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`, 'POST', {}) }
+export async function testProxy(id: string): Promise<ProxyProbeResult> { return mutate(`settings/proxies/${encodeURIComponent(id)}/test`, 'POST', {}) }
+export async function getPreferences(signal?: AbortSignal): Promise<Preferences> { return request(`${apiBase}/settings/preferences`, { signal }) }
+export async function patchPreferences(patch: PreferencesPatch): Promise<Preferences> { return mutate('settings/preferences', 'PATCH', patch) }
+export async function createBackup(): Promise<BackupReceipt> { return mutate('maintenance/backups', 'POST', {}) }
+export async function verifyBackup(backupId: string): Promise<BackupVerification> { return mutate('maintenance/backups/verify', 'POST', { backupId }) }
+export async function getIntegrity(signal?: AbortSignal): Promise<IntegrityReport> { return request(`${apiBase}/maintenance/integrity`, { signal }) }
+export async function getDiagnostics(signal?: AbortSignal): Promise<DiagnosticsReport> { return request(`${apiBase}/maintenance/diagnostics`, { signal }) }
+export async function planGarbageCollection(): Promise<GarbageCollectionPlan> { return mutate('maintenance/gc/plan', 'POST', {}) }
+export async function applyGarbageCollection(planId: string, confirmation: string): Promise<GarbageCollectionResult> { return mutate('maintenance/gc/apply', 'POST', { planId, confirmation }) }
 
 async function getPage<T>(resource: string, params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<T>> {
   const searchParams = new URLSearchParams({
