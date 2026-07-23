@@ -178,3 +178,14 @@ func TestCandidateProcessConfigurationCompiles(t *testing.T) {
 	command := exec.Command("true")
 	configureCandidateProcess(command)
 }
+
+func TestCandidateRunnerRequiresObserverWhenConfiguredForControlledLive(t *testing.T) {
+	runner := candidateRunner{binary: helperShell(t), requireObserver: true}
+	if _, err := runner.configuredCommand("status"); err == nil || !strings.Contains(err.Error(), "requires a process-tree observer") {
+		t.Fatalf("configuredCommand without observer error = %v", err)
+	}
+	runner.observerCommand = " "
+	if _, err := runner.configuredCommand("status"); err == nil || !strings.Contains(err.Error(), "requires a process-tree observer") {
+		t.Fatalf("configuredCommand with whitespace observer error = %v", err)
+	}
+}

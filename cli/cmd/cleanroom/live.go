@@ -91,7 +91,7 @@ func runControlledLive(options runOptions) error {
 		CleanRoom: CleanRoomEvidence{RootCount: 4, RootsBeganEmpty: true},
 		Network:   NetworkEvidence{OfflineGuard: "os-deny-all-required"},
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
 	defer cancel()
 	portableRoot := filepath.Join(workRoot, "portable")
 	qrPath := options.QROutput
@@ -100,6 +100,9 @@ func runControlledLive(options runOptions) error {
 	}
 	if !pathWithin(workRoot, qrPath) {
 		return errors.New("--qr-output must be inside --work-root")
+	}
+	if err := validateLiveQRPath(workRoot, qrPath); err != nil {
+		return err
 	}
 	baseEnv := []string{"WECHAT_ARTICLE_PORTABLE_ROOT=" + portableRoot, "WECHAT_ARTICLE_CLEAN_ROOM=0"}
 	bootstrap := candidateRunner{binary: artifact.BinaryPath, env: baseEnv, observerCommand: options.ObserverCommand, requireObserver: true}
@@ -226,6 +229,10 @@ func runControlledLive(options runOptions) error {
 		if err := requireCompletedJob(result.Envelope); err != nil {
 			return nil, err
 		}
+		withContent, err := runner.runJSON(ctx, "article", "list", "--account", string(accountID), "--has-content", "true", "--limit", "1", "--json")
+		if err != nil || !articlePageContains(withContent.Envelope.Data, articleID, true) {
+			return nil, errors.Join(err, errors.New("downloaded controlled article content was not queryable"))
+		}
 		return map[string]string{"articleCount": "1", "contentAvailable": "true"}, nil
 	})
 	run("download.resources", livePhase, func() (map[string]string, error) {
@@ -347,8 +354,21 @@ func liveMCPProof(ctx context.Context, runner candidateRunner) (map[string]strin
 	}
 	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":%q}}`+"\n"+`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`+"\n"+`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`+"\n"+`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"storage.status","arguments":{}}}`+"\n", mcp.ProtocolVersion)
 	output, normalStderr, code, err := runner.runStdio(ctx, input, "mcp", "serve", "--transport", "stdio")
-	if err != nil || code != 0 || len(nonEmptyLines(string(output))) != 3 {
+	lines := nonEmptyLines(string(output))
+	if err != nil || code != 0 || len(lines) != 3 {
 		return nil, errors.Join(err, errors.New("MCP stdio proof failed"))
+	}
+	var initialize, tools, storage map[string]any
+	if json.Unmarshal([]byte(lines[0]), &initialize) != nil || jsonPathString(initialize, "result", "protocolVersion") != mcp.ProtocolVersion ||
+		!jsonPathBoolean(initialize, "result", "capabilities", "experimental", "localOnly") ||
+		jsonPathBoolean(initialize, "result", "capabilities", "experimental", "remoteOAuth") {
+		return nil, errors.New("MCP initialize contract failed")
+	}
+	if json.Unmarshal([]byte(lines[1]), &tools) != nil || !jsonContainsTool(tools, "storage.status") || !jsonContainsTool(tools, "accounts.query") || !jsonContainsTool(tools, "articles.query") {
+		return nil, errors.New("MCP tool registry contract failed")
+	}
+	if json.Unmarshal([]byte(lines[2]), &storage) != nil || !jsonPathBoolean(storage, "result", "structuredContent", "databaseAvailable") || !jsonPathBoolean(storage, "result", "structuredContent", "objectStoreReady") {
+		return nil, errors.New("MCP storage status contract failed")
 	}
 	return map[string]string{"responses": "3", "transport": "stdio", "unsupportedRejected": "true", "stderrBytes": fmt.Sprint(len(stderr) + len(normalStderr))}, nil
 }
@@ -359,6 +379,9 @@ func liveBackupRestore(ctx context.Context, runner candidateRunner, binary, work
 		return nil, errors.Join(err, errors.New("backup verification failed"))
 	}
 	restoreRoot := filepath.Join(workRoot, "restore-portable")
+	if err := ensureAbsentOrEmptyRealDirectory(restoreRoot); err != nil {
+		return nil, fmt.Errorf("prepare independent restore root: %w", err)
+	}
 	restore := candidateRunner{binary: binary, env: []string{"WECHAT_ARTICLE_PORTABLE_ROOT=" + restoreRoot, "WECHAT_ARTICLE_CLEAN_ROOM=0", "WECHAT_ARTICLE_SECRET_BACKEND=vault", "WECHAT_ARTICLE_VAULT_PASSPHRASE_FILE=" + passphrase}, observerCommand: runner.observerCommand, requireObserver: true}
 	if _, err := restore.runJSON(ctx, "vault", "init", "--passphrase-file", passphrase, "--json"); err != nil {
 		return nil, err
@@ -402,6 +425,49 @@ func pathWithin(root, path string) bool {
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
+func validateLiveQRPath(workRoot, path string) error {
+	parent := filepath.Dir(path)
+	if !pathWithin(workRoot, parent) {
+		return errors.New("QR output parent escapes the clean-room root")
+	}
+	for current := parent; ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return errors.New("QR output parent contains an unsafe path component")
+		}
+		if current == workRoot {
+			return nil
+		}
+	}
+}
+
+func ensureAbsentOrEmptyRealDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return errors.New("restore root is not a real directory")
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 0 {
+		return errors.New("restore root is not empty")
+	}
+	return nil
+}
+
 func assembleSetCommand(arguments []string) error {
 	flags := flag.NewFlagSet("assemble-set", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -432,7 +498,7 @@ func assembleSetCommand(arguments []string) error {
 			return errors.New("assemble-set accepts only passing live receipts")
 		}
 		relative, err := filepath.Rel(base, path)
-		if err != nil || filepath.IsAbs(relative) || strings.HasPrefix(relative, "..") {
+		if err != nil || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 			return errors.New("receipt path must be inside aggregate output directory")
 		}
 		set.Receipts = append(set.Receipts, ReceiptSetReference{Target: receipt.Platform.GOOS + "/" + receipt.Platform.GOARCH, ReceiptPath: filepath.ToSlash(relative), ReceiptSHA256: sha256Bytes(body), ArchiveSHA256: receipt.Artifact.ArchiveSHA256})

@@ -17,6 +17,8 @@ on:
       - 'docs/release/**'
       - 'samples/**'
       - '.github/workflows/release-cli.yml'
+      - '.github/workflows/controlled-live-clean-room.yml'
+      - 'actionlint.yaml'
   workflow_dispatch:
   push:
     tags:
