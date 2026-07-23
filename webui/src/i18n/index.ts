@@ -7,8 +7,8 @@ export type Locale = 'en' | 'zh-CN'
 export const messages = { en, 'zh-CN': zhCN } as const
 
 export type MessageCatalog = {
-  readonly product: { readonly name: string; readonly local: string; readonly privacy: string }
-  readonly navigation: Record<'workspace' | 'library' | 'operations' | 'overview' | 'articles' | 'albums' | 'jobs' | 'settings', string>
+  readonly product: { readonly name: string; readonly local: string; readonly privacy: string; readonly beta: string; readonly readOnly: string }
+  readonly navigation: Record<'workspace' | 'library' | 'operations' | 'overview' | 'accounts' | 'articles' | 'albums' | 'savedQueries' | 'jobs' | 'settings', string>
   readonly a11y: { readonly skip: string }
   readonly localeSwitch: string
   readonly connection: { readonly connected: string; readonly unavailable: string; readonly checking: string }
@@ -19,6 +19,15 @@ export type MessageCatalog = {
     readonly profileDescription: string
     readonly nextTitle: string
     readonly nextDescription: string
+    readonly runtimeTitle: string
+    readonly sessionTitle: string
+    readonly storageTitle: string
+    readonly unavailable: string
+    readonly sessionAccount: string
+    readonly sessionState: string
+    readonly runtimeProfile: string
+    readonly runtimeVersion: string
+    readonly storageCounts: (accounts: number, articles: number, albums: number, jobs: number) => string
   }
   readonly articles: {
     readonly title: string
@@ -39,6 +48,30 @@ export type MessageCatalog = {
     readonly selectRow: (title: string) => string
     readonly columns: { readonly title: string; readonly account: string; readonly published: string; readonly status: string }
   }
+  readonly resources: {
+    readonly accounts: ResourceMessages
+    readonly albums: ResourceMessages
+    readonly jobs: ResourceMessages
+    readonly savedQueries: ResourceMessages
+  }
+}
+
+type ResourceMessages = {
+  readonly title: string
+  readonly description: string
+  readonly loading: string
+  readonly unavailable: string
+  readonly empty: string
+  readonly retry: string
+  readonly previous: string
+  readonly next: string
+  readonly page: (current: number, total: number) => string
+  readonly pagination: string
+  readonly selected: string
+  readonly selectAll: string
+  readonly selectRow: (row: string) => string
+  readonly visibleColumns: string
+  readonly columns: Readonly<Record<string, string>>
 }
 
 export function useMessages(locale: Locale): MessageCatalog {

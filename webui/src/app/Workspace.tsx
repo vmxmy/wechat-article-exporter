@@ -4,8 +4,9 @@ import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from '@astryxdes
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { useEffect, useState } from 'react'
 import { ArticleTable } from '../features/articles/ArticleTable'
+import { AccountsPage, AlbumsPage, JobsPage, SavedQueriesPage } from '../features/resources/ResourcePages'
 import { type Locale, type MessageCatalog, useMessages } from '../i18n'
-import { useRuntimeStatus } from '../lib/queries'
+import { useRuntimeStatus, useWorkspaceSnapshot } from '../lib/queries'
 
 interface WorkspaceProps {
   readonly locale: Locale
@@ -14,7 +15,11 @@ interface WorkspaceProps {
 
 const navigation = [
   { group: 'workspace', href: '/', key: 'overview' },
-  { group: 'library', href: '/articles', key: 'articles' }
+  { group: 'library', href: '/accounts', key: 'accounts' },
+  { group: 'library', href: '/articles', key: 'articles' },
+  { group: 'library', href: '/albums', key: 'albums' },
+  { group: 'library', href: '/saved-queries', key: 'savedQueries' },
+  { group: 'operations', href: '/jobs', key: 'jobs' }
 ] as const
 
 export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
@@ -41,7 +46,7 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
           header={<SideNavHeading superheading={messages.product.local} heading={messages.product.name} headingHref="/" />}
           footer={<p className="workspace-nav-footer">{messages.product.privacy}</p>}
         >
-          {(['workspace', 'library'] as const).map((group) => (
+          {(['workspace', 'library', 'operations'] as const).map((group) => (
             <SideNavSection key={group} title={messages.navigation[group]}>
               {navigation.filter((item) => item.group === group).map((item) => (
                 <SideNavItem
@@ -63,6 +68,7 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
           <span>{connection.label}</span>
         </div>
         <div className="header-actions">
+          <span className="read-only-badge">{messages.product.beta} · {messages.product.readOnly}</span>
           <Button
             label={messages.localeSwitch}
             variant="secondary"
@@ -72,10 +78,19 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
         </div>
       </header>
       <main id="workspace-content" className="workspace-content" tabIndex={-1}>
-        {path === '/articles' ? <ArticleTable locale={locale} messages={messages} /> : <Overview messages={messages} />}
+        {renderPage(path, locale, messages)}
       </main>
     </AppShell>
   )
+}
+
+function renderPage(path: string, locale: Locale, messages: MessageCatalog) {
+  if (path === '/accounts') return <AccountsPage locale={locale} messages={messages} />
+  if (path === '/articles') return <ArticleTable locale={locale} messages={messages} />
+  if (path === '/albums') return <AlbumsPage messages={messages} />
+  if (path === '/saved-queries') return <SavedQueriesPage locale={locale} messages={messages} />
+  if (path === '/jobs') return <JobsPage locale={locale} messages={messages} />
+  return <Overview messages={messages} />
 }
 
 function getConnectionState(isSuccess: boolean, isError: boolean, messages: MessageCatalog) {
@@ -85,6 +100,10 @@ function getConnectionState(isSuccess: boolean, isError: boolean, messages: Mess
 }
 
 function Overview({ messages }: { readonly messages: MessageCatalog }) {
+  const snapshot = useWorkspaceSnapshot()
+  const runtime = snapshot.data?.runtime
+  const session = snapshot.data?.session
+  const storage = snapshot.data?.storage ?? runtime?.storage
   return (
     <section className="overview" aria-labelledby="overview-title">
       <p className="eyebrow">{messages.product.local}</p>
@@ -93,10 +112,19 @@ function Overview({ messages }: { readonly messages: MessageCatalog }) {
       <div className="overview-grid">
         <section className="workspace-panel" aria-labelledby="profile-title">
           <h2 id="profile-title">{messages.overview.profileTitle}</h2>
-          <p>{messages.overview.profileDescription}</p>
+          {snapshot.isLoading ? <p role="status">{messages.connection.checking}</p> : null}
+          {snapshot.isError ? <p>{messages.overview.unavailable}</p> : <dl className="facts-list"><div><dt>{messages.overview.runtimeProfile}</dt><dd>{runtime?.profileId ?? runtime?.profile ?? '—'}</dd></div><div><dt>{messages.overview.runtimeVersion}</dt><dd>{runtime?.version ?? '—'}</dd></div></dl>}
         </section>
         <section className="workspace-panel" aria-labelledby="next-title">
-          <h2 id="next-title">{messages.overview.nextTitle}</h2>
+          <h2 id="next-title">{messages.overview.sessionTitle}</h2>
+          {snapshot.isError ? <p>{messages.overview.unavailable}</p> : <dl className="facts-list"><div><dt>{messages.overview.sessionAccount}</dt><dd>{session?.accountName ?? '—'}</dd></div><div><dt>{messages.overview.sessionState}</dt><dd>{session?.state ?? runtime?.session ?? '—'}</dd></div></dl>}
+        </section>
+        <section className="workspace-panel" aria-labelledby="storage-title">
+          <h2 id="storage-title">{messages.overview.storageTitle}</h2>
+          <p>{storage ? messages.overview.storageCounts(storage.accounts, storage.articles, storage.albums, storage.jobs) : messages.overview.unavailable}</p>
+        </section>
+        <section className="workspace-panel" aria-labelledby="next-steps-title">
+          <h2 id="next-steps-title">{messages.overview.nextTitle}</h2>
           <p>{messages.overview.nextDescription}</p>
         </section>
       </div>

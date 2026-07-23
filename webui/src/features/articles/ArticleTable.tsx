@@ -57,7 +57,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
       )
     },
     { accessorKey: 'title', header: messages.articles.columns.title },
-    { accessorKey: 'accountName', header: messages.articles.columns.account },
+    { accessorKey: 'accountId', header: messages.articles.columns.account, cell: ({ getValue }) => getValue<string | undefined>() ?? '—' },
     {
       accessorKey: 'publishedAt',
       header: messages.articles.columns.published,
@@ -66,7 +66,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
     {
       accessorKey: 'status',
       header: messages.articles.columns.status,
-      cell: ({ getValue }) => <ArticleStatus status={getValue<string>()} locale={locale} />
+      cell: ({ row }) => <ArticleStatus status={row.original.state ?? row.original.status ?? ''} locale={locale} />
     }
   ], [locale, messages])
 
@@ -103,6 +103,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
           <h1 id="articles-title">{messages.articles.title}</h1>
           <p className="lede">{messages.articles.description}</p>
         </div>
+        <p className="read-only-badge">{messages.product.beta} · {messages.product.readOnly}</p>
       </header>
       <div className="table-toolbar">
         <TextInput
