@@ -13,7 +13,9 @@ import {
   getWorkspaceSnapshot,
   authorizeDefaultExportDirectory, beginLogin, completeLogin, controlJob, createExportDirectory, deleteAccounts, ingestURL, pollLogin, saveAccount, searchAccounts, startExport, syncAccount, updateAccount, verifyExport,
   addProxy, applyGarbageCollection, createBackup, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importCredential, patchPreferences, planGarbageCollection, removeCredential, removeProxy, setProxyEnabled, testProxy, verifyBackup,
+  downloadArticles, traverseAlbum,
   type AccountInput,
+  type ArticleDownloadKind,
   type ArticlePageParams,
   type PageParams
 } from './api'
@@ -101,6 +103,8 @@ export function useWorkspaceMutations() {
     deleteAccounts: useMutation({ mutationFn: (ids: readonly string[]) => deleteAccounts(ids), onSuccess: refresh }),
     syncAccount: useMutation({ mutationFn: syncAccount, onSuccess: refresh }),
     ingestURL: useMutation({ mutationFn: ({ url, force }: { url: string; force: boolean }) => ingestURL(url, force), onSuccess: refresh }),
+    downloadArticles: useMutation({ mutationFn: ({ articleIds, kind, force }: { articleIds: readonly string[]; kind: ArticleDownloadKind; force?: boolean }) => downloadArticles(articleIds, kind, force), onSuccess: refresh }),
+    traverseAlbum: useMutation({ mutationFn: ({ albumId, accountId, download }: { albumId: string; accountId: string; download: boolean }) => traverseAlbum(albumId, accountId, download), onSuccess: refresh }),
     controlJob: useMutation({ mutationFn: ({ id, action }: { id: string; action: 'cancel' | 'pause' | 'resume' | 'retry' }) => controlJob(id, action), onSuccess: refresh }),
     authorizeDefaultExportDirectory: useMutation({ mutationFn: authorizeDefaultExportDirectory }),
     createExportDirectory: useMutation({ mutationFn: ({ parentToken, name }: { parentToken: string; name: string }) => createExportDirectory(parentToken, name) }),

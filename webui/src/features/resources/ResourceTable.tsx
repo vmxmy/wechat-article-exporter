@@ -31,6 +31,7 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
     header: ({ table: currentTable }) => <CheckboxInput label={messages.selectAll} isLabelHidden value={currentTable.getIsSomePageRowsSelected() ? 'indeterminate' : currentTable.getIsAllPageRowsSelected()} onChange={() => currentTable.toggleAllPageRowsSelected()} />,
     cell: ({ row }) => <CheckboxInput label={messages.selectRow(row.id)} isLabelHidden value={row.getIsSelected()} onChange={() => row.toggleSelected()} />
   }), [messages])
+  useEffect(() => setRowSelection({}), [pageIndex])
   // TanStack Table deliberately returns a mutable instance; it is rendered
   // directly here rather than being memoized or passed to a memoized child.
   // eslint-disable-next-line react-hooks/incompatible-library

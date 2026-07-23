@@ -5,9 +5,9 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type SortingState, type VisibilityState } from '@tanstack/react-table'
 import { useEffect, useMemo, useState } from 'react'
 import type { Locale, MessageCatalog } from '../../i18n'
-import type { ArticleRecord } from '../../lib/api'
+import { getArticlePreview, type ArticleRecord } from '../../lib/api'
 import { useArticlePage } from '../../lib/queries'
-import { UnavailableActionPanel } from '../actions/UnavailableActionPanel'
+import { useWorkspaceMutations } from '../../lib/queries'
 
 interface ArticleTableProps {
   readonly locale: Locale
@@ -23,11 +23,13 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'publishedAt', desc: true }])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({})
+  const [notice, setNotice] = useState<string>()
   const sort = sorting[0] ?? { id: 'publishedAt', desc: true }
   useEffect(() => {
     const timeout = window.setTimeout(() => setQuery(search), 250)
     return () => window.clearTimeout(timeout)
   }, [search])
+  useEffect(() => setRowSelection({}), [pageIndex, query, sort.id, sort.desc])
   const articlePage = useArticlePage({
     page: pageIndex + 1,
     pageSize,
@@ -35,6 +37,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
     sort: sort.id,
     direction: sort.desc ? 'desc' : 'asc'
   })
+  const mutations = useWorkspaceMutations()
 
   const columns = useMemo<ColumnDef<ArticleRecord>[]>(() => [
     {
@@ -95,6 +98,20 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
 
   const totalPages = articlePage.data ? Math.max(1, Math.ceil(articlePage.data.pagination.total / pageSize)) : 1
   const selectedCount = Object.values(rowSelection).filter(Boolean).length
+  const selectedIDs = Object.entries(rowSelection).filter(([, selected]) => selected).map(([id]) => id)
+  const selectedArticle = selectedIDs.length === 1 ? articlePage.data?.data.find((article) => article.id === selectedIDs[0]) : undefined
+  const startDownload = (kind: 'article' | 'metadata' | 'comments' | 'resources') => {
+    if (selectedIDs.length === 0) return
+    mutations.downloadArticles.mutate({ articleIds: selectedIDs, kind, force: false }, {
+      onSuccess: (job) => setNotice(`${kind}: ${job.id}`),
+      onError: () => setNotice(messages.articles.actions.failed)
+    })
+  }
+  const preview = () => {
+    if (!selectedArticle) return
+    if (selectedArticle.hasContent === false) return setNotice(messages.articles.actions.previewUnavailable)
+    void getArticlePreview(selectedArticle.id).then((handoff) => setNotice(handoff.available ? `${messages.articles.actions.preview}: ${handoff.title}` : messages.articles.actions.previewUnavailable)).catch(() => setNotice(messages.articles.actions.failed))
+  }
 
   return (
     <section aria-labelledby="articles-title">
@@ -104,7 +121,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
           <h1 id="articles-title">{messages.articles.title}</h1>
           <p className="lede">{messages.articles.description}</p>
         </div>
-        <p className="read-only-badge">{messages.product.beta} · {messages.product.readOnly}</p>
+        <p className="read-only-badge">{messages.product.local}</p>
       </header>
       <div className="table-toolbar">
         <TextInput
@@ -179,11 +196,17 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
         <span>{messages.articles.page(pageIndex + 1, totalPages)}</span>
         <Button label={messages.articles.next} variant="secondary" size="sm" isDisabled={pageIndex + 1 >= totalPages} onClick={() => setPageIndex((current) => current + 1)} />
       </nav>
-      <UnavailableActionPanel messages={messages} title={messages.articles.actions.title} description={messages.articles.actions.description} availabilityNote={messages.unavailableActions.apiUnavailable}>
-        <Button label={messages.articles.actions.preview} variant="secondary" isDisabled />
-        <Button label={messages.articles.actions.download} variant="secondary" isDisabled />
-        <Button label={messages.articles.actions.saveQuery} variant="secondary" isDisabled />
-      </UnavailableActionPanel>
+      <section className="unavailable-actions" aria-labelledby="article-actions-title">
+        <div><h2 id="article-actions-title">{messages.articles.actions.title}</h2><p>{messages.articles.actions.description}</p></div>
+        <div className="action-button-group">
+          <Button label={messages.articles.actions.preview} variant="secondary" isDisabled={!selectedArticle} onClick={preview} />
+          <Button label={messages.articles.actions.download} variant="primary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('article')} />
+          <Button label={messages.articles.actions.metadata} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('metadata')} />
+          <Button label={messages.articles.actions.comments} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('comments')} />
+          <Button label={messages.articles.actions.resources} variant="secondary" isLoading={mutations.downloadArticles.isPending} isDisabled={selectedIDs.length === 0} onClick={() => startDownload('resources')} />
+        </div>
+        {notice ? <p role="status">{notice}</p> : null}
+      </section>
     </section>
   )
 }

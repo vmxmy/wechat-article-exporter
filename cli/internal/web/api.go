@@ -57,6 +57,8 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		server.accountSearch(writer, request)
 	case "/api/v1/articles":
 		server.articles(writer, request)
+	case "/api/v1/articles/preview":
+		server.articlePreview(writer, request)
 	case "/api/v1/albums":
 		server.albums(writer, request)
 	case "/api/v1/saved-queries":
@@ -143,6 +145,20 @@ func (server *Server) articles(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	writePage(writer, http.StatusOK, value)
+}
+
+func (server *Server) articlePreview(writer http.ResponseWriter, request *http.Request) {
+	articleID := domain.ArticleID(strings.TrimSpace(request.URL.Query().Get("articleId")))
+	if articleID == "" {
+		server.apiError(writer, http.StatusBadRequest, "invalid_argument", "article identifier is required")
+		return
+	}
+	value, err := server.workspace.ArticlePreview(request.Context(), articleID)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusOK, value)
 }
 
 func (server *Server) albums(writer http.ResponseWriter, request *http.Request) {

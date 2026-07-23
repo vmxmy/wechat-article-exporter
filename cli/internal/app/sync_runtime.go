@@ -125,6 +125,14 @@ func (runtime *localSyncRuntime) StartAlbum(ctx context.Context, request syncrun
 }
 
 func (runtime *localSyncRuntime) StartAlbumByID(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
+	return runtime.startAlbumByID(ctx, accountID, albumID, false)
+}
+
+func (runtime *localSyncRuntime) StartAlbumByIDAndDownload(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
+	return runtime.startAlbumByID(ctx, accountID, albumID, true)
+}
+
+func (runtime *localSyncRuntime) startAlbumByID(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID, download bool) (domain.Job, error) {
 	if runtime == nil || runtime.library == nil {
 		return domain.Job{}, fmt.Errorf("album sync runtime: %w", application.ErrUnavailable)
 	}
@@ -138,7 +146,7 @@ func (runtime *localSyncRuntime) StartAlbumByID(ctx context.Context, accountID d
 	}
 	return runtime.StartAlbum(ctx, syncrunner.AlbumSyncRequest{
 		FakeID: account.FakeID, AlbumID: album.UpstreamID, Order: "forward", PageSize: 20, PageDelay: 5 * time.Second,
-	}, false)
+	}, download)
 }
 
 func normalizedSyncAccountIDs(request domain.SynchronizeAccountRequest) []domain.AccountID {

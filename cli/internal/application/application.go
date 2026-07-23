@@ -86,6 +86,14 @@ type SyncJobs interface {
 	Recover(context.Context) (int64, error)
 }
 
+// AlbumSyncJobs is an optional execution extension implemented by local sync
+// runtimes that can atomically persist album traversal intent with a follow-on
+// batch download. The application exposes it through its typed facade.
+type AlbumSyncJobs interface {
+	StartAlbumByID(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error)
+	StartAlbumByIDAndDownload(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error)
+}
+
 type ExportJobs interface {
 	Start(context.Context, domain.ExportRequest) (domain.Job, error)
 	Run(context.Context, domain.JobID) (domain.Job, error)
@@ -299,6 +307,16 @@ func (service *Service) GetAccountByFakeID(ctx context.Context, fakeID string) (
 	return service.accounts.GetAccountByFakeID(ctx, fakeID)
 }
 
+func (service *Service) GetArticle(ctx context.Context, id domain.ArticleID) (domain.Article, error) {
+	articles, ok := service.library.(interface {
+		GetArticle(context.Context, domain.ArticleID) (domain.Article, error)
+	})
+	if !ok {
+		return domain.Article{}, fmt.Errorf("get article: %w", ErrUnavailable)
+	}
+	return articles.GetArticle(ctx, id)
+}
+
 func (service *Service) QueryAccounts(ctx context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
 	if service.library == nil {
 		return domain.Page[domain.Account]{Items: []domain.Account{}, Offset: query.Offset, Limit: query.Limit}, nil
@@ -377,9 +395,7 @@ func (service *Service) SynchronizeAlbum(ctx context.Context, accountID domain.A
 	if accountID == "" || albumID == "" {
 		return domain.Job{}, errors.New("album synchronization requires account and album IDs")
 	}
-	albumRuntime, ok := service.syncs.(interface {
-		StartAlbumByID(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error)
-	})
+	albumRuntime, ok := service.syncs.(AlbumSyncJobs)
 	if !ok {
 		return domain.Job{}, fmt.Errorf("album synchronization: %w", ErrUnavailable)
 	}
@@ -387,6 +403,26 @@ func (service *Service) SynchronizeAlbum(ctx context.Context, accountID domain.A
 		return domain.Job{}, fmt.Errorf("start album_sync worker: %w", ErrUnavailable)
 	}
 	job, err := albumRuntime.StartAlbumByID(ctx, accountID, albumID)
+	return service.startJob(ctx, job, err)
+}
+
+// SynchronizeAlbumAndDownload traverses a saved album through the same
+// resumable album_sync worker, then has that worker enqueue one persistent
+// batch article-download job after traversal commits. It is intentionally an
+// additive capability so older adapter fakes do not gain a bypass around the
+// shared Application interface.
+func (service *Service) SynchronizeAlbumAndDownload(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
+	if accountID == "" || albumID == "" {
+		return domain.Job{}, errors.New("album synchronization requires account and album IDs")
+	}
+	albumRuntime, ok := service.syncs.(AlbumSyncJobs)
+	if !ok {
+		return domain.Job{}, fmt.Errorf("album batch download: %w", ErrUnavailable)
+	}
+	if service.starter == nil {
+		return domain.Job{}, fmt.Errorf("start album_sync worker: %w", ErrUnavailable)
+	}
+	job, err := albumRuntime.StartAlbumByIDAndDownload(ctx, accountID, albumID)
 	return service.startJob(ctx, job, err)
 }
 

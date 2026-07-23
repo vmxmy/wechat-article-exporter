@@ -139,6 +139,11 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 		{"/api/v1/login/complete", `{}`, http.StatusOK},
 		{"/api/v1/accounts/account-1/sync", `{"incremental":true,"pageSize":20}`, http.StatusAccepted},
 		{"/api/v1/ingest/url", `{"url":"https://mp.weixin.qq.com/s/fixture"}`, http.StatusAccepted},
+		{"/api/v1/articles/download", `{"articleIds":["article-1"]}`, http.StatusAccepted},
+		{"/api/v1/articles/metadata", `{"articleIds":["article-1"]}`, http.StatusAccepted},
+		{"/api/v1/articles/comments", `{"articleIds":["article-1"]}`, http.StatusAccepted},
+		{"/api/v1/articles/resources", `{"articleIds":["article-1"],"force":true}`, http.StatusAccepted},
+		{"/api/v1/albums/album-1/traverse", `{"accountId":"account-1","download":true}`, http.StatusAccepted},
 		{"/api/v1/jobs/" + jobID + "/pause", `{"confirm":"pause-job:` + jobID + `"}`, http.StatusOK},
 		{"/api/v1/jobs/" + jobID + "/resume", `{}`, http.StatusOK},
 		{"/api/v1/jobs/" + jobID + "/retry", `{"confirm":"retry-job:` + jobID + `"}`, http.StatusOK},
@@ -150,8 +155,11 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 		}
 		response.Body.Close()
 	}
-	if app.loginSessionID != "browser-session" || app.syncRequest.AccountID != "account-1" || len(app.downloadRequest.URLs) != 1 || app.downloadRequest.URLs[0] != "https://mp.weixin.qq.com/s/fixture" {
-		t.Fatalf("control inputs were not routed through application: login=%q sync=%#v download=%#v", app.loginSessionID, app.syncRequest, app.downloadRequest)
+	if app.loginSessionID != "browser-session" || app.syncRequest.AccountID != "account-1" || app.albumRequest.AccountID != "account-1" || app.albumRequest.AlbumID != "album-1" || !app.albumBatch || len(app.downloadRequests) != 5 {
+		t.Fatalf("control inputs were not routed through application: login=%q sync=%#v album=%#v batch=%t downloads=%#v", app.loginSessionID, app.syncRequest, app.albumRequest, app.albumBatch, app.downloadRequests)
+	}
+	if app.downloadRequests[0].URLs[0] != "https://mp.weixin.qq.com/s/fixture" || app.downloadRequests[1].Kind != "article" || app.downloadRequests[2].Kind != "metadata" || app.downloadRequests[3].Kind != "comments" || app.downloadRequests[4].Kind != "resources" || !app.downloadRequests[4].Force {
+		t.Fatalf("download jobs = %#v", app.downloadRequests)
 	}
 	response := mutate("/api/v1/jobs/"+jobID+"/cancel", `{}`)
 	if response.StatusCode != http.StatusBadRequest {
@@ -166,6 +174,30 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 	if !app.loggedOut {
 		t.Fatal("application logout was not invoked")
 	}
+}
+
+func TestArticlePreviewUsesSafeWorkspaceHandoff(t *testing.T) {
+	app := &apiApplication{article: domain.Article{ID: "article-1", Title: "Fixture", HasContent: true}}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+	response := get(t, client, base+"/api/v1/articles/preview?articleId=article-1")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	var preview application.WorkspaceArticlePreview
+	if err := json.NewDecoder(response.Body).Decode(&preview); err != nil {
+		response.Body.Close()
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if preview.ArticleID != "article-1" || preview.Title != "Fixture" || !preview.Available {
+		t.Fatalf("preview = %#v", preview)
+	}
+	response = get(t, client, base+"/api/v1/articles/preview")
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("missing article ID status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "invalid_argument")
 }
 
 func applicationLoginFlow() wechat.LoginFlow {
@@ -280,26 +312,29 @@ func assertAPIError(t *testing.T, response *http.Response, code string) {
 
 type apiApplication struct {
 	testApplication
-	runtime         domain.RuntimeStatus
-	session         wechat.Session
-	accounts        domain.Page[domain.Account]
-	articles        domain.Page[domain.Article]
-	albums          domain.Page[domain.Album]
-	jobs            domain.Page[domain.Job]
-	saved           []domain.SavedArticleQuery
-	job             domain.Job
-	accountsErr     error
-	accountQuery    domain.AccountQuery
-	articleQuery    domain.ArticleQuery
-	jobQuery        domain.JobQuery
-	loginFlow       wechat.LoginFlow
-	poll            wechat.PollResult
-	completed       wechat.Session
-	loginSessionID  string
-	account         domain.Account
-	syncRequest     domain.SynchronizeAccountRequest
-	downloadRequest domain.DownloadRequest
-	loggedOut       bool
+	runtime          domain.RuntimeStatus
+	session          wechat.Session
+	accounts         domain.Page[domain.Account]
+	articles         domain.Page[domain.Article]
+	albums           domain.Page[domain.Album]
+	jobs             domain.Page[domain.Job]
+	saved            []domain.SavedArticleQuery
+	job              domain.Job
+	article          domain.Article
+	accountsErr      error
+	accountQuery     domain.AccountQuery
+	articleQuery     domain.ArticleQuery
+	jobQuery         domain.JobQuery
+	loginFlow        wechat.LoginFlow
+	poll             wechat.PollResult
+	completed        wechat.Session
+	loginSessionID   string
+	account          domain.Account
+	syncRequest      domain.SynchronizeAccountRequest
+	downloadRequests []domain.DownloadRequest
+	albumRequest     application.WorkspaceAlbumTraversalRequest
+	albumBatch       bool
+	loggedOut        bool
 }
 
 func (app *apiApplication) BeginLogin(_ context.Context, id string) (wechat.LoginFlow, error) {
@@ -327,7 +362,16 @@ func (app *apiApplication) SynchronizeAccount(_ context.Context, request domain.
 	return app.job, nil
 }
 func (app *apiApplication) StartDownload(_ context.Context, request domain.DownloadRequest) (domain.Job, error) {
-	app.downloadRequest = request
+	app.downloadRequests = append(app.downloadRequests, request)
+	return app.job, nil
+}
+func (app *apiApplication) SynchronizeAlbum(_ context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
+	app.albumRequest = application.WorkspaceAlbumTraversalRequest{AccountID: accountID, AlbumID: albumID}
+	return app.job, nil
+}
+func (app *apiApplication) SynchronizeAlbumAndDownload(_ context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
+	app.albumRequest = application.WorkspaceAlbumTraversalRequest{AccountID: accountID, AlbumID: albumID, Download: true}
+	app.albumBatch = true
 	return app.job, nil
 }
 func (app *apiApplication) PauseJob(context.Context, domain.JobID) (domain.Job, error) {
@@ -357,6 +401,9 @@ func (app *apiApplication) QueryArticles(_ context.Context, query domain.Article
 	page := app.articles
 	page.Offset, page.Limit = query.Offset, query.Limit
 	return page, nil
+}
+func (app *apiApplication) GetArticle(context.Context, domain.ArticleID) (domain.Article, error) {
+	return app.article, nil
 }
 func (app *apiApplication) QueryAlbums(context.Context, domain.AlbumQuery) (domain.Page[domain.Album], error) {
 	return app.albums, nil

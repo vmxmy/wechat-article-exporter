@@ -192,9 +192,14 @@ export const en = {
     },
     actions: {
       title: 'Selected article actions',
-      description: 'Preview, download, and save-query actions require dedicated local endpoints.',
+      description: 'Each action creates a persistent local job; preview remains a safe local handoff.',
       preview: 'Preview selected article',
+      previewUnavailable: 'Download article content before opening a local preview.',
       download: 'Download selected article',
+      metadata: 'Refresh metadata',
+      comments: 'Download comments',
+      resources: 'Complete resources',
+      failed: 'The selected article action could not be queued.',
       saveQuery: 'Save current query'
     }
   },
@@ -208,9 +213,10 @@ export const en = {
     },
     albums: {
       title: 'Albums',
-      description: 'Album metadata is available for inspection only in this beta. Traversal and download actions will arrive with their supported APIs.',
+      description: 'Browse saved albums, then traverse their ordered contents or queue one persistent batch download.',
       loading: 'Loading local album page…', unavailable: 'The local albums API is not available yet.', empty: 'No albums match this query.', retry: 'Retry', previous: 'Previous page', next: 'Next page', page: (current: number, total: number) => `Page ${current} of ${total}`, pagination: 'Album pagination', selected: 'selected', selectAll: 'Select all rows on this page', selectRow: (row: string) => `Select ${row}`, visibleColumns: 'Visible album columns',
-      columns: { name: 'Album', articles: 'Articles', paid: 'Paid', description: 'Description' }
+      columns: { name: 'Album', articles: 'Articles', paid: 'Paid', description: 'Description' },
+      actions: { title: 'Album actions', description: 'Traversal resumes through the shared persistent album job. Batch download queues article downloads after traversal commits.', traverse: 'Traverse selected album', download: 'Traverse and batch download', selectOne: 'Select one saved album with an owning account first.', queued: (id: string) => `Album job ${id} was queued.`, failed: 'The album action could not be queued.' }
     },
     jobs: {
       title: 'Jobs',

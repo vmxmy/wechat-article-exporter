@@ -87,6 +87,9 @@ export interface ArticleRecord {
   readonly hasComments?: boolean
 }
 
+export type ArticleDownloadKind = 'article' | 'metadata' | 'comments' | 'resources'
+export interface ArticlePreview { readonly articleId: string; readonly title: string; readonly available: boolean }
+
 export interface AlbumRecord {
   readonly id: string
   readonly accountId?: string
@@ -334,6 +337,16 @@ export async function updateAccount(id: string, input: AccountInput): Promise<Ac
 export async function deleteAccounts(ids: readonly string[]): Promise<void> { await mutate('accounts', 'DELETE', { ids, confirm: `delete-accounts:${ids.join(',')}` }) }
 export async function syncAccount(id: string): Promise<JobRecord> { return mutate<JobRecord>(`accounts/${encodeURIComponent(id)}/sync`, 'POST', { incremental: true }) }
 export async function ingestURL(url: string, force = false): Promise<JobRecord> { return mutate<JobRecord>('ingest/url', 'POST', { url, force }) }
+export async function downloadArticles(articleIds: readonly string[], kind: ArticleDownloadKind, force = false): Promise<JobRecord> {
+  const resource = kind === 'article' ? 'articles/download' : `articles/${kind}`
+  return mutate<JobRecord>(resource, 'POST', { articleIds, force })
+}
+export async function getArticlePreview(articleId: string, signal?: AbortSignal): Promise<ArticlePreview> {
+  return request<ArticlePreview>(`${apiBase}/articles/preview?articleId=${encodeURIComponent(articleId)}`, { signal })
+}
+export async function traverseAlbum(albumId: string, accountId: string, download: boolean): Promise<JobRecord> {
+  return mutate<JobRecord>(`albums/${encodeURIComponent(albumId)}/traverse`, 'POST', { accountId, download })
+}
 export async function controlJob(id: string, action: 'cancel' | 'pause' | 'resume' | 'retry'): Promise<JobRecord> {
   const confirm = action === 'resume' ? undefined : `${action}-job:${id}`
   return mutate<JobRecord>(`jobs/${encodeURIComponent(id)}/${action}`, 'POST', confirm ? { confirm } : {})

@@ -192,9 +192,14 @@ export const zhCN = {
     },
     actions: {
       title: '已选文章操作',
-      description: '预览、下载和保存查询需要专门的本地端点。',
+      description: '每项操作都会创建持久化本地任务；预览保持为安全的本地交接。',
       preview: '预览所选文章',
+      previewUnavailable: '请先下载文章正文，再打开本地预览。',
       download: '下载所选文章',
+      metadata: '刷新元数据',
+      comments: '下载评论',
+      resources: '补齐资源',
+      failed: '无法为所选文章创建任务。',
       saveQuery: '保存当前查询'
     }
   },
@@ -208,9 +213,10 @@ export const zhCN = {
     },
     albums: {
       title: '专辑',
-      description: '此 Beta 仅供查看专辑元数据。遍历和下载操作会在对应 API 可用后提供。',
+      description: '浏览已保存专辑，并遍历其排序内容或创建一个持久化批量下载任务。',
       loading: '正在加载本地专辑页…', unavailable: '本地 albums API 尚不可用。', empty: '没有与查询匹配的专辑。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '专辑分页', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见专辑列',
-      columns: { name: '专辑', articles: '文章数', paid: '付费', description: '简介' }
+      columns: { name: '专辑', articles: '文章数', paid: '付费', description: '简介' },
+      actions: { title: '专辑操作', description: '遍历由共享持久化专辑任务可恢复地执行；批量下载会在遍历提交后创建文章下载任务。', traverse: '遍历所选专辑', download: '遍历并批量下载', selectOne: '请先选择一个带所属账号的已保存专辑。', queued: (id: string) => `专辑任务 ${id} 已排队。`, failed: '无法为专辑创建任务。' }
     },
     jobs: {
       title: '任务',

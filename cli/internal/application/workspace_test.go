@@ -25,6 +25,15 @@ type workspaceLibrary struct {
 	accountsError error
 }
 
+func (library *workspaceLibrary) GetArticle(_ context.Context, id domain.ArticleID) (domain.Article, error) {
+	for _, article := range library.articles.Items {
+		if article.ID == id {
+			return article, nil
+		}
+	}
+	return domain.Article{}, errors.New("article missing")
+}
+
 func (library *workspaceLibrary) QueryAccounts(_ context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
 	library.accountQuery = query
 	return library.accounts, library.accountsError
@@ -184,4 +193,49 @@ func TestWorkspaceErrorModelRedactsApplicationFailures(t *testing.T) {
 	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorUnavailable {
 		t.Fatalf("unavailable error = %#v", err)
 	}
+}
+
+func TestWorkspaceArticleControlsUseSharedApplicationJobs(t *testing.T) {
+	library := &workspaceLibrary{articles: domain.Page[domain.Article]{Items: []domain.Article{{ID: "article-1", Title: "Fixture", HasContent: true}}}}
+	application := &workspaceControlApplication{Service: New(Options{Library: library}), job: domain.Job{ID: "job-1", Kind: "article_download", State: domain.JobQueued}}
+	workspace := NewWorkspace(application)
+
+	preview, err := workspace.ArticlePreview(context.Background(), "article-1")
+	if err != nil || preview.ArticleID != "article-1" || !preview.Available {
+		t.Fatalf("ArticlePreview() = %#v, %v", preview, err)
+	}
+	job, err := workspace.StartDownload(context.Background(), domain.DownloadRequest{Kind: "metadata", ArticleIDs: []domain.ArticleID{"article-1"}})
+	if err != nil || job.ID != "job-1" || application.download.Kind != "metadata" {
+		t.Fatalf("StartDownload() = %#v, request=%#v, err=%v", job, application.download, err)
+	}
+	job, err = workspace.SynchronizeAlbum(context.Background(), WorkspaceAlbumTraversalRequest{AccountID: "account-1", AlbumID: "album-1", Download: true})
+	if err != nil || job.ID != "job-1" || !application.albumDownload {
+		t.Fatalf("SynchronizeAlbum() = %#v, download=%t, err=%v", job, application.albumDownload, err)
+	}
+	_, err = workspace.StartDownload(context.Background(), domain.DownloadRequest{Kind: "metadata"})
+	var workspaceErr *WorkspaceError
+	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInvalidArgument {
+		t.Fatalf("empty download error = %v", err)
+	}
+}
+
+type workspaceControlApplication struct {
+	*Service
+	job           domain.Job
+	download      domain.DownloadRequest
+	albumDownload bool
+}
+
+func (application *workspaceControlApplication) GetArticle(ctx context.Context, id domain.ArticleID) (domain.Article, error) {
+	return application.Service.library.(*workspaceLibrary).GetArticle(ctx, id)
+}
+
+func (application *workspaceControlApplication) StartDownload(_ context.Context, request domain.DownloadRequest) (domain.Job, error) {
+	application.download = request
+	return application.job, nil
+}
+
+func (application *workspaceControlApplication) SynchronizeAlbumAndDownload(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error) {
+	application.albumDownload = true
+	return application.job, nil
 }

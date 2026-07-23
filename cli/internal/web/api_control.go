@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 )
 
@@ -13,6 +14,9 @@ import (
 // application-owned Workspace facade; handlers never receive profile runtime,
 // filesystem, database, cookie, or secret-store capabilities.
 func (server *Server) apiControl(writer http.ResponseWriter, request *http.Request) bool {
+	if request.Method == http.MethodGet {
+		return false
+	}
 	if server.maintenanceControl(writer, request) {
 		return true
 	}
@@ -52,6 +56,14 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 		return false
 	case "/api/v1/ingest/url":
 		server.ingestURL(writer, request)
+	case "/api/v1/articles/download":
+		server.articleDownload(writer, request)
+	case "/api/v1/articles/metadata":
+		server.articleDownloadKind(writer, request, "metadata")
+	case "/api/v1/articles/comments":
+		server.articleDownloadKind(writer, request, "comments")
+	case "/api/v1/articles/resources":
+		server.articleDownloadKind(writer, request, "resources")
 	default:
 		if server.exportControl(writer, request) {
 			return true
@@ -79,6 +91,12 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 			default:
 				return false
 			}
+		} else if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/albums/"); ok {
+			albumID, action, found := strings.Cut(id, "/")
+			if !found || action != "traverse" {
+				return false
+			}
+			server.albumTraverse(writer, request, domain.AlbumID(albumID))
 		} else {
 			return false
 		}
@@ -274,6 +292,52 @@ func (server *Server) ingestURL(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	job, err := server.workspace.StartDownload(request.Context(), domain.DownloadRequest{Kind: "article", URLs: []string{strings.TrimSpace(input.URL)}, Force: input.Force})
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusAccepted, job)
+}
+
+func (server *Server) articleDownload(writer http.ResponseWriter, request *http.Request) {
+	server.articleDownloadKind(writer, request, "article")
+}
+
+func (server *Server) articleDownloadKind(writer http.ResponseWriter, request *http.Request, kind string) {
+	if !server.apiMutation(writer, request, http.MethodPost) {
+		return
+	}
+	var input struct {
+		ArticleIDs []domain.ArticleID `json:"articleIds"`
+		Force      bool               `json:"force"`
+	}
+	if err := decodeControl(request, &input); err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	job, err := server.workspace.StartDownload(request.Context(), domain.DownloadRequest{Kind: kind, ArticleIDs: input.ArticleIDs, Force: input.Force})
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusAccepted, job)
+}
+
+func (server *Server) albumTraverse(writer http.ResponseWriter, request *http.Request, albumID domain.AlbumID) {
+	if !server.apiMutation(writer, request, http.MethodPost) {
+		return
+	}
+	var input struct {
+		AccountID domain.AccountID `json:"accountId"`
+		Download  bool             `json:"download"`
+	}
+	if err := decodeControl(request, &input); err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	job, err := server.workspace.SynchronizeAlbum(request.Context(), application.WorkspaceAlbumTraversalRequest{
+		AccountID: input.AccountID, AlbumID: albumID, Download: input.Download,
+	})
 	if err != nil {
 		server.workspaceError(writer, err)
 		return

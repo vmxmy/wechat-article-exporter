@@ -47,14 +47,29 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
 
 export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) {
   const [pageIndex, setPageIndex] = useState(0)
+  const [selected, setSelected] = useState<readonly string[]>([])
+  const [notice, setNotice] = useState<string>()
   const query = useAlbumPage({ page: pageIndex + 1, pageSize })
+  const mutations = useWorkspaceMutations()
   const columns = useMemo<ColumnDef<AlbumRecord>[]>(() => [
     { accessorKey: 'name', header: messages.resources.albums.columns.name },
     { accessorKey: 'articleCount', header: messages.resources.albums.columns.articles },
     { accessorKey: 'paid', header: messages.resources.albums.columns.paid, cell: ({ getValue }) => getValue<boolean | undefined>() ? '✓' : '—' },
     { accessorKey: 'description', header: messages.resources.albums.columns.description, cell: ({ getValue }) => getValue<string | undefined>() ?? '—' }
   ], [messages])
-  return <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} />
+  const album = selected.length === 1 ? query.data?.data.find((item) => item.id === selected[0]) : undefined
+  const traverse = (download: boolean) => {
+    if (!album?.accountId) return setNotice(messages.resources.albums.actions.selectOne)
+    mutations.traverseAlbum.mutate({ albumId: album.id, accountId: album.accountId, download }, { onSuccess: (job) => setNotice(messages.resources.albums.actions.queued(job.id)), onError: () => setNotice(messages.resources.albums.actions.failed) })
+  }
+  return <>
+    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
+    <section className="unavailable-actions" aria-labelledby="album-actions-title">
+      <div><h2 id="album-actions-title">{messages.resources.albums.actions.title}</h2><p>{messages.resources.albums.actions.description}</p></div>
+      <div className="action-button-group"><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending} isDisabled={!album?.accountId} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending} isDisabled={!album?.accountId} onClick={() => traverse(true)} /></div>
+      {notice ? <p role="status">{notice}</p> : null}
+    </section>
+  </>
 }
 
 export function JobsPage({ messages, locale }: { readonly messages: MessageCatalog; readonly locale: Locale }) {

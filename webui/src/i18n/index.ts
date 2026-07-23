@@ -52,11 +52,11 @@ export type MessageCatalog = {
     readonly selectAll: string
     readonly selectRow: (title: string) => string
     readonly columns: { readonly title: string; readonly account: string; readonly published: string; readonly status: string }
-    readonly actions: { readonly title: string; readonly description: string; readonly preview: string; readonly download: string; readonly saveQuery: string }
+    readonly actions: { readonly title: string; readonly description: string; readonly preview: string; readonly previewUnavailable: string; readonly download: string; readonly metadata: string; readonly comments: string; readonly resources: string; readonly failed: string; readonly saveQuery: string }
   }
   readonly resources: {
     readonly accounts: AccountResourceMessages
-    readonly albums: ResourceMessages
+    readonly albums: ResourceMessages & { readonly actions: { readonly title: string; readonly description: string; readonly traverse: string; readonly download: string; readonly selectOne: string; readonly queued: (id: string) => string; readonly failed: string } }
     readonly jobs: JobResourceMessages
     readonly savedQueries: SavedQueryResourceMessages
   }

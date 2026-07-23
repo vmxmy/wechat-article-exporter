@@ -195,6 +195,38 @@ type WorkspaceJobQuery struct {
 	Page   WorkspacePageRequest `json:"page"`
 }
 
+// WorkspaceAlbumTraversalRequest describes the browser-safe portion of an
+// album traversal. The application resolves the saved account and album IDs
+// before the durable worker contacts WeChat.
+type WorkspaceAlbumTraversalRequest struct {
+	AccountID domain.AccountID `json:"accountId"`
+	AlbumID   domain.AlbumID   `json:"albumId"`
+	Download  bool             `json:"download"`
+}
+
+// WorkspaceArticlePreview is a small, local handoff descriptor. It does not
+// contain a filesystem path, object digest, or arbitrary HTML; a later local
+// preview service may resolve the opaque article identity into sanitized HTML.
+type WorkspaceArticlePreview struct {
+	ArticleID domain.ArticleID `json:"articleId"`
+	Title     string           `json:"title"`
+	Available bool             `json:"available"`
+}
+
+// WorkspaceArticleLookup is the typed optional application capability needed
+// for an article-only local handoff. Keeping it narrow avoids making unrelated
+// adapter test doubles pretend they can resolve article bodies.
+type WorkspaceArticleLookup interface {
+	GetArticle(context.Context, domain.ArticleID) (domain.Article, error)
+}
+
+// WorkspaceAlbumController is the typed application capability for the
+// persisted album workflow. Both variants return the durable album_sync job.
+type WorkspaceAlbumController interface {
+	SynchronizeAlbum(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error)
+	SynchronizeAlbumAndDownload(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error)
+}
+
 // WorkspaceReader is the P0 read contract for local browser, TUI, and MCP
 // presentation adapters. It exposes only stable, profile-scoped DTOs.
 type WorkspaceReader interface {
@@ -205,6 +237,7 @@ type WorkspaceReader interface {
 	Albums(context.Context, WorkspaceAlbumQuery) (WorkspacePage[domain.Album], error)
 	SavedArticleQueries(context.Context, WorkspacePageRequest) (WorkspacePage[domain.SavedArticleQuery], error)
 	Jobs(context.Context, WorkspaceJobQuery) (WorkspacePage[domain.Job], error)
+	ArticlePreview(context.Context, domain.ArticleID) (WorkspaceArticlePreview, error)
 }
 
 // WorkspaceController keeps supported controls tied to the same durable jobs
@@ -216,6 +249,7 @@ type WorkspaceController interface {
 	CompleteLogin(context.Context) (WorkspaceSession, error)
 	Logout(context.Context) error
 	SynchronizeAccount(context.Context, domain.SynchronizeAccountRequest) (domain.Job, error)
+	SynchronizeAlbum(context.Context, WorkspaceAlbumTraversalRequest) (domain.Job, error)
 	StartDownload(context.Context, domain.DownloadRequest) (domain.Job, error)
 	CancelJob(context.Context, domain.JobID) (domain.Job, error)
 }
@@ -355,9 +389,57 @@ func (workspace *Workspace) SynchronizeAccount(ctx context.Context, request doma
 	return job, workspaceError(err)
 }
 
+func (workspace *Workspace) SynchronizeAlbum(ctx context.Context, request WorkspaceAlbumTraversalRequest) (domain.Job, error) {
+	if strings.TrimSpace(string(request.AccountID)) == "" || strings.TrimSpace(string(request.AlbumID)) == "" {
+		return domain.Job{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "album account and identifier are required"}
+	}
+	var (
+		job domain.Job
+		err error
+	)
+	if request.Download {
+		controls, ok := workspace.application.(WorkspaceAlbumController)
+		if !ok {
+			return domain.Job{}, workspaceError(fmt.Errorf("album batch download: %w", ErrUnavailable))
+		}
+		job, err = controls.SynchronizeAlbumAndDownload(ctx, request.AccountID, request.AlbumID)
+	} else {
+		controls, ok := workspace.application.(WorkspaceAlbumController)
+		if !ok {
+			return domain.Job{}, workspaceError(fmt.Errorf("synchronize album: %w", ErrUnavailable))
+		}
+		job, err = controls.SynchronizeAlbum(ctx, request.AccountID, request.AlbumID)
+	}
+	return job, workspaceError(err)
+}
+
 func (workspace *Workspace) StartDownload(ctx context.Context, request domain.DownloadRequest) (domain.Job, error) {
+	request.Kind = strings.TrimSpace(request.Kind)
+	if len(request.ArticleIDs) == 0 && len(request.URLs) == 0 {
+		return domain.Job{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "at least one article identifier or URL is required"}
+	}
+	switch request.Kind {
+	case "", "article", "resources", "metadata", "comments", "paid":
+	default:
+		return domain.Job{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "download kind is not supported"}
+	}
 	job, err := workspace.application.StartDownload(ctx, request)
 	return job, workspaceError(err)
+}
+
+func (workspace *Workspace) ArticlePreview(ctx context.Context, id domain.ArticleID) (WorkspaceArticlePreview, error) {
+	if strings.TrimSpace(string(id)) == "" {
+		return WorkspaceArticlePreview{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "article identifier is required"}
+	}
+	articles, ok := workspace.application.(WorkspaceArticleLookup)
+	if !ok {
+		return WorkspaceArticlePreview{}, workspaceError(fmt.Errorf("article preview: %w", ErrUnavailable))
+	}
+	article, err := articles.GetArticle(ctx, id)
+	if err != nil {
+		return WorkspaceArticlePreview{}, workspaceError(err)
+	}
+	return WorkspaceArticlePreview{ArticleID: article.ID, Title: article.Title, Available: article.HasContent}, nil
 }
 
 func (workspace *Workspace) CancelJob(ctx context.Context, id domain.JobID) (domain.Job, error) {
