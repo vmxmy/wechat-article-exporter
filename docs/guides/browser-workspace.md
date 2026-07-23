@@ -34,9 +34,9 @@ wechat-article profile list
 
 浏览器不能把任意主机绝对路径交给服务端。导出页先授权 profile 的导出根（已设置时使用该根，否则使用本机默认 Downloads export 根），再可创建其下的子目录。页面只获得不透明 directory token，不会显示或接收完整主机路径；服务端仍会执行输出根、路径穿越与 symlink 逃逸检查。
 
-导出是持久任务。选择文章、格式和已授权目录后，工作区会返回 job ID；在 Jobs 或 Exports 中查看进度、manifest 和离线校验结果。生成的文件并不自动作为任意浏览器下载链接暴露。
+导出是持久任务。选择文章、格式和已授权目录后，工作区会返回 job ID；在 Jobs 或 Exports 中查看进度、manifest 和离线校验结果。生成的文件只能通过 manifest 中的不透明 artifact capability 流式下载，不接受路径参数；打开所选导出的输出目录也必须输入该导出的精确确认值。浏览器不会接收任意主机路径。
 
-凭据字段在浏览器中是仅写入的：导入后会清空，列表只显示安全元数据。备份创建和验证使用不透明 backup ID。恢复归档的上传/staging 流程尚未在当前浏览器工作区交付；请使用经确认的本地 CLI：
+凭据字段在浏览器中是仅写入的：导入后会清空，列表只显示安全元数据。维护页面已接入备份创建和验证（使用不透明 backup ID）、完整性检查、GC 的计划/一次性确认执行、诊断读取，以及以不透明一次性 handle 下载的脱敏诊断包。恢复归档的上传/staging 流程仍未在当前浏览器工作区交付；请使用经确认的本地 CLI：
 
 ```bash
 wechat-article db restore ./backups/work.zip \
@@ -62,10 +62,10 @@ wechat-article db restore ./backups/work.zip \
 | 页面无法加载或 API 不可用 | 保持 `web` 进程运行，确认地址仍是 `127.0.0.1`，再运行 `wechat-article status --json` 与 `wechat-article diagnostics status --json`。 |
 | 看不到另一入口创建的内容/任务 | 确认两个入口使用同一 active profile；切换 profile 后需要重启浏览器工作区。 |
 | 导出目录不可用 | 从导出页重新授权默认目录或创建其下子目录；不要尝试粘贴绝对路径。 |
-| 恢复或任意文件上传不可用 | 这是当前已知限制，使用 Cobra 的 `db restore` 等受确认命令。 |
+| 恢复归档或任意文件上传不可用 | 这是当前已知限制，使用 Cobra 的 `db restore` 等受确认命令。 |
 
 ## 当前浏览器范围
 
-工作区已经覆盖本地 session、账号/文章/专辑的分页查询、账号搜索与同步、单 URL 导入、作业观察与允许的控制、受控目录导出、导出 manifest/verification、凭据/代理/安全偏好、备份创建/验证、完整性和诊断。完整逐项对照见 [能力矩阵](../release/browser-capability-matrix.md)。
+工作区已经覆盖本地 session、账号/文章/专辑的分页查询、账号搜索与同步、单 URL 导入、保存的文章查询、受限本地预览、带边界的作业详情与允许的控制、受控目录导出、导出 manifest/verification、opaque artifact 下载、精确确认后的输出目录打开、凭据/代理/安全偏好、备份创建/验证、完整性、GC 和诊断（包括 opaque diagnostic bundle 下载）。完整逐项对照见 [能力矩阵](../release/browser-capability-matrix.md)。
 
-未交付的浏览器能力不会被标记为 parity：恢复归档上传、任意主机文件选择、导出文件流式下载/打开本地目录、批量导出，以及部分 destructive maintenance 仍使用 Cobra 或 TUI。文章预览及文章/元数据/评论/资源下载、单专辑遍历和批量下载会复用同一套持久作业；stdio MCP 则有意不提供 GUI、浏览器 session 或网络监听，只通过 stdio 和 profile policy 面向自动化。
+未交付的浏览器能力不会被标记为 parity：恢复归档上传、任意主机文件选择和批量导出仍使用 Cobra 或 TUI。浏览器的 artifact 下载和输出目录打开受到 opaque capability 与精确确认的约束，不能成为任意文件或目录访问接口。文章预览及文章/元数据/评论/资源下载、单专辑遍历和批量下载会复用同一套持久作业；stdio MCP 则有意不提供 GUI、浏览器 session 或网络监听，只通过 stdio 和 profile policy 面向自动化。

@@ -19,9 +19,9 @@
 ## 3. Shared browser API
 
 - [ ] 3.1 Add runtime/session/status API endpoints backed by the shared application and profile runtime.
-- [ ] 3.2 Add paginated account, article, album, export, job, log, lease, saved-query, storage, and diagnostics read endpoints with bounded responses.
+- [ ] 3.2 Add paginated account, article, album, export, job, log, lease, saved-query, storage, and diagnostics read endpoints with bounded responses. The implemented browser API includes bounded job detail, saved-query CRUD, safe article-preview handoff, and maintenance/diagnostics reads; this broad parity item remains open pending the remaining resource coverage.
 - [ ] 3.3 Add mutation endpoints for login/logout, discovery, account management, sync, ingestion, download, metadata/comments, album traversal, and job control.
-- [ ] 3.4 Add export, preview, manifest, verification, opening, preferences, credential, proxy, backup, restore, integrity, garbage-collection, and diagnostic endpoints.
+- [ ] 3.4 Add export, preview, manifest, verification, opening, preferences, credential, proxy, backup, restore, integrity, garbage-collection, and diagnostic endpoints. Export artifact streaming/opening, preview, maintenance, GC, and diagnostic-bundle endpoints are implemented; browser restore/archive upload is not implemented, so this combined item remains open.
 - [ ] 3.5 Ensure every long-running endpoint creates or controls a persistent job and returns a stable job ID.
 - [ ] 3.6 Add event/polling API for QR/login and job state changes with reconnect-safe snapshot semantics.
 - [ ] 3.7 Add cross-adapter contract tests comparing browser API outcomes with Cobra/TUI/MCP application seams.
@@ -29,8 +29,8 @@
 ## 4. File, export, and confirmation safety
 
 - [ ] 4.1 Define service-validated export root and descendant directory-handle protocol using configured/default Downloads roots and existing output authorization.
-- [ ] 4.2 Implement streaming download responses for safe generated artifacts and bounded upload staging for account manifests, credentials, backups, and restore archives.
-- [ ] 4.3 Integrate uploaded restore archives with the existing staged transactional restore pipeline and cleanup guarantees.
+- [ ] 4.2 Implement streaming download responses for safe generated artifacts and bounded upload staging for account manifests, credentials, backups, and restore archives. Safe generated export artifacts now stream only through opaque artifact capabilities, but the combined item remains open because browser upload staging, including restore archives, is not implemented.
+- [ ] 4.3 Integrate uploaded restore archives with the existing staged transactional restore pipeline and cleanup guarantees. Not implemented in the browser workspace; use the confirmed local CLI/TUI restore flow.
 - [ ] 4.4 Preserve existing exact scoped confirmation behavior for deletion, job cancellation, restore, GC, credential removal, and proxy trust operations.
 - [ ] 4.5 Add path traversal, symlink/escape, oversized upload, archive abuse, failed-restore rollback, and secret non-echo regression tests.
 
@@ -39,11 +39,11 @@
 - [ ] 5.1 Build the React/Astryx app shell, local connection/error states, profile/session home, local SPA navigation, layout responsiveness, and English/Simplified Chinese resource system.
 - [ ] 5.1a Configure TanStack Query cache/polling/invalidation and TanStack Table server-side pagination, sorting, columns, and multi-selection without whole-library client loading.
 - [ ] 5.2 Implement QR login/status/logout, account discovery/import/export/manage, and account synchronization views.
-- [ ] 5.3 Implement paginated article grid, compound filters, saved queries, columns, multi-selection, single-URL ingestion, safe preview, local HTML handoff, downloads, comments, metrics, and resource completeness actions.
+- [ ] 5.3 Implement paginated article grid, compound filters, saved queries, columns, multi-selection, single-URL ingestion, safe preview, local HTML handoff, downloads, comments, metrics, and resource completeness actions. Saved-query CRUD and safe local article preview are implemented; this broader resource-completeness item remains open.
 - [ ] 5.4 Implement album browsing, ordering/traversal, batch download, and export workflows.
 - [ ] 5.5 Implement persistent job dashboard, item/log/lease detail, refresh/event feedback, and permitted pause/resume/retry/cancel controls.
-- [ ] 5.6 Implement every export format/options flow, default/custom permitted output selection, manifest/verification, and open-output interaction.
-- [ ] 5.7 Implement credentials, proxies, preferences, storage backup/restore/integrity/GC, diagnostics, and diagnostic bundle flows.
+- [ ] 5.6 Implement every export format/options flow, default/custom permitted output selection, manifest/verification, and open-output interaction. Opaque artifact download streaming and exact-confirmed output opening are implemented; the every-format/options parity item remains open.
+- [ ] 5.7 Implement credentials, proxies, preferences, storage backup/restore/integrity/GC, diagnostics, and diagnostic bundle flows. Real maintenance wiring, integrity, GC plan/apply, diagnostics, and opaque diagnostic-bundle download are implemented; browser restore/archive upload is not, so this combined item remains open.
 - [ ] 5.8 Add keyboard navigation, focus management, labelled controls, live status announcements, destructive confirmation UX, and narrow-window coverage.
 
 ## 6. Verification, documentation, and release

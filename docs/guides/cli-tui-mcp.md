@@ -85,4 +85,4 @@ wechat-article web
 
 浏览器工作区固定使用随机 `127.0.0.1` IPv4 listener、一次性 bootstrap URL、HttpOnly session、Host/Origin/CSRF 验证与禁缓存安全头。它与其他入口共享 active profile 和持久作业；切换 profile 后重启浏览器工作区。
 
-浏览器不接收任意绝对路径：导出使用服务端授权的默认 export root/子目录 token；Credential 字段只写入不回显。恢复上传、任意文件选择、输出文件 streaming/open-folder 和批量导出尚未在浏览器中完成；文章/资源/评论下载及专辑遍历/批量下载使用共享持久作业。请使用功能矩阵确认入口选择：[browser-capability-matrix.md](../release/browser-capability-matrix.md)。详细操作与无障碍/语言排错见[本地浏览器工作区](./browser-workspace.md)。
+浏览器不接收任意绝对路径：导出使用服务端授权的默认 export root/子目录 token；生成文件通过 opaque artifact capability 流式下载，打开所选导出的输出目录需要该导出的精确确认值。Credential 字段只写入不回显。保存的文章查询、受限本地预览、bounded job detail、维护设置、GC 计划/确认执行，以及 opaque diagnostic bundle 下载均已接入共享应用层；文章/资源/评论下载及专辑遍历/批量下载使用共享持久作业。恢复归档上传和任意文件选择尚未在浏览器中实现，批量导出仍使用 Cobra/TUI/MCP。请使用功能矩阵确认入口选择：[browser-capability-matrix.md](../release/browser-capability-matrix.md)。详细操作与无障碍/语言排错见[本地浏览器工作区](./browser-workspace.md)。
