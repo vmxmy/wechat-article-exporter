@@ -109,10 +109,12 @@ type countingClient struct {
 	code        int
 	err         error
 	contentType string
+	requests    []network.Request
 }
 
 func (client *countingClient) Do(_ context.Context, request network.Request) (network.Result, error) {
 	client.calls++
+	client.requests = append(client.requests, request)
 	if client.err != nil {
 		return network.Result{}, client.err
 	}
@@ -173,6 +175,26 @@ func TestArticleDownloaderPersistsOnlyValidContent(t *testing.T) {
 	}
 	if !bytes.Equal(objectsStore.values[store.current.ObjectDigest], []byte(html)) {
 		t.Fatal("persisted content differs from downloaded response")
+	}
+}
+
+func TestArticleDownloaderUsesBrowserNavigationHeadersForWeChatArticles(t *testing.T) {
+	html := `<html><body><div id="js_article"><div id="js_content">hello</div></div><script>window.cgiDataNew={title:'Title',user_name:'gh_fixture',content_noencode:'hello'}</script></body></html>`
+	objectsStore := newMemoryObjects()
+	store := &articleMemoryStore{}
+	client := &countingClient{body: html}
+	_, err := (ArticleDownloader{Network: client, Processor: processor.New(), Objects: objectsStore, Store: store}).Download(
+		context.Background(), ArticleRequest{ArticleID: "article-a", URL: "https://mp.weixin.qq.com/s/a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.requests) != 1 {
+		t.Fatalf("requests = %#v", client.requests)
+	}
+	header := client.requests[0].Header
+	if header.Get("User-Agent") != browserArticleUserAgent || header.Get("Referer") != "https://mp.weixin.qq.com/" ||
+		header.Get("Accept-Language") != "zh-CN,zh;q=0.9,en;q=0.8" || header.Get("Sec-Fetch-Mode") != "navigate" {
+		t.Fatalf("article request headers = %#v", header)
 	}
 }
 

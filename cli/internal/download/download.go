@@ -78,6 +78,25 @@ type ArticleResult struct {
 	RequestID      string                   `json:"requestId,omitempty"`
 }
 
+const browserArticleUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+
+func browserArticleHeaders(target *url.URL) http.Header {
+	header := make(http.Header)
+	if target == nil || !strings.EqualFold(target.Hostname(), "mp.weixin.qq.com") {
+		return header
+	}
+	header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+	header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	header.Set("Cache-Control", "max-age=0")
+	header.Set("Referer", "https://mp.weixin.qq.com/")
+	header.Set("Sec-Fetch-Dest", "document")
+	header.Set("Sec-Fetch-Mode", "navigate")
+	header.Set("Sec-Fetch-Site", "same-origin")
+	header.Set("Upgrade-Insecure-Requests", "1")
+	header.Set("User-Agent", browserArticleUserAgent)
+	return header
+}
+
 func (downloader ArticleDownloader) Download(ctx context.Context, request ArticleRequest) (ArticleResult, error) {
 	if request.ArticleID == "" {
 		return ArticleResult{}, errors.New("article ID is required")
@@ -98,7 +117,7 @@ func (downloader ArticleDownloader) Download(ctx context.Context, request Articl
 		return ArticleResult{}, errors.New("article downloader dependencies are incomplete")
 	}
 	networkResult, err := downloader.Network.Do(ctx, network.Request{
-		Class: network.PublicContent, Method: http.MethodGet, URL: target, MaxResponseBytes: 32 << 20,
+		Class: network.PublicContent, Method: http.MethodGet, URL: target, Header: browserArticleHeaders(target), MaxResponseBytes: 32 << 20,
 	})
 	if err != nil {
 		return ArticleResult{}, fmt.Errorf("download article: %w", err)

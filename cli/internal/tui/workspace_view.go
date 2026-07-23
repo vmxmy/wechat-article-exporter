@@ -23,8 +23,11 @@ type workspaceTheme struct {
 }
 
 func theme(noColor bool) workspaceTheme {
+	style := workspaceTheme{
+		border: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1),
+	}
 	if noColor {
-		return workspaceTheme{}
+		return style
 	}
 	return workspaceTheme{
 		title:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42")),
@@ -33,7 +36,7 @@ func theme(noColor bool) workspaceTheme {
 		error:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196")),
 		warning:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")),
 		selected: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42")),
-		border:   lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1),
+		border:   style.border.BorderForeground(lipgloss.Color("240")),
 	}
 }
 
@@ -55,23 +58,44 @@ func (model Model) renderWorkspace() string {
 	if model.options.ASCII {
 		title = "WeChat Article Workspace"
 	}
-	builder.WriteString(style.title.Render(title))
+	builder.WriteString(model.renderComponent(style, style.title.Render(title)))
 	builder.WriteString("\n")
-	builder.WriteString(model.renderNavigation(style))
+	builder.WriteString(model.renderComponent(style, model.renderNavigation(style)))
 	builder.WriteString("\n")
 	if model.loading {
-		builder.WriteString(model.symbol("…", "...") + " Loading local workspace through Application…\n")
+		builder.WriteString(model.renderComponent(style, model.symbol("…", "...")+" Loading local workspace through Application…"))
 	} else {
-		builder.WriteString(model.renderArea(style))
+		content := style.title.Render(areaLabel(model.state.Area)) + "\n" + model.renderArea(style)
+		builder.WriteString(model.renderComponent(style, content))
 	}
+	status := ""
 	if model.err != "" {
-		builder.WriteString("\n" + style.error.Render(model.symbol("!", "!")+" "+model.err) + "\n")
+		status += style.error.Render(model.symbol("!", "!") + " " + model.err)
 	}
 	if model.notice != "" {
-		builder.WriteString("\n" + style.muted.Render(model.notice) + "\n")
+		if status != "" {
+			status += "\n"
+		}
+		status += style.muted.Render(model.notice)
 	}
-	builder.WriteString("\n" + style.muted.Render(model.footerHelp()))
+	if status != "" {
+		builder.WriteString("\n" + model.renderComponent(style, status))
+	}
+	builder.WriteString("\n" + model.renderComponent(style, style.muted.Render(model.footerHelp())))
 	return builder.String()
+}
+
+func (model Model) renderComponent(style workspaceTheme, content string) string {
+	if model.layout == LayoutPlain {
+		return content
+	}
+	width := max(20, min(model.width-4, 120))
+	contentWidth := max(1, width-4)
+	border := lipgloss.RoundedBorder()
+	if model.options.ASCII {
+		border = lipgloss.NormalBorder()
+	}
+	return style.border.Border(border).Width(contentWidth).Render(content)
 }
 
 func (model Model) renderNavigation(style workspaceTheme) string {

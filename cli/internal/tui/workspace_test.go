@@ -54,6 +54,26 @@ func TestWorkspaceInitialLoadAndMajorNavigationUseApplicationSeam(t *testing.T) 
 	}
 }
 
+func TestWorkspaceRendersBorderedComponentsAndKeepsPlainLayoutUnboxed(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, nil)
+	model.options.NoColor = true
+	model.options.ASCII = true
+	model.width = 100
+	model.updateLayout()
+	view := model.View()
+	for _, fragment := range []string{"┌", "│ WeChat Article Workspace", "│ Home"} {
+		if !strings.Contains(view, fragment) {
+			t.Fatalf("bordered view does not contain %q:\n%s", fragment, view)
+		}
+	}
+	model.layout = LayoutPlain
+	plain := model.View()
+	if strings.Contains(plain, "+") || strings.Contains(plain, "| WeChat Article Workspace") {
+		t.Fatalf("plain layout unexpectedly contains component borders:\n%s", plain)
+	}
+}
+
 func TestWorkspaceArticleSelectionStartsOneDownloadJobForStableIDs(t *testing.T) {
 	app := newFakeWorkspaceApplication()
 	model := loadedWorkspace(t, app, nil)
