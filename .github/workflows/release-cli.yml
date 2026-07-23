@@ -200,6 +200,7 @@ jobs:
           pnpm run lint
           pnpm run build
           pnpm run verify:go-assets
+          pnpm run check:release-size
 
       - name: Install pinned Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium

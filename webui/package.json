@@ -19,6 +19,7 @@
     "theme:build": "astryx theme build src/theme/workspaceTheme.source.ts --out src/styles/theme.css && node scripts/normalize-theme-build.mjs",
     "astryx:doctor": "astryx doctor",
     "verify:assets": "node scripts/verify-assets.mjs",
+    "check:release-size": "node scripts/check-release-size.mjs",
     "sync:go-assets": "node scripts/sync-go-assets.mjs",
     "verify:go-assets": "node scripts/sync-go-assets.mjs --check",
     "e2e": "playwright test",
