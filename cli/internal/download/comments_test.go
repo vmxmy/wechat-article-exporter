@@ -70,6 +70,37 @@ func TestCommentsDownloaderKeepsContinuationCheckpointOnPageFailure(t *testing.T
 	}
 }
 
+func TestCommentsDownloaderFetchesReplyPagesUntilComplete(t *testing.T) {
+	store := newCommentMemoryStore()
+	source := &fakeCommentSource{
+		commentPages: []wechat.CommentPage{{Comments: []wechat.Comment{{ID: "comment-1", ReplyTotal: 3}}}},
+		replyResults: map[string][]replySourceResult{
+			"comment-1": {
+				{page: wechat.ReplyPage{ContentID: "comment-1", MaxReplyID: 10,
+					Replies: []wechat.Reply{{ID: "reply-1"}, {ID: "reply-2"}}}},
+				{page: wechat.ReplyPage{ContentID: "comment-1", MaxReplyID: 20,
+					Replies: []wechat.Reply{{ID: "reply-3"}}}},
+			},
+		},
+	}
+	result, err := (CommentsDownloader{
+		Credentials: &fixedCredentialLoader{metadata: credentials.Metadata{ID: "credential-a"}, record: downloadCredential()},
+		Source:      source, Store: store, MaxRetries: 1,
+	}).Download(context.Background(), CommentsRequest{
+		ArticleID: "article-a", AccountID: "account-a", BusinessID: "fixture-biz", CommentID: "stream",
+	})
+	if err != nil || result.Partial || result.ReplyThreadsCompleted != 1 || result.ReplyThreadsFailed != 0 {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	if len(source.replyRequests) != 2 || source.replyRequests[0].MaxReplyID != 0 || source.replyRequests[1].MaxReplyID != 10 {
+		t.Fatalf("reply requests=%#v", source.replyRequests)
+	}
+	thread := store.threads["comment-1"]
+	if !thread.Complete || thread.Fetched != 3 || thread.MaxReplyID != 20 {
+		t.Fatalf("thread=%#v", thread)
+	}
+}
+
 type replySourceResult struct {
 	page wechat.ReplyPage
 	err  error
@@ -188,6 +219,10 @@ func (store *commentMemoryStore) CommitReplyPage(_ context.Context, _ domain.Art
 	comment.ReplyTotal = thread.Total
 	comment.ReplyMaxID = thread.MaxReplyID
 	store.comments[contentID] = comment
+	result.Fetched = thread.Fetched
+	result.Total = thread.Total
+	result.Complete = thread.Complete
+	result.MaxReplyID = thread.MaxReplyID
 	return result, nil
 }
 

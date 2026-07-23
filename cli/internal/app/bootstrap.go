@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/credentials"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/exporter"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/jobs"
@@ -38,6 +39,7 @@ type Dependencies struct {
 	Secrets     secrets.Store
 	Executable  string
 	Worker      WorkerLauncher
+	StartupArgs []string
 
 	// ApplicationFactory is primarily a contract-test seam. Production leaves
 	// it nil so the full profile-isolated SQLite/object/session runtime is built.
@@ -64,26 +66,35 @@ func (source *processSignalSource) Close() {
 }
 
 type ProfileRuntime struct {
-	Profile   profiles.Profile
-	Paths     profiles.Paths
-	Library   *library.Database
-	Objects   *objects.FileStore
-	Jobs      *library.JobStore
-	WeChat    *wechat.Client
-	Network   *network.Service
-	Downloads application.DownloadJobs
-	Syncs     application.SyncJobs
-	Exports   application.ExportJobs
-	Core      application.Application
-	close     sync.Once
-	closeErr  error
+	Profile     profiles.Profile
+	Paths       profiles.Paths
+	Library     *library.Database
+	Objects     *objects.FileStore
+	Jobs        *library.JobStore
+	WeChat      *wechat.Client
+	Network     *network.Service
+	Downloads   application.DownloadJobs
+	Credentials *credentials.Service
+	Syncs       application.SyncJobs
+	Exports     application.ExportJobs
+	Core        application.Application
+	runtimeLock *profiles.ProfileLock
+	close       sync.Once
+	closeErr    error
 }
 
 func (runtime *ProfileRuntime) Close() error {
-	if runtime == nil || runtime.Library == nil {
+	if runtime == nil {
 		return nil
 	}
-	runtime.close.Do(func() { runtime.closeErr = runtime.Library.Close() })
+	runtime.close.Do(func() {
+		if runtime.Library != nil {
+			runtime.closeErr = runtime.Library.Close()
+		}
+		if runtime.runtimeLock != nil {
+			runtime.closeErr = errors.Join(runtime.closeErr, runtime.runtimeLock.Close())
+		}
+	})
 	return runtime.closeErr
 }
 
@@ -108,7 +119,16 @@ type runtimeManager struct {
 func newRuntimeManager(version string, paths profiles.Paths, dependencies Dependencies) *runtimeManager {
 	httpDoer := dependencies.HTTP
 	if httpDoer == nil {
-		httpDoer = http.DefaultClient
+		directTransport := http.DefaultTransport
+		if configured, ok := http.DefaultTransport.(*http.Transport); ok && configured != nil {
+			directTransport = configured.Clone()
+		}
+		transport, ok := directTransport.(*http.Transport)
+		if !ok {
+			transport = &http.Transport{}
+		}
+		transport.Proxy = nil
+		httpDoer = &http.Client{Transport: transport}
 	}
 	clock := dependencies.Clock
 	if clock == nil {
@@ -161,13 +181,13 @@ func (manager *runtimeManager) Activate(runtime *ProfileRuntime) error {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	previous := manager.active
-	manager.active = runtime
 	if previous != nil && previous != runtime {
 		if err := previous.Close(); err != nil {
-			manager.active = previous
+			manager.active = nil
 			return fmt.Errorf("close previous profile database: %w", err)
 		}
 	}
+	manager.active = runtime
 	return nil
 }
 
@@ -177,31 +197,50 @@ func (manager *runtimeManager) buildLocked(ctx context.Context, profile profiles
 		return nil, err
 	}
 	previous := manager.active
-	manager.active = runtime
 	if previous != nil {
 		if err := previous.Close(); err != nil {
 			_ = runtime.Close()
-			manager.active = previous
+			manager.active = nil
 			return nil, fmt.Errorf("close previous profile database: %w", err)
 		}
 	}
+	manager.active = runtime
 	return runtime, nil
 }
 
 func (manager *runtimeManager) prepareLocked(ctx context.Context, profile profiles.Profile) (*ProfileRuntime, error) {
+	return manager.prepareProfileLocked(ctx, profile, false)
+}
+
+func (manager *runtimeManager) prepareProfileLocked(ctx context.Context, profile profiles.Profile, maintenanceGateHeld bool) (*ProfileRuntime, error) {
 
 	profilePaths := manager.paths.ForProfile(profile.ID)
 	if err := ensureProfilePaths(manager.filesystem, profilePaths); err != nil {
 		return nil, err
 	}
+	var gate *profiles.ProfileLock
+	var err error
+	if !maintenanceGateHeld {
+		gate, err = profiles.AcquireRuntimeGate(ctx, profilePaths)
+		if err != nil {
+			return nil, err
+		}
+		defer gate.Close()
+	}
+	runtimeLock, err := profiles.AcquireRuntimeLock(ctx, profilePaths)
+	if err != nil {
+		return nil, err
+	}
 	objectStore, err := objects.NewFileStore(profilePaths.Objects)
 	if err != nil {
+		_ = runtimeLock.Close()
 		return nil, fmt.Errorf("open profile object store: %w", err)
 	}
 	database, err := manager.databaseOpen(ctx, library.OpenOptions{
 		Path: profilePaths.Database, ProfileID: profile.ID, ProfileName: profile.Name,
 	})
 	if err != nil {
+		_ = runtimeLock.Close()
 		return nil, fmt.Errorf("open profile database: %w", err)
 	}
 	database.SetObjectStoreReadyProbe(func() bool {
@@ -215,6 +254,13 @@ func (manager *runtimeManager) prepareLocked(ctx context.Context, profile profil
 	}
 	wechatClient := wechat.NewClient(httpClient, manager.secrets, string(profile.ID))
 	jobsStore := library.NewJobStore(database)
+	jobsStore.SetAdmissionGuard(func(admissionCtx context.Context) (func() error, error) {
+		lock, lockErr := profiles.AcquireRuntimeGate(admissionCtx, profilePaths)
+		if lockErr != nil {
+			return nil, lockErr
+		}
+		return lock.Close, nil
+	})
 	routeService := network.NewService(network.ServiceOptions{
 		Profile: string(profile.ID), Routes: database,
 		Secrets: manager.secrets, HTTP: manager.http,
@@ -227,15 +273,37 @@ func (manager *runtimeManager) prepareLocked(ctx context.Context, profile profil
 	})
 	runtime := &ProfileRuntime{
 		Profile: profile, Paths: manager.paths, Library: database, Objects: objectStore,
-		Jobs: jobsStore, WeChat: wechatClient, Network: routeService,
+		Jobs: jobsStore, WeChat: wechatClient, Network: routeService, runtimeLock: runtimeLock,
 	}
 	if manager.factory != nil {
 		runtime.Core = manager.factory(runtime)
 	} else {
-		downloads := newLocalDownloadRuntime(runtime, manager.secrets, manager.http)
+		configuration, _, configErr := profiles.NewConfigStore(profilePaths.Config).Read()
+		if configErr != nil {
+			_ = runtime.Close()
+			return nil, fmt.Errorf("read profile configuration: %w", configErr)
+		}
+		scheduler := jobs.NewScheduler(profileSchedulerLimits(configuration.Preferences.Download.Concurrency), jobs.SchedulerOptions{
+			PermitStore: library.NewSchedulerPermitStore(database),
+			Owner:       fmt.Sprintf("scheduler-%d-%p", os.Getpid(), database),
+		})
+		downloads, downloadErr := newLocalDownloadRuntime(runtime, manager.secrets, manager.http, downloadRuntimeOptions{
+			Proxy: configuration.Preferences.Proxy, ProxyConfigured: true,
+			Concurrency: configuration.Preferences.Download.Concurrency, Scheduler: scheduler,
+		})
+		if downloadErr != nil {
+			_ = runtime.Close()
+			return nil, fmt.Errorf("configure download runtime: %w", downloadErr)
+		}
 		runtime.Downloads = downloads
-		syncs := newLocalSyncRuntime(runtime, manager.clock)
-		exports := newLocalExportRuntime(runtime, manager.clock, manager.browser, manager.pdfRunner)
+		if downloads != nil {
+			runtime.Credentials = downloads.credentials
+		}
+		syncs := newLocalSyncRuntime(runtime, manager.clock, scheduler)
+		exports := newLocalExportRuntime(runtime, manager.clock, manager.browser, manager.pdfRunner, scheduler)
+		if exports != nil {
+			exports.admit = jobsStore.WithAdmission
+		}
 		starter := persistentJobStarter{executable: manager.executable, paths: manager.paths, profile: profile.ID, launcher: manager.worker}
 		if syncs != nil {
 			syncs.starter = starter
@@ -265,6 +333,14 @@ func (manager *runtimeManager) prepareLocked(ctx context.Context, profile profil
 	}
 
 	return runtime, nil
+}
+
+func profileSchedulerLimits(downloadConcurrency int) jobs.Limits {
+	limits := downloadSchedulerLimits(downloadConcurrency)
+	limits.PerOperation["account_sync"] = 1
+	limits.PerOperation["album_sync"] = 1
+	limits.PerOperation["export"] = 2
+	return limits
 }
 
 func (manager *runtimeManager) Close() error {

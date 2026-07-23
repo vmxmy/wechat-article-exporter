@@ -132,22 +132,37 @@ func (downloader CommentsDownloader) Download(ctx context.Context, request Comme
 	sort.Slice(threads, func(left, right int) bool { return threads[left].ContentID < threads[right].ContentID })
 	var failures []error
 	for _, thread := range threads {
-		page, _, fetchErr := downloader.fetchReplyPage(ctx, request, credential, thread)
-		if fetchErr != nil {
-			_ = downloader.Store.RecordReplyFailure(ctx, request.ArticleID, thread.ContentID, fetchErr.Error())
-			result.ReplyThreadsFailed++
-			failures = append(failures, fmt.Errorf("reply thread %s: %w", thread.ContentID, fetchErr))
-			continue
+		current := thread
+		for {
+			page, _, fetchErr := downloader.fetchReplyPage(ctx, request, credential, current)
+			if fetchErr != nil {
+				_ = downloader.Store.RecordReplyFailure(ctx, request.ArticleID, thread.ContentID, fetchErr.Error())
+				result.ReplyThreadsFailed++
+				failures = append(failures, fmt.Errorf("reply thread %s: %w", thread.ContentID, fetchErr))
+				break
+			}
+			committed, commitErr := downloader.Store.CommitReplyPage(ctx, request.ArticleID, thread.ContentID, library.ReplyPageCommit{
+				Replies: mapReplies(page.Replies, downloader.now()), MaxReplyID: page.MaxReplyID, FetchedAt: downloader.now(),
+			})
+			if commitErr != nil {
+				result.ReplyThreadsFailed++
+				failures = append(failures, fmt.Errorf("reply thread %s: %w", thread.ContentID, commitErr))
+				break
+			}
+			if committed.Complete {
+				result.ReplyThreadsCompleted++
+				break
+			}
+			if committed.MaxReplyID <= current.MaxReplyID || len(page.Replies) == 0 {
+				err := errors.New("reply continuation did not advance")
+				_ = downloader.Store.RecordReplyFailure(ctx, request.ArticleID, thread.ContentID, err.Error())
+				result.ReplyThreadsFailed++
+				failures = append(failures, fmt.Errorf("reply thread %s: %w", thread.ContentID, err))
+				break
+			}
+			current.MaxReplyID = committed.MaxReplyID
+			current.Fetched = committed.Fetched
 		}
-		_, commitErr := downloader.Store.CommitReplyPage(ctx, request.ArticleID, thread.ContentID, library.ReplyPageCommit{
-			Replies: mapReplies(page.Replies, downloader.now()), MaxReplyID: page.MaxReplyID, FetchedAt: downloader.now(),
-		})
-		if commitErr != nil {
-			result.ReplyThreadsFailed++
-			failures = append(failures, fmt.Errorf("reply thread %s: %w", thread.ContentID, commitErr))
-			continue
-		}
-		result.ReplyThreadsCompleted++
 	}
 	if len(failures) > 0 {
 		result.Partial = true

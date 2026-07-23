@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/jobs"
@@ -41,8 +42,12 @@ type Application interface {
 	ImportAccounts(context.Context, domain.AccountManifest) (domain.AccountImportReport, error)
 	DeleteAccounts(context.Context, []domain.AccountID) (domain.AccountDeleteReport, error)
 	QueryArticles(context.Context, domain.ArticleQuery) (domain.Page[domain.Article], error)
+	SaveArticleQuery(context.Context, string, domain.ArticleQuery) (domain.SavedArticleQuery, error)
+	ListSavedArticleQueries(context.Context) ([]domain.SavedArticleQuery, error)
+	DeleteSavedArticleQuery(context.Context, string) (bool, error)
 	QueryAlbums(context.Context, domain.AlbumQuery) (domain.Page[domain.Album], error)
 	SynchronizeAccount(context.Context, domain.SynchronizeAccountRequest) (domain.Job, error)
+	SynchronizeAlbum(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error)
 	StartDownload(context.Context, domain.DownloadRequest) (domain.Job, error)
 	StartExport(context.Context, domain.ExportRequest) (domain.Job, error)
 	GetJob(context.Context, domain.JobID) (domain.Job, error)
@@ -104,6 +109,12 @@ type Service struct {
 	wechat    wechat.Gateway
 	discovery wechat.DiscoveryGateway
 	session   wechat.SessionGateway
+}
+
+type savedArticleQueries interface {
+	SaveArticleQuery(context.Context, string, domain.ArticleQuery) (domain.SavedArticleQuery, error)
+	ListSavedArticleQueries(context.Context) ([]domain.SavedArticleQuery, error)
+	DeleteSavedArticleQuery(context.Context, string) (bool, error)
 }
 
 func New(options Options) *Service {
@@ -323,6 +334,30 @@ func (service *Service) QueryArticles(ctx context.Context, query domain.ArticleQ
 	return service.library.QueryArticles(ctx, query)
 }
 
+func (service *Service) SaveArticleQuery(ctx context.Context, name string, query domain.ArticleQuery) (domain.SavedArticleQuery, error) {
+	queries, ok := service.library.(savedArticleQueries)
+	if !ok {
+		return domain.SavedArticleQuery{}, fmt.Errorf("save article query: %w", ErrUnavailable)
+	}
+	return queries.SaveArticleQuery(ctx, name, query)
+}
+
+func (service *Service) ListSavedArticleQueries(ctx context.Context) ([]domain.SavedArticleQuery, error) {
+	queries, ok := service.library.(savedArticleQueries)
+	if !ok {
+		return nil, fmt.Errorf("list saved article queries: %w", ErrUnavailable)
+	}
+	return queries.ListSavedArticleQueries(ctx)
+}
+
+func (service *Service) DeleteSavedArticleQuery(ctx context.Context, name string) (bool, error) {
+	queries, ok := service.library.(savedArticleQueries)
+	if !ok {
+		return false, fmt.Errorf("delete saved article query: %w", ErrUnavailable)
+	}
+	return queries.DeleteSavedArticleQuery(ctx, name)
+}
+
 func (service *Service) QueryAlbums(ctx context.Context, query domain.AlbumQuery) (domain.Page[domain.Album], error) {
 	if service.library == nil {
 		return domain.Page[domain.Album]{Items: []domain.Album{}, Offset: query.Offset, Limit: query.Limit}, nil
@@ -336,6 +371,23 @@ func (service *Service) SynchronizeAccount(ctx context.Context, request domain.S
 		return service.startJob(ctx, job, err)
 	}
 	return service.createJob(ctx, "account_sync", request)
+}
+
+func (service *Service) SynchronizeAlbum(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
+	if accountID == "" || albumID == "" {
+		return domain.Job{}, errors.New("album synchronization requires account and album IDs")
+	}
+	albumRuntime, ok := service.syncs.(interface {
+		StartAlbumByID(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error)
+	})
+	if !ok {
+		return domain.Job{}, fmt.Errorf("album synchronization: %w", ErrUnavailable)
+	}
+	if service.starter == nil {
+		return domain.Job{}, fmt.Errorf("start album_sync worker: %w", ErrUnavailable)
+	}
+	job, err := albumRuntime.StartAlbumByID(ctx, accountID, albumID)
+	return service.startJob(ctx, job, err)
 }
 
 func (service *Service) StartDownload(ctx context.Context, request domain.DownloadRequest) (domain.Job, error) {
@@ -373,11 +425,32 @@ func (service *Service) startJob(ctx context.Context, job domain.Job, err error)
 		return domain.Job{}, err
 	}
 	if service.starter == nil {
+		if job.ID != "" && service.jobs == nil {
+			return job, errors.Join(fmt.Errorf("start %s worker: %w", job.Kind, ErrUnavailable),
+				errors.New("cancel unstarted job: job manager is unavailable"))
+		}
+		if service.jobs != nil && job.ID != "" {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			_, cleanupErr := service.jobs.Cancel(cleanupCtx, job.ID)
+			cancel()
+			if cleanupErr != nil {
+				return domain.Job{}, errors.Join(fmt.Errorf("start %s worker: %w", job.Kind, ErrUnavailable),
+					fmt.Errorf("cancel unstarted job: %w", cleanupErr))
+			}
+		}
 		return domain.Job{}, fmt.Errorf("start %s worker: %w", job.Kind, ErrUnavailable)
 	}
 	if err := service.starter.Start(ctx, job); err != nil {
+		if job.ID != "" && service.jobs == nil {
+			return job, errors.Join(err, errors.New("cancel unstarted job: job manager is unavailable"))
+		}
 		if service.jobs != nil {
-			_, _ = service.jobs.Cancel(context.Background(), job.ID)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			_, cleanupErr := service.jobs.Cancel(cleanupCtx, job.ID)
+			cancel()
+			if cleanupErr != nil {
+				return domain.Job{}, errors.Join(err, fmt.Errorf("cancel unstarted job: %w", cleanupErr))
+			}
 		}
 		return domain.Job{}, err
 	}

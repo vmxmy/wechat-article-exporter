@@ -38,15 +38,23 @@ The Cobra interface SHALL expose deterministic help, shell completion, documente
 
 #### Scenario: Successful JSON command
 - **WHEN** an automation caller runs a supported command with `--json`
-- **THEN** stdout contains a versioned success envelope, progress is suppressed or written to stderr, and the process exits with code `0`
+- **THEN** stdout contains exactly one UTF-8 JSON document with `schemaVersion="wechat-article-cli/v1"`, `success=true`, and a `data` value; progress is suppressed or written to stderr, and the process exits with code `0`
 
 #### Scenario: Invalid command usage
 - **WHEN** arguments or flags violate the command contract
-- **THEN** the system emits a structured usage error in JSON mode and exits with code `2`
+- **THEN** the system emits `schemaVersion`, `success=false`, and an `error` object containing `kind="usage"`, a redacted `message`, and `exitCode=2`, then exits with code `2`
 
 #### Scenario: Runtime failure
 - **WHEN** a valid command fails because of network, authentication, storage, parsing, or export conditions
-- **THEN** the system emits a redacted structured runtime error and exits with code `1`
+- **THEN** the system emits the same envelope with `kind="runtime"`, a redacted message, and `exitCode=1`, then exits with code `1`
+
+#### Scenario: Compatible JSON evolution
+- **WHEN** a v1 producer adds a field that is not required by the documented v1 envelope
+- **THEN** existing consumers can ignore it, while deleting or renaming required fields or changing their types requires a new incompatible schema version
+
+#### Scenario: Stable pagination
+- **WHEN** an automation caller traverses account, article, album, job, or export pages without changing the underlying query
+- **THEN** results use stable ordering with deterministic tie breakers and do not duplicate or omit items between pages
 
 ### Requirement: Observability and diagnostics
 The system SHALL provide human-readable and structured status, version, configuration, storage, dependency, migration, session, proxy, and recent-job diagnostics without exposing secrets.
@@ -57,7 +65,7 @@ The system SHALL provide human-readable and structured status, version, configur
 
 #### Scenario: Diagnostic bundle
 - **WHEN** a user creates a diagnostic bundle
-- **THEN** the bundle contains system metadata, redacted configuration, schema version, logs, and integrity results but excludes article bodies and secrets unless explicitly requested and confirmed
+- **THEN** the private archive contains system metadata, redacted configuration, database/configuration schema versions, recent job metadata, and integrity results, excludes article bodies and all secret-store bytes, refuses to overwrite an existing file, and reports its SHA-256
 
 ### Requirement: Graceful interruption
 Long-running operations SHALL respond to cancellation signals, persist recoverable progress, close files and database transactions, and return a distinct interrupted result.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -27,6 +28,17 @@ type VaultParameters struct {
 }
 
 var DefaultVaultParameters = VaultParameters{Memory: 64 * 1024, Iterations: 3, Parallelism: 2}
+
+const (
+	minimumVaultMemory      = 8 * 1024
+	maximumVaultMemory      = 256 * 1024
+	minimumVaultIterations  = 1
+	maximumVaultIterations  = 8
+	minimumVaultParallelism = 1
+	maximumVaultParallelism = 8
+	vaultSaltSize           = 16
+	maximumVaultFileSize    = 16 << 20
+)
 
 type vaultEnvelope struct {
 	Version    int             `json:"version"`
@@ -57,12 +69,29 @@ func NewVaultStore(path string, parameters VaultParameters) *VaultStore {
 
 func (*VaultStore) Backend() string { return "encrypted-vault" }
 
+// ValidateEnvelope verifies the non-secret vault container structure without
+// deriving a key or decrypting its payload. It is suitable for status output.
+func (store *VaultStore) ValidateEnvelope() error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	_, err := store.readEnvelope()
+	return err
+}
+
 func (store *VaultStore) Initialize(passphrase []byte) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if len(passphrase) == 0 {
 		return errors.New("vault passphrase must not be empty")
 	}
+	if err := validateVaultParameters(store.parameters); err != nil {
+		return err
+	}
+	unlock, err := lockKeyring(context.Background(), store.path+".init")
+	if err != nil {
+		return fmt.Errorf("lock encrypted vault initialization: %w", err)
+	}
+	defer unlock()
 	if _, err := os.Stat(store.path); err == nil {
 		return errors.New("encrypted vault is already initialized")
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -186,12 +215,30 @@ func (store *VaultStore) readPayload() (vaultPayload, []byte, error) {
 }
 
 func (store *VaultStore) readEnvelope() (vaultEnvelope, error) {
-	data, err := os.ReadFile(store.path)
+	file, err := os.Open(store.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return vaultEnvelope{}, ErrVaultUninitialized
 	}
 	if err != nil {
 		return vaultEnvelope{}, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return vaultEnvelope{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return vaultEnvelope{}, errors.New("encrypted vault must be a regular file")
+	}
+	if info.Size() > maximumVaultFileSize {
+		return vaultEnvelope{}, errors.New("encrypted vault exceeds supported size")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maximumVaultFileSize+1))
+	if err != nil {
+		return vaultEnvelope{}, err
+	}
+	if len(data) > maximumVaultFileSize {
+		return vaultEnvelope{}, errors.New("encrypted vault exceeds supported size")
 	}
 	var envelope vaultEnvelope
 	if err := json.Unmarshal(data, &envelope); err != nil {
@@ -200,7 +247,31 @@ func (store *VaultStore) readEnvelope() (vaultEnvelope, error) {
 	if envelope.Version != 1 || envelope.KDF != "argon2id" {
 		return vaultEnvelope{}, errors.New("unsupported encrypted vault format")
 	}
+	if err := validateVaultParameters(envelope.Parameters); err != nil {
+		return vaultEnvelope{}, err
+	}
+	salt, err := decodeVaultField("salt", envelope.Salt)
+	if err != nil || len(salt) != vaultSaltSize {
+		return vaultEnvelope{}, errors.New("encrypted vault has invalid salt")
+	}
+	nonce, err := decodeVaultField("nonce", envelope.Nonce)
+	if err != nil || len(nonce) != chacha20poly1305.NonceSizeX {
+		return vaultEnvelope{}, errors.New("encrypted vault has invalid nonce")
+	}
+	ciphertext, err := decodeVaultField("ciphertext", envelope.Ciphertext)
+	if err != nil || len(ciphertext) < chacha20poly1305.Overhead {
+		return vaultEnvelope{}, errors.New("encrypted vault has invalid ciphertext")
+	}
 	return envelope, nil
+}
+
+func validateVaultParameters(parameters VaultParameters) error {
+	if parameters.Memory < minimumVaultMemory || parameters.Memory > maximumVaultMemory ||
+		parameters.Iterations < minimumVaultIterations || parameters.Iterations > maximumVaultIterations ||
+		parameters.Parallelism < minimumVaultParallelism || parameters.Parallelism > maximumVaultParallelism {
+		return errors.New("encrypted vault has invalid key-derivation parameters")
+	}
+	return nil
 }
 
 func (store *VaultStore) writePayload(key, salt []byte, payload vaultPayload) error {
@@ -224,6 +295,9 @@ func (store *VaultStore) writePayload(key, salt []byte, payload vaultPayload) er
 	encoded, err := json.MarshalIndent(envelope, "", "  ")
 	if err != nil {
 		return err
+	}
+	if len(encoded)+1 > maximumVaultFileSize {
+		return errors.New("encrypted vault exceeds supported size")
 	}
 	return writeSecretAtomic(store.path, append(encoded, '\n'))
 }

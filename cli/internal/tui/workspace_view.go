@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
 
@@ -125,7 +127,9 @@ func (model Model) renderArea(style workspaceTheme) string {
 		return model.renderAlbums(style)
 	case AreaJobs:
 		return model.renderJobs(style)
-	case AreaExports, AreaSettings, AreaStorage, AreaDiagnostics:
+	case AreaExports:
+		return model.renderExports(style)
+	case AreaSettings, AreaStorage, AreaDiagnostics:
 		return model.renderPanel(style, model.state.Area)
 	default:
 		return ""
@@ -202,13 +206,38 @@ func (model Model) renderAlbums(style workspaceTheme) string {
 }
 
 func (model Model) renderJobs(style workspaceTheme) string {
-	columns := []string{"kind", "state", "progress", "updated"}
+	columns := []string{"kind", "state", "progress", "throughput", "updated"}
 	rows := make([][]string, 0, len(model.jobs.Items))
 	for _, job := range model.jobs.Items {
-		rows = append(rows, []string{job.Kind, string(job.State), formatCounts(job.Counts), formatTime(job.UpdatedAt)})
+		completed := job.Counts[string(domain.JobCompleted)]
+		end := model.options.Now()
+		switch job.State {
+		case domain.JobCompleted, domain.JobPartial, domain.JobFailed, domain.JobCancelled:
+			end = job.UpdatedAt
+		}
+		elapsed := end.Sub(job.CreatedAt)
+		throughput := "-"
+		if completed > 0 && elapsed > 0 {
+			throughput = fmt.Sprintf("%.1f/min", float64(completed)/elapsed.Minutes())
+		}
+		rows = append(rows, []string{job.Kind, string(job.State), formatCounts(job.Counts), throughput, formatTime(job.UpdatedAt)})
 	}
 	return model.renderTable(style, columns, rows, model.jobs.Offset, model.jobs.Limit, model.jobs.Total,
 		"enter detail/lease · a logs/route health/pause/resume/cancel/retry · r refresh")
+}
+
+func (model Model) renderExports(style workspaceTheme) string {
+	columns := []string{"id", "format", "state", "provenance", "generation", "output"}
+	rows := make([][]string, 0, len(model.exports.Items))
+	for _, item := range model.exports.Items {
+		rows = append(rows, []string{
+			sanitizeTableCell(string(item.ID)), sanitizeTableCell(item.Format), sanitizeTableCell(item.State),
+			sanitizeTableCell(fallback(item.ProvenanceState, "pending")),
+			fmt.Sprint(item.ProvenanceGeneration), sanitizeTableCell(item.OutputRoot),
+		})
+	}
+	return model.renderTable(style, columns, rows, model.exports.Offset, model.exports.Limit, model.exports.Total,
+		"space select exact export ID · enter detail · a start/manifest/verify/open · r refresh")
 }
 
 func (model Model) renderPanel(style workspaceTheme, area Area) string {
@@ -297,6 +326,10 @@ func (model Model) idAt(index int) string {
 	case AreaJobs:
 		if index < len(model.jobs.Items) {
 			return string(model.jobs.Items[index].ID)
+		}
+	case AreaExports:
+		if index < len(model.exports.Items) {
+			return string(model.exports.Items[index].ID)
 		}
 	}
 	return ""
@@ -407,7 +440,14 @@ func (model Model) renderModal() string {
 			"[/]: page", "r: refresh", "Esc: close", "Ctrl-C: cancel operation", "q: quit",
 		}, "\n")
 	case modalInput:
-		content = model.inputLabel + "\n\n> " + model.input + model.symbol("▌", "_") + "\n\nEnter submit · Esc cancel"
+		value := model.input
+		if model.inputSecret {
+			value = strings.Repeat("•", utf8.RuneCountInString(value))
+			if model.options.ASCII || model.layout == LayoutPlain {
+				value = strings.Repeat("*", utf8.RuneCountInString(model.input))
+			}
+		}
+		content = model.inputLabel + "\n\n> " + value + model.symbol("▌", "_") + "\n\nEnter submit · Esc cancel"
 	case modalConfirm:
 		content = strings.Join([]string{
 			style.warning.Render(model.confirm.Title), "Scope: " + model.confirm.Scope,
@@ -500,6 +540,17 @@ func sanitizePreview(value string) string {
 	var builder strings.Builder
 	for _, character := range value {
 		if character == '\n' || character == '\t' || character >= 0x20 {
+			builder.WriteRune(character)
+		}
+	}
+	return builder.String()
+}
+
+func sanitizeTableCell(value string) string {
+	value = strings.ReplaceAll(value, "\x1b", "")
+	var builder strings.Builder
+	for _, character := range value {
+		if !unicode.IsControl(character) && !unicode.Is(unicode.Cf, character) {
 			builder.WriteRune(character)
 		}
 	}

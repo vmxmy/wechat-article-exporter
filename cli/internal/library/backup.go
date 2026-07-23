@@ -327,12 +327,16 @@ func buildBackupManifest(
 		}
 	}
 	if configPath != "" {
-		configDigest, configSize, err := hashFile(ctx, configPath)
+		sanitizedConfig := filepath.Join(filepath.Dir(databasePath), "profile.backup.json")
+		if err := writeBackupConfiguration(configPath, sanitizedConfig); err != nil {
+			return BackupManifest{}, nil, err
+		}
+		configDigest, configSize, err := hashFile(ctx, sanitizedConfig)
 		if err != nil {
 			return BackupManifest{}, nil, err
 		}
 		manifest.Files[backupConfigPath] = BackupFile{Size: configSize, SHA256: configDigest}
-		entries = append(entries, backupEntry{path: backupConfigPath, sourcePath: configPath, digest: configDigest, size: configSize})
+		entries = append(entries, backupEntry{path: backupConfigPath, sourcePath: sanitizedConfig, digest: configDigest, size: configSize})
 	}
 	objectRows, err := database.QueryContext(ctx, `SELECT digest, size_bytes, media_type FROM objects WHERE digest IN (`+referencedObjectUnion+`) ORDER BY digest`)
 	if err != nil {
@@ -375,12 +379,67 @@ func buildBackupManifest(
 	return manifest, entries, nil
 }
 
-const referencedObjectUnion = `
-SELECT object_digest FROM content_versions WHERE object_digest <> ''
-UNION SELECT object_digest FROM resources WHERE object_digest IS NOT NULL AND object_digest <> ''
-UNION SELECT raw_object_digest FROM comments WHERE raw_object_digest <> ''
-UNION SELECT raw_object_digest FROM replies WHERE raw_object_digest <> ''
-UNION SELECT object_digest FROM debug_incidents WHERE object_digest IS NOT NULL AND object_digest <> ''`
+func writeBackupConfiguration(source, destination string) error {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return fmt.Errorf("read profile configuration for backup: %w", err)
+	}
+	var configuration struct {
+		SchemaVersion int             `json:"schemaVersion"`
+		ProfileID     string          `json:"profileId"`
+		Preferences   json.RawMessage `json:"preferences"`
+		MCP           json.RawMessage `json:"mcp"`
+	}
+	if err := json.Unmarshal(data, &configuration); err != nil {
+		return fmt.Errorf("decode profile configuration for backup: %w", err)
+	}
+	if len(configuration.Preferences) == 0 {
+		configuration.Preferences = json.RawMessage(`{}`)
+	}
+	if len(configuration.MCP) == 0 {
+		configuration.MCP = json.RawMessage(`{}`)
+	}
+	encoded, err := json.MarshalIndent(configuration, "", "  ")
+	if err != nil {
+		return err
+	}
+	encoded = append(encoded, '\n')
+	return os.WriteFile(destination, encoded, 0o600)
+}
+
+const referencedObjectRows = `
+SELECT cv.object_digest AS digest, cv.article_id, '' AS resource_id, 'content' AS reference_kind
+FROM content_versions AS cv
+WHERE cv.object_digest <> ''
+UNION ALL
+SELECT r.object_digest AS digest, COALESCE(ar.article_id, '') AS article_id, r.id AS resource_id,
+  'resource' AS reference_kind
+FROM resources AS r
+LEFT JOIN article_resources AS ar ON ar.resource_id=r.id
+WHERE r.object_digest IS NOT NULL AND r.object_digest <> ''
+UNION ALL
+SELECT c.raw_object_digest AS digest, c.article_id, '' AS resource_id, 'comment' AS reference_kind
+FROM comments AS c
+WHERE c.raw_object_digest <> ''
+UNION ALL
+SELECT rp.raw_object_digest AS digest, c.article_id, '' AS resource_id, 'reply' AS reference_kind
+FROM replies AS rp
+JOIN comments AS c ON c.id=rp.comment_id
+WHERE rp.raw_object_digest <> ''
+UNION ALL
+SELECT object_digest AS digest, '' AS article_id, '' AS resource_id, 'debug' AS reference_kind
+FROM debug_incidents WHERE object_digest IS NOT NULL AND object_digest <> ''
+UNION ALL
+SELECT CAST(pinned.value AS TEXT) AS digest, '' AS article_id, '' AS resource_id, 'job-pin' AS reference_kind
+FROM job_items AS ji
+JOIN jobs AS j ON j.id=ji.job_id
+JOIN json_each(CASE WHEN json_valid(ji.item_key) THEN ji.item_key ELSE '{}' END, '$.pinnedDigests') AS pinned
+  ON pinned.type='text'
+WHERE CAST(pinned.value AS TEXT) <> ''
+  AND j.state <> 'completed'
+  AND ji.state <> 'completed'`
+
+const referencedObjectUnion = `SELECT digest FROM (` + referencedObjectRows + `)`
 
 func verifyBackupDatabase(ctx context.Context, path string, manifest BackupManifest, archiveObjects map[string]struct{}) error {
 	database, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=query_only(1)")

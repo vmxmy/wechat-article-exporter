@@ -2,9 +2,13 @@ package library
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/objects"
@@ -114,9 +118,26 @@ WHERE j.state IN ('completed', 'partial', 'failed', 'cancelled')
 		return GarbageCollectionPlan{}, err
 	}
 	plan.Metadata.CompletedJobLogs.Count = len(plan.jobLogIDs)
-	plan.Confirmation = fmt.Sprintf("garbage-collect:%d:%d:%d:%d", objectPlan.Unreferenced.Count, objectPlan.Temporary.Count,
-		plan.Metadata.ExpiredDebug.Count, plan.Metadata.CompletedJobLogs.Count)
+	plan.Confirmation = garbageCollectionConfirmation(plan)
 	return plan, nil
+}
+
+func garbageCollectionConfirmation(plan GarbageCollectionPlan) string {
+	hasher := sha256.New()
+	for _, candidate := range plan.Objects.Candidates {
+		_, _ = fmt.Fprintf(hasher, "object\x00%s\x00%s\x00%d\x00%d\n", candidate.Kind, candidate.Path, candidate.Size,
+			candidate.ModifiedAt.UnixNano())
+	}
+	for _, id := range plan.debugIDs {
+		_, _ = fmt.Fprintf(hasher, "debug\x00%s\n", id)
+	}
+	for _, id := range plan.jobLogIDs {
+		_, _ = fmt.Fprintf(hasher, "job-log\x00%s\n", strconv.FormatInt(id, 10))
+	}
+	digest := hex.EncodeToString(hasher.Sum(nil))[:24]
+	return strings.Join([]string{"garbage-collect", strconv.Itoa(plan.Objects.Unreferenced.Count),
+		strconv.Itoa(plan.Objects.Temporary.Count), strconv.Itoa(plan.Metadata.ExpiredDebug.Count),
+		strconv.Itoa(plan.Metadata.CompletedJobLogs.Count), digest}, ":")
 }
 
 func (database *Database) ApplyGarbageCollection(

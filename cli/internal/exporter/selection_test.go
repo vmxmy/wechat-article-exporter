@@ -3,6 +3,7 @@ package exporter
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,6 +70,9 @@ func TestBuildSelectionManifestFreezesExactSelectionAndOptions(t *testing.T) {
 	if manifest.ID == "" || len(manifest.DigestSHA256) != 64 {
 		t.Fatalf("stable identity missing: %#v", manifest)
 	}
+	if err := ValidateSelectionManifest(manifest); err != nil {
+		t.Fatalf("validate built manifest: %v", err)
+	}
 
 	request.Selection.ArticleIDs[0] = "mutated"
 	formatOptions["comments"] = false
@@ -88,6 +92,83 @@ func TestBuildSelectionManifestFreezesExactSelectionAndOptions(t *testing.T) {
 	}
 	if again.ID != manifest.ID || again.DigestSHA256 != manifest.DigestSHA256 {
 		t.Fatalf("same selection produced unstable identity: %#v != %#v", again, manifest)
+	}
+}
+
+func TestValidateSelectionManifestRejectsTamperedIdentityAndContents(t *testing.T) {
+	manifest, err := BuildSelectionManifest(context.Background(), nil, domain.ExportRequest{Format: "json",
+		Selection: domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs,
+			ArticleIDs: []domain.ArticleID{"article-a"}}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []func(*SelectionManifest){
+		func(value *SelectionManifest) { value.ID = "selection-tampered" },
+		func(value *SelectionManifest) { value.DigestSHA256 = strings.Repeat("0", 64) },
+		func(value *SelectionManifest) { value.FilterSummary = `{}` },
+		func(value *SelectionManifest) { value.ArticleIDs[0] = "article-b" },
+		func(value *SelectionManifest) { value.Options.CollisionPolicy = "replace" },
+	}
+	for index, mutate := range tests {
+		copy := manifest
+		copy.ArticleIDs = append([]domain.ArticleID(nil), manifest.ArticleIDs...)
+		mutate(&copy)
+		if err := ValidateSelectionManifest(copy); err == nil {
+			t.Fatalf("tampered case %d validated: %#v", index, copy)
+		}
+	}
+}
+
+func TestValidateSelectionManifestRejectsRehashedSemanticMismatchAndBlankIdentifiers(t *testing.T) {
+	createdAt := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	manifest, err := BuildSelectionManifest(context.Background(), nil, domain.ExportRequest{Format: "json",
+		Selection: domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs,
+			ArticleIDs: []domain.ArticleID{"article-a"}}}, createdAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rehash := func(value *SelectionManifest) {
+		t.Helper()
+		summary, err := canonicalJSON(value.Selection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value.FilterSummary = summary
+		digest, err := selectionManifestDigest(*value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value.DigestSHA256 = digest
+		value.ID = "selection-" + digest
+	}
+	tests := []SelectionManifest{
+		manifest,
+		manifest,
+		manifest,
+		manifest,
+	}
+	tests[0].ArticleIDs = []domain.ArticleID{"article-b"}
+	tests[1].Kind = domain.ExportSelectionURLs
+	tests[1].Selection = domain.ExportSelection{Kind: domain.ExportSelectionURLs, URLs: []string{" "}}
+	tests[2].Kind = domain.ExportSelectionAccount
+	tests[2].Selection = domain.ExportSelection{Kind: domain.ExportSelectionAccount, AccountID: " "}
+	tests[3].Kind = domain.ExportSelectionAlbum
+	tests[3].Selection = domain.ExportSelection{Kind: domain.ExportSelectionAlbum, AlbumID: " "}
+	for index := range tests {
+		rehash(&tests[index])
+		if err := ValidateSelectionManifest(tests[index]); err == nil {
+			t.Fatalf("rehashed invalid manifest %d validated: %#v", index, tests[index])
+		}
+	}
+
+	sourceBacked := SelectionManifest{
+		SchemaVersion: SelectionManifestVersion, Kind: domain.ExportSelectionAccount,
+		Selection:  domain.ExportSelection{Kind: domain.ExportSelectionAccount, AccountID: "account-a"},
+		ArticleIDs: []domain.ArticleID{"article-a"}, Format: "json", CreatedAt: createdAt,
+	}
+	rehash(&sourceBacked)
+	if err := ValidateSelectionManifest(sourceBacked); err != nil {
+		t.Fatalf("valid frozen source-backed manifest rejected: %v", err)
 	}
 }
 
@@ -134,6 +215,9 @@ func TestBuildSelectionManifestAcceptsEverySelectionSource(t *testing.T) {
 			if manifest.FilterSummary == "" {
 				t.Fatal("filter summary was empty")
 			}
+			if err := ValidateSelectionManifest(manifest); err != nil {
+				t.Fatalf("validate built manifest: %v", err)
+			}
 		})
 	}
 }
@@ -163,5 +247,25 @@ func TestBuildSelectionManifestSupportsLegacyExplicitArticleIDs(t *testing.T) {
 	}
 	if manifest.Kind != domain.ExportSelectionExplicitIDs || !reflect.DeepEqual(manifest.ArticleIDs, []domain.ArticleID{"legacy-b", "legacy-a"}) {
 		t.Fatalf("legacy manifest = %#v", manifest)
+	}
+}
+
+func TestResolvedSavedQuerySelectionReplaysFrozenQuery(t *testing.T) {
+	selection := domain.ExportSelection{
+		Kind: domain.ExportSelectionSavedQuery, SavedQueryID: "saved-a",
+		Query: domain.ArticleQuery{Keyword: "frozen", State: "ready", Sort: "title"},
+	}
+	source := &fakeSelectionSource{queries: map[string][]domain.ArticleID{
+		"||frozen|ready|title": {"article-b", "article-a"},
+	}}
+	ids, resolved, err := resolveSelection(context.Background(), source, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(ids, []domain.ArticleID{"article-b", "article-a"}) || resolved.Query.Keyword != "frozen" {
+		t.Fatalf("ids=%#v resolved=%#v", ids, resolved)
+	}
+	if len(source.seenQueries) != 1 || source.seenQueries[0].Keyword != "frozen" {
+		t.Fatalf("seen queries=%#v", source.seenQueries)
 	}
 }

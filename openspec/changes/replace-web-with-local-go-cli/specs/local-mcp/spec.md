@@ -7,6 +7,10 @@ The binary SHALL provide `wechat-article mcp serve --transport stdio` and SHALL 
 - **WHEN** an MCP client starts the command
 - **THEN** stdout is reserved for protocol messages, logs are written to stderr, and the server advertises its implementation and supported capabilities
 
+#### Scenario: Protocol negotiation
+- **WHEN** a client initializes with the supported protocol version
+- **THEN** the server returns that exact version and its local-only capabilities; a missing or unsupported version receives a structured protocol error and cannot continue as initialized
+
 ### Requirement: Shared application modules
 MCP tools SHALL invoke the same session, discovery, library, download, processing, and export modules used by Cobra and Bubble Tea.
 
@@ -41,6 +45,21 @@ The MCP adapter SHALL bound message sizes, reject malformed JSON-RPC, avoid writ
 #### Scenario: Malformed request
 - **WHEN** stdin contains an invalid or oversized protocol message
 - **THEN** the server returns a protocol error when possible and does not execute a partially decoded tool call
+
+#### Scenario: EOF or cancellation
+- **WHEN** the MCP client closes stdin or cancels the server context
+- **THEN** the server terminates without protocol pollution, releases its input wait, and does not leave an untracked in-memory operation running
+
+### Requirement: Bounded results and file roots
+MCP list/query results SHALL use explicit limits and stable pagination, and file-producing tools SHALL write only below profile-configured allowed roots after path traversal and symlink-escape validation.
+
+#### Scenario: Export within allowed root
+- **WHEN** `exports.start` resolves an explicit or configured default output directory below an allowed root
+- **THEN** the canonical path is passed to the shared export application and a persistent job ID is returned
+
+#### Scenario: Export path escape
+- **WHEN** an MCP caller supplies an absolute path outside all allowed roots, a `..` escape, or a symlink path whose existing ancestor resolves outside a root
+- **THEN** the request is rejected before an export job or output file is created
 
 ### Requirement: Optional tool policy
 Users SHALL be able to configure read-only mode and explicit allow/deny lists for MCP tools per profile.

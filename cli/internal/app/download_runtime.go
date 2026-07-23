@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/credentials"
@@ -16,24 +20,30 @@ import (
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/network"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/objects"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/processor"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
 
 type localDownloadRuntime struct {
-	profile domain.ProfileID
-	library *library.Database
-	objects *objects.FileStore
-	service download.JobService
+	profile     domain.ProfileID
+	library     *library.Database
+	objects     *objects.FileStore
+	credentials *credentials.Service
+	service     download.JobService
 }
 
 type downloadRuntimeOptions struct {
 	DestinationPolicy network.DestinationPolicy
+	Proxy             profiles.ProxyPreferences
+	ProxyConfigured   bool
+	Concurrency       int
+	Scheduler         *jobs.Scheduler
 }
 
-func newLocalDownloadRuntime(runtime *ProfileRuntime, secretStore secrets.Store, httpClient network.Doer, options ...downloadRuntimeOptions) *localDownloadRuntime {
+func newLocalDownloadRuntime(runtime *ProfileRuntime, secretStore secrets.Store, httpClient network.Doer, options ...downloadRuntimeOptions) (*localDownloadRuntime, error) {
 	if runtime == nil || runtime.Library == nil || runtime.Objects == nil || runtime.Jobs == nil || runtime.Network == nil {
-		return nil
+		return nil, errors.New("download runtime dependencies are incomplete")
 	}
 	client, ok := httpClient.(*http.Client)
 	if !ok {
@@ -48,15 +58,34 @@ func newLocalDownloadRuntime(runtime *ProfileRuntime, secretStore secrets.Store,
 	direct := network.NewDirect(client, policy)
 	routes, err := runtime.Network.Candidates(context.Background(), direct)
 	if err != nil {
-		routes = []network.Candidate{{Client: direct, Direct: true, Enabled: true}}
+		return nil, fmt.Errorf("build configured network routes: %w", err)
 	}
-	router := network.Router{Routes: routes, Retryable: func(err error) bool {
+	if len(options) > 0 {
+		routes = configureDownloadRoutes(routes, options[0])
+	}
+	hasEligibleRoute := false
+	for _, route := range routes {
+		if route.Enabled && route.Client != nil {
+			hasEligibleRoute = true
+			break
+		}
+	}
+	if !hasEligibleRoute {
+		return nil, errors.New("download routing configuration has no enabled direct or proxy route")
+	}
+	router := &downloadRouter{routes: routes, retryable: func(err error) bool {
 		return !errors.Is(err, network.ErrSensitiveRouteRequired)
 	}}
+	contentEndpoint := wechat.ContentEndpoint{Network: router}
 	credentialsService := credentials.NewService(credentials.ServiceOptions{
 		Profile: string(runtime.Profile.ID), Repository: runtime.Library, Accounts: runtime.Library, Secrets: secretStore,
+		Validator: credentials.ValidatorFunc(func(ctx context.Context, record credentials.Record) error {
+			_, err := contentEndpoint.ValidateCredential(ctx, wechat.CredentialValidationRequest{
+				BusinessID: record.Biz, Credential: record,
+			})
+			return err
+		}),
 	})
-	contentEndpoint := wechat.ContentEndpoint{Network: router}
 	articleDownloader := download.ArticleDownloader{Network: router, Processor: processor.New(), Objects: runtime.Objects,
 		Store: runtime.Library, DebugCapture: true}
 	resourceDownloader := download.ResourceDownloader{Network: router, Objects: runtime.Objects, Store: runtime.Library}
@@ -64,10 +93,186 @@ func newLocalDownloadRuntime(runtime *ProfileRuntime, secretStore secrets.Store,
 	commentsDownloader := download.CommentsDownloader{Credentials: credentialsService, Source: contentEndpoint, Store: runtime.Library}
 	paidDownloader := download.PaidArticleDownloader{Fetcher: download.PaidContentDownloader{Credentials: credentialsService,
 		Source: contentEndpoint}, Processor: processor.New(), Objects: runtime.Objects, Store: runtime.Library, DebugCapture: true}
-	return &localDownloadRuntime{profile: runtime.Profile.ID, library: runtime.Library, objects: runtime.Objects, service: download.JobService{
-		Store: runtime.Jobs, Engine: jobs.EngineOptions{Owner: "local-download-worker"}, Articles: articleDownloader,
-		Resources: resourceDownloader, Metadata: metadataDownloader, Comments: commentsDownloader, Paid: paidDownloader,
-	}}
+	return &localDownloadRuntime{profile: runtime.Profile.ID, library: runtime.Library, objects: runtime.Objects,
+		credentials: credentialsService, service: download.JobService{
+			Store: runtime.Jobs, Engine: jobs.EngineOptions{Owner: "local-download-worker", Scheduler: downloadScheduler(options)}, Articles: articleDownloader,
+			Resources: resourceDownloader, Metadata: metadataDownloader, Comments: commentsDownloader, Paid: paidDownloader,
+		}}, nil
+}
+
+func filterDirectRoutes(routes []network.Candidate) []network.Candidate {
+	result := make([]network.Candidate, 0, 1)
+	for _, route := range routes {
+		if route.Direct {
+			result = append(result, route)
+		}
+	}
+	return result
+}
+
+func filterProxyRoutes(routes []network.Candidate) []network.Candidate {
+	result := make([]network.Candidate, 0, len(routes))
+	for _, route := range routes {
+		if !route.Direct {
+			result = append(result, route)
+		}
+	}
+	return result
+}
+
+func configureDownloadRoutes(routes []network.Candidate, options downloadRuntimeOptions) []network.Candidate {
+	configured := append([]network.Candidate(nil), routes...)
+	if !options.ProxyConfigured {
+		return orderDownloadRoutes(configured, true)
+	}
+	if !options.Proxy.FallbackEnabled {
+		if options.Proxy.DirectFirst {
+			return orderDownloadRoutes(filterDirectRoutes(configured), true)
+		}
+		return orderDownloadRoutes(filterProxyRoutes(configured), false)
+	}
+	return orderDownloadRoutes(configured, options.Proxy.DirectFirst)
+}
+
+func orderDownloadRoutes(routes []network.Candidate, directFirst bool) []network.Candidate {
+	sort.SliceStable(routes, func(left, right int) bool {
+		if routes[left].Direct != routes[right].Direct {
+			return routes[left].Direct == directFirst
+		}
+		if routes[left].ProbeRequired != routes[right].ProbeRequired {
+			return !routes[left].ProbeRequired
+		}
+		return routes[left].Priority < routes[right].Priority
+	})
+	return routes
+}
+
+type downloadRouter struct {
+	routes    []network.Candidate
+	now       func() time.Time
+	retryable func(error) bool
+	mu        sync.Mutex
+}
+
+func (router *downloadRouter) Do(ctx context.Context, request network.Request) (network.Result, error) {
+	now := router.now
+	if now == nil {
+		now = time.Now
+	}
+	var failures []error
+	for index := range router.routes {
+		if err := ctx.Err(); err != nil {
+			return network.Result{}, err
+		}
+		router.mu.Lock()
+		candidate := router.routes[index]
+		router.mu.Unlock()
+		if candidate.Client == nil || !candidate.Enabled || candidate.CooldownUntil.After(now()) {
+			continue
+		}
+		if len(candidate.Classes) > 0 {
+			if _, ok := candidate.Classes[request.Class]; !ok {
+				continue
+			}
+		}
+		if err := network.ValidateRoute(request.Class, candidate.Direct, candidate.Trust); err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if candidate.ProbeRequired {
+			router.mu.Lock()
+			candidate = router.routes[index]
+			if !candidate.ProbeRequired {
+				router.mu.Unlock()
+			} else if candidate.CooldownUntil.After(now()) {
+				router.mu.Unlock()
+				continue
+			} else if candidate.Probe == nil {
+				router.mu.Unlock()
+				failures = append(failures, fmt.Errorf("route %s requires a recovery probe", candidate.Client.Name()))
+				continue
+			} else {
+				probe := candidate.Probe
+				router.mu.Unlock()
+				probeErr := probe(ctx)
+				router.mu.Lock()
+				current := router.routes[index]
+				if probeErr != nil {
+					router.routes[index].ProbeRequired = true
+					router.routes[index].CooldownUntil = now().Add(time.Minute)
+				} else if current.ProbeRequired && current.Probe != nil {
+					router.routes[index].ProbeRequired = false
+					router.routes[index].CooldownUntil = time.Time{}
+				}
+				router.mu.Unlock()
+				if probeErr == nil {
+					candidate = current
+					candidate.ProbeRequired = false
+				} else {
+					if cancellationErr := cancellationError(ctx, probeErr); cancellationErr != nil {
+						return network.Result{}, cancellationErr
+					}
+					failures = append(failures, fmt.Errorf("route %s recovery probe: %w", candidate.Client.Name(), probeErr))
+					continue
+				}
+			}
+		}
+		result, err := candidate.Client.Do(ctx, request)
+		if err == nil {
+			return result, nil
+		}
+		if cancellationErr := cancellationError(ctx, err); cancellationErr != nil {
+			return network.Result{}, cancellationErr
+		}
+		failures = append(failures, fmt.Errorf("route %s: %w", candidate.Client.Name(), err))
+		if router.retryable == nil || !router.retryable(err) {
+			return network.Result{}, failures[len(failures)-1]
+		}
+		if request.Body != nil {
+			seeker, ok := request.Body.(io.Seeker)
+			if !ok {
+				return network.Result{}, errors.New("request body is not replayable for route fallback")
+			}
+			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+				return network.Result{}, fmt.Errorf("rewind request body for route fallback: %w", err)
+			}
+		}
+	}
+	if len(failures) == 0 {
+		return network.Result{}, errors.New("no eligible network route")
+	}
+	return network.Result{}, errors.Join(failures...)
+}
+
+func cancellationError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return nil
+}
+
+func downloadScheduler(options []downloadRuntimeOptions) *jobs.Scheduler {
+	if len(options) > 0 && options[0].Scheduler != nil {
+		return options[0].Scheduler
+	}
+	limit := 4
+	if len(options) > 0 && options[0].Concurrency > 0 {
+		limit = options[0].Concurrency
+	}
+	return jobs.NewScheduler(downloadSchedulerLimits(limit))
+}
+
+func downloadSchedulerLimits(limit int) jobs.Limits {
+	if limit <= 0 {
+		limit = 4
+	}
+	return jobs.Limits{Global: limit, PerOperation: map[string]int{
+		string(download.JobArticle): limit, string(download.JobResource): limit, string(download.JobMetadata): 1,
+		string(download.JobComments): 1, string(download.JobPaid): 1,
+	}, PerHost: limit, Sensitive: 1}
 }
 
 func (runtime *localDownloadRuntime) Start(ctx context.Context, request domain.DownloadRequest) (domain.Job, error) {

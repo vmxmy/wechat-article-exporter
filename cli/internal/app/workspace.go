@@ -3,18 +3,22 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/credentials"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/exporter"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/network"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/processor"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
 	syncrunner "github.com/wechat-article/wechat-article-exporter/cli/internal/sync"
@@ -44,16 +48,12 @@ func (extensions *workspaceExtensions) Panel(ctx context.Context, area tui.Area)
 	}
 	switch area {
 	case tui.AreaExports:
-		page, err := active.Library.QueryExports(ctx, 0, 10)
+		page, err := active.Library.QueryExportRecords(ctx, 0, 10)
 		if err != nil {
 			return tui.OperationResult{}, err
 		}
 		lines := make([]string, 0, len(page.Items))
-		for _, id := range page.Items {
-			record, recordErr := active.Library.GetExport(ctx, id)
-			if recordErr != nil {
-				return tui.OperationResult{}, recordErr
-			}
+		for _, record := range page.Items {
 			lines = append(lines, fmt.Sprintf("%s · %s · %s · %s", record.ID, record.Format, record.State, record.OutputRoot))
 		}
 		return tui.OperationResult{Title: "Exports", Message: fmt.Sprintf("%d persistent export records", page.Total), Lines: lines}, nil
@@ -95,6 +95,31 @@ func (extensions *workspaceExtensions) Panel(ctx context.Context, area tui.Area)
 	default:
 		return tui.OperationResult{}, nil
 	}
+}
+
+func (extensions *workspaceExtensions) QueryExports(ctx context.Context, offset, limit int) (domain.Page[tui.ExportSummary], error) {
+	active, err := extensions.active()
+	if err != nil {
+		return domain.Page[tui.ExportSummary]{}, err
+	}
+	page, err := active.Library.QueryExportRecords(ctx, offset, limit)
+	if err != nil {
+		return domain.Page[tui.ExportSummary]{}, err
+	}
+	items := make([]tui.ExportSummary, 0, len(page.Items))
+	for _, record := range page.Items {
+		var completedAt *time.Time
+		if !record.CompletedAt.IsZero() {
+			value := record.CompletedAt
+			completedAt = &value
+		}
+		items = append(items, tui.ExportSummary{
+			ID: record.ID, Format: record.Format, State: record.State, OutputRoot: record.OutputRoot,
+			ProvenanceState: record.ProvenanceState, ProvenancePath: record.ProvenancePath,
+			ProvenanceGeneration: record.ProvenanceGeneration, CreatedAt: record.CreatedAt, CompletedAt: completedAt,
+		})
+	}
+	return domain.Page[tui.ExportSummary]{Items: items, Total: page.Total, Offset: page.Offset, Limit: page.Limit}, nil
 }
 
 func (extensions *workspaceExtensions) PreviewArticle(ctx context.Context, articleID domain.ArticleID) (tui.PreviewDocument, error) {
@@ -150,15 +175,22 @@ func (extensions *workspaceExtensions) Operate(ctx context.Context, request tui.
 	}
 	switch request.Kind {
 	case tui.OperationAccountImport:
-		return tui.OperationResult{Title: "Import accounts", Message: "Use `wechat-article account import --file <manifest>` so the source path and merge report are explicit."}, nil
+		return extensions.importAccounts(ctx, request.Parameters["path"])
 	case tui.OperationAccountExport:
 		manifest, err := extensions.app.core.ExportAccounts(ctx, domain.AccountQuery{})
 		if err != nil {
 			return tui.OperationResult{}, err
 		}
+		path := strings.TrimSpace(request.Parameters["path"])
+		if path == "" {
+			return tui.OperationResult{}, errors.New("account manifest output path is required")
+		}
+		if err := writePrivateJSONFile(path, manifest); err != nil {
+			return tui.OperationResult{}, err
+		}
 		return tui.OperationResult{Title: "Account export manifest", Fields: map[string]string{
 			"schema version": fmt.Sprint(manifest.SchemaVersion), "accounts": fmt.Sprint(len(manifest.Accounts)),
-			"exported at": manifest.ExportedAt.Local().Format(time.RFC3339),
+			"exported at": manifest.ExportedAt.Local().Format(time.RFC3339), "path": path,
 		}}, nil
 	case tui.OperationAlbumTraverse:
 		return extensions.albumTraverse(ctx, request)
@@ -169,13 +201,17 @@ func (extensions *workspaceExtensions) Operate(ctx context.Context, request tui.
 	case tui.OperationJobResume:
 		return extensions.jobOperation(ctx, request.IDs, active.Jobs.Resume, "queued for resume")
 	case tui.OperationJobRetry:
-		return extensions.jobOperation(ctx, request.IDs, active.Jobs.Retry, "queued for retry")
+		return extensions.jobOperation(ctx, request.IDs, nil, "queued for retry")
 	case tui.OperationRouteHealth:
 		return extensions.routeHealth(ctx)
 	case tui.OperationExportManifest:
 		return extensions.exportManifest(ctx, request.IDs)
+	case tui.OperationExportVerify:
+		return extensions.verifyExport(ctx, request.IDs)
 	case tui.OperationExportConfig:
 		return extensions.exportConfiguration(ctx)
+	case tui.OperationExportStart:
+		return extensions.startExport(ctx, request)
 	case tui.OperationOpenExport:
 		return extensions.openExport(ctx, request.IDs)
 	case tui.OperationCredentials:
@@ -188,14 +224,32 @@ func (extensions *workspaceExtensions) Operate(ctx context.Context, request tui.
 			lines = append(lines, fmt.Sprintf("%s · account %s · %s · %s", item.ID, item.AccountID, item.Kind, item.Status))
 		}
 		return tui.OperationResult{Title: "Credentials", Message: fmt.Sprintf("%d non-secret credential records", len(items)), Lines: lines}, nil
+	case tui.OperationCredentialImport:
+		return extensions.importCredential(ctx, request.Parameters["path"])
+	case tui.OperationCredentialCheck:
+		return extensions.validateCredential(ctx, request.Parameters["id"])
+	case tui.OperationCredentialRemove:
+		return extensions.removeCredential(ctx, request.Parameters["id"])
 	case tui.OperationProxies:
 		return extensions.routeHealth(ctx)
+	case tui.OperationProxyAdd:
+		return extensions.addProxy(ctx, request.Parameters)
+	case tui.OperationProxyEnable:
+		return extensions.proxyOperation(ctx, request.Parameters["id"], active.Network.Enable, "enabled")
+	case tui.OperationProxyDisable:
+		return extensions.proxyOperation(ctx, request.Parameters["id"], active.Network.Disable, "disabled")
+	case tui.OperationProxyTest:
+		return extensions.testProxy(ctx, request.Parameters["id"])
+	case tui.OperationProxyRemove:
+		return extensions.proxyOperation(ctx, request.Parameters["id"], active.Network.Remove, "removed")
 	case tui.OperationPreferences:
 		return extensions.preferences(ctx)
+	case tui.OperationPreferenceSet:
+		return extensions.setPreference(ctx, request.Parameters["key"], request.Parameters["value"])
 	case tui.OperationBackup:
 		return extensions.backup(ctx)
 	case tui.OperationRestore:
-		return tui.OperationResult{Title: "Restore backup", Message: "Use `wechat-article db restore <archive> --confirm restore-backup:<archive>` so the archive and conflict policy are explicit."}, nil
+		return extensions.restore(ctx, request.Parameters["path"], request.Parameters["conflict"])
 	case tui.OperationIntegrity:
 		report, err := active.Library.CheckIntegrity(ctx, active.Objects)
 		if err != nil {
@@ -204,22 +258,11 @@ func (extensions *workspaceExtensions) Operate(ctx context.Context, request tui.
 		return tui.OperationResult{Title: "Integrity check", Message: fmt.Sprintf("%d issue(s)", len(report.Issues)),
 			Fields: map[string]string{"checked at": report.CheckedAt.Local().Format(time.RFC3339), "valid": fmt.Sprint(len(report.Issues) == 0)}}, nil
 	case tui.OperationGarbageCollect:
-		plan, err := active.Library.PlanGarbageCollection(ctx, library.GarbageCollectionOptions{
-			ObjectStore: active.Objects, ObjectRetention: 24 * time.Hour, TemporaryRetention: 24 * time.Hour,
-			DebugRetention: 30 * 24 * time.Hour, CompletedJobRetention: 30 * 24 * time.Hour,
-		})
-		if err != nil {
-			return tui.OperationResult{}, err
-		}
-		return tui.OperationResult{Title: "Garbage collection dry run", Fields: map[string]string{
-			"unreferenced objects":   fmt.Sprint(plan.Objects.Unreferenced.Count),
-			"temporary files":        fmt.Sprint(plan.Objects.Temporary.Count),
-			"expired debug captures": fmt.Sprint(plan.Metadata.ExpiredDebug.Count),
-			"completed logs":         fmt.Sprint(plan.Metadata.CompletedJobLogs.Count),
-			"CLI confirmation":       plan.Confirmation,
-		}}, nil
+		return extensions.garbageCollect(ctx, request.Parameters)
 	case tui.OperationDiagnostics:
 		return extensions.diagnostics(ctx)
+	case tui.OperationDiagnosticBundle:
+		return extensions.diagnosticBundle(ctx, request.Parameters["path"])
 	case tui.OperationArticleComments:
 		return extensions.articleComments(ctx, request.IDs)
 	case tui.OperationArticleMetrics:
@@ -229,6 +272,272 @@ func (extensions *workspaceExtensions) Operate(ctx context.Context, request tui.
 	default:
 		return tui.OperationResult{}, fmt.Errorf("unsupported workspace operation %q", request.Kind)
 	}
+}
+
+func (extensions *workspaceExtensions) credentialService() (*credentials.Service, error) {
+	if extensions == nil || extensions.app == nil {
+		return nil, errors.New("credential service is unavailable")
+	}
+	return extensions.app.credentialService()
+}
+
+func (extensions *workspaceExtensions) importCredential(ctx context.Context, path string) (tui.OperationResult, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return tui.OperationResult{}, errors.New("credential JSON path is required")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	defer file.Close()
+	record, err := credentials.ParseJSON(file)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	service, err := extensions.credentialService()
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	metadata, err := service.Import(ctx, record)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	return tui.OperationResult{Title: "Credential imported", Fields: map[string]string{
+		"id": metadata.ID, "account": string(metadata.AccountID), "kind": metadata.Kind, "status": string(metadata.Status),
+	}}, nil
+}
+
+func (extensions *workspaceExtensions) validateCredential(ctx context.Context, id string) (tui.OperationResult, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return tui.OperationResult{}, errors.New("credential ID is required")
+	}
+	service, err := extensions.credentialService()
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	metadata, err := service.Validate(ctx, id)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	return tui.OperationResult{Title: "Credential validated", Fields: map[string]string{
+		"id": metadata.ID, "status": string(metadata.Status), "validated at": formatOptionalTime(metadata.ValidatedAt),
+	}}, nil
+}
+
+func (extensions *workspaceExtensions) removeCredential(ctx context.Context, id string) (tui.OperationResult, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return tui.OperationResult{}, errors.New("credential ID is required")
+	}
+	service, err := extensions.credentialService()
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	if err := service.Remove(ctx, id); err != nil {
+		return tui.OperationResult{}, err
+	}
+	return tui.OperationResult{Title: "Credential removed", Fields: map[string]string{"id": id}}, nil
+}
+
+func (extensions *workspaceExtensions) addProxy(ctx context.Context, parameters map[string]string) (tui.OperationResult, error) {
+	active, err := extensions.active()
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	route, err := active.Network.Add(ctx, network.AddProxyRequest{
+		Name: strings.TrimSpace(parameters["name"]), Endpoint: strings.TrimSpace(parameters["endpoint"]),
+		Authorization: parameters["authorization"], Trust: network.TrustPublicOnly,
+		Classes: []network.RequestClass{network.PublicContent}, Priority: 100,
+	})
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	return tui.OperationResult{Title: "Proxy added", Fields: map[string]string{
+		"id": route.ID, "name": route.Name, "endpoint": route.Endpoint, "trust": string(route.Trust),
+		"authorization configured": fmt.Sprint(route.AuthorizationConfigured),
+	}}, nil
+}
+
+func (extensions *workspaceExtensions) proxyOperation(
+	ctx context.Context,
+	id string,
+	operation func(context.Context, string) (network.RouteConfig, error),
+	verb string,
+) (tui.OperationResult, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return tui.OperationResult{}, errors.New("proxy name or ID is required")
+	}
+	route, err := operation(ctx, id)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	return tui.OperationResult{Title: "Proxy " + verb, Fields: map[string]string{
+		"id": route.ID, "name": route.Name, "enabled": fmt.Sprint(route.Enabled),
+	}}, nil
+}
+
+func (extensions *workspaceExtensions) testProxy(ctx context.Context, id string) (tui.OperationResult, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return tui.OperationResult{}, errors.New("proxy name or ID is required")
+	}
+	active, err := extensions.active()
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	probe, err := active.Network.Test(ctx, id)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	return tui.OperationResult{Title: "Proxy test", Fields: map[string]string{
+		"id": probe.Route.ID, "name": probe.Route.Name, "valid": fmt.Sprint(probe.ResponseValid),
+		"latency": probe.Latency.String(), "status": fmt.Sprint(probe.StatusCode),
+	}}, nil
+}
+
+func (extensions *workspaceExtensions) setPreference(ctx context.Context, key, value string) (tui.OperationResult, error) {
+	if err := ctx.Err(); err != nil {
+		return tui.OperationResult{}, err
+	}
+	active, err := extensions.active()
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	key = strings.ToLower(strings.TrimSpace(key))
+	value = strings.TrimSpace(value)
+	if key == "" {
+		return tui.OperationResult{}, errors.New("preference key is required")
+	}
+	effective, err := profiles.NewConfigStore(active.Profile.Paths.Config).Update(func(configuration *profiles.ProfileConfig) error {
+		return updateWorkspacePreference(configuration, key, value)
+	})
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	return tui.OperationResult{Title: "Preference saved", Fields: map[string]string{
+		"key": key, "value": value, "configuration": effective.Path,
+	}, Message: "The saved value applies to new operations; restart the workspace for display/runtime composition changes."}, nil
+}
+
+func updateWorkspacePreference(configuration *profiles.ProfileConfig, key, value string) error {
+	parseBool := func() (bool, error) {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return false, fmt.Errorf("%s must be true or false", key)
+		}
+		return parsed, nil
+	}
+	switch key {
+	case "export.root":
+		configuration.Preferences.Export.Root = value
+	case "export.naming-template":
+		if value == "" {
+			return errors.New("export.naming-template must not be empty")
+		}
+		configuration.Preferences.Export.NamingTemplate = value
+	case "export.collision-policy":
+		if value != "fail" && value != "suffix" {
+			return errors.New("export.collision-policy must be fail or suffix")
+		}
+		configuration.Preferences.Export.CollisionPolicy = value
+	case "download.concurrency":
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > 64 {
+			return errors.New("download.concurrency must be an integer between 1 and 64")
+		}
+		configuration.Preferences.Download.Concurrency = parsed
+	case "display.no-color":
+		parsed, err := parseBool()
+		if err != nil {
+			return err
+		}
+		configuration.Preferences.Display.NoColor = parsed
+	case "display.ascii":
+		parsed, err := parseBool()
+		if err != nil {
+			return err
+		}
+		configuration.Preferences.Display.ASCII = parsed
+	case "display.plain":
+		parsed, err := parseBool()
+		if err != nil {
+			return err
+		}
+		configuration.Preferences.Display.Plain = parsed
+	case "proxy.direct-first":
+		parsed, err := parseBool()
+		if err != nil {
+			return err
+		}
+		configuration.Preferences.Proxy.DirectFirst = parsed
+	case "proxy.fallback-enabled":
+		parsed, err := parseBool()
+		if err != nil {
+			return err
+		}
+		configuration.Preferences.Proxy.FallbackEnabled = parsed
+	case "sync.page-delay":
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed < 3*time.Second {
+			return errors.New("sync.page-delay must be at least 3s in the workspace; use Cobra with explicit risk confirmation for lower values")
+		}
+		configuration.Preferences.Sync.PageDelay = parsed
+	default:
+		return fmt.Errorf("unsupported workspace preference %q", key)
+	}
+	return nil
+}
+
+func (extensions *workspaceExtensions) garbageCollect(ctx context.Context, parameters map[string]string) (tui.OperationResult, error) {
+	active, err := extensions.active()
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	gate, err := profiles.AcquireMaintenanceGate(ctx, active.Profile.Paths)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	defer gate.Close()
+	blockers, err := active.Jobs.RestoreBlockers(ctx)
+	if err != nil {
+		return tui.OperationResult{}, fmt.Errorf("check garbage-collection blockers: %w", err)
+	}
+	if len(blockers) > 0 {
+		return tui.OperationResult{}, fmt.Errorf("garbage collection blocked by %d running job or active lease: %w", len(blockers), profiles.ErrProfileBusy)
+	}
+	options := library.GarbageCollectionOptions{
+		ObjectStore: active.Objects, ObjectRetention: 24 * time.Hour, TemporaryRetention: 24 * time.Hour,
+		DebugRetention: 30 * 24 * time.Hour, CompletedJobRetention: 30 * 24 * time.Hour,
+	}
+	plan, err := active.Library.PlanGarbageCollection(ctx, options)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	fields := map[string]string{
+		"unreferenced objects": fmt.Sprint(plan.Objects.Unreferenced.Count), "temporary files": fmt.Sprint(plan.Objects.Temporary.Count),
+		"expired debug captures": fmt.Sprint(plan.Metadata.ExpiredDebug.Count), "completed logs": fmt.Sprint(plan.Metadata.CompletedJobLogs.Count),
+		"confirmation": plan.Confirmation,
+	}
+	if strings.TrimSpace(parameters["mode"]) != "apply" {
+		return tui.OperationResult{Title: "Garbage collection dry run", Fields: fields,
+			Message: "Copy the exact confirmation into Apply garbage collection to delete this plan."}, nil
+	}
+	confirmation := strings.TrimSpace(parameters["confirm"])
+	if confirmation != plan.Confirmation {
+		return tui.OperationResult{}, fmt.Errorf("garbage collection plan changed or confirmation mismatched; generate a new plan and use %q", plan.Confirmation)
+	}
+	result, err := active.Library.ApplyGarbageCollection(ctx, options, plan, confirmation)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	fields["deleted objects"] = fmt.Sprint(result.Objects.DeletedObjects.Count)
+	fields["deleted temporary files"] = fmt.Sprint(result.Objects.DeletedTemporary.Count)
+	fields["deleted debug captures"] = fmt.Sprint(result.DeletedDebug.Count)
+	fields["deleted completed logs"] = fmt.Sprint(result.DeletedCompletedLogs.Count)
+	return tui.OperationResult{Title: "Garbage collection complete", Fields: fields}, nil
 }
 
 func (extensions *workspaceExtensions) albumTraverse(ctx context.Context, request tui.OperationRequest) (tui.OperationResult, error) {
@@ -284,6 +593,102 @@ func (extensions *workspaceExtensions) albumTraverse(ctx context.Context, reques
 	}}, nil
 }
 
+func (extensions *workspaceExtensions) importAccounts(ctx context.Context, path string) (tui.OperationResult, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return tui.OperationResult{}, errors.New("account manifest path is required")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	var manifest domain.AccountManifest
+	if err := decodeSingleJSONValue(decoder, &manifest); err != nil {
+		return tui.OperationResult{}, fmt.Errorf("decode account manifest: %w", err)
+	}
+	report, err := extensions.app.core.ImportAccounts(ctx, manifest)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	return tui.OperationResult{Title: "Account import complete", Fields: map[string]string{
+		"path": path, "added": fmt.Sprint(report.Added), "merged": fmt.Sprint(report.Merged), "unchanged": fmt.Sprint(report.Unchanged),
+	}}, nil
+}
+
+func (extensions *workspaceExtensions) startExport(ctx context.Context, request tui.OperationRequest) (tui.OperationResult, error) {
+	format := strings.ToLower(strings.TrimSpace(request.Parameters["format"]))
+	outputRoot := strings.TrimSpace(request.Parameters["outputRoot"])
+	if format == "" || outputRoot == "" {
+		return tui.OperationResult{}, errors.New("export format and output directory are required")
+	}
+	selection := domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs}
+	for _, id := range request.IDs {
+		if request.Area == tui.AreaAlbums {
+			selection = domain.ExportSelection{Kind: domain.ExportSelectionAlbum, AlbumID: domain.AlbumID(id)}
+			break
+		}
+		selection.ArticleIDs = append(selection.ArticleIDs, domain.ArticleID(id))
+	}
+	if len(selection.ArticleIDs) == 0 && selection.AlbumID == "" {
+		return tui.OperationResult{}, errors.New("select one or more articles or an album before starting an export")
+	}
+	active, err := extensions.active()
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	configuration, _, err := profiles.NewConfigStore(active.Profile.Paths.Config).Read()
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	preferences := configuration.Preferences.Export
+	includeComments := false
+	switch format {
+	case "html":
+		includeComments = preferences.HTMLIncludeComments
+	case "json":
+		includeComments = preferences.JSONIncludeComments
+	}
+	job, err := extensions.app.core.StartExport(ctx, domain.ExportRequest{
+		Selection: selection, Format: format, OutputRoot: outputRoot,
+		Options: domain.ExportOptions{NamingTemplate: preferences.NamingTemplate, MaximumNameBytes: preferences.MaximumNameBytes,
+			CollisionPolicy: preferences.CollisionPolicy, FormatOptions: map[string]any{
+				"content": true, "metadata": true, "comments": includeComments,
+				"htmlResourcePolicy": fallbackValue(request.Parameters["htmlResourcePolicy"], "best-effort"),
+				"htmlBatchArchive":   request.Parameters["htmlBatchArchive"],
+			}},
+	})
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	return tui.OperationResult{Title: "Export queued", Fields: map[string]string{
+		"job": string(job.ID), "format": format, "output": outputRoot, "state": string(job.State),
+	}}, nil
+}
+
+func (extensions *workspaceExtensions) restore(ctx context.Context, archivePath, conflict string) (tui.OperationResult, error) {
+	archivePath = strings.TrimSpace(archivePath)
+	if archivePath == "" {
+		return tui.OperationResult{}, errors.New("backup archive path is required")
+	}
+	if conflict == "" {
+		conflict = string(library.RestoreRefuseConflicts)
+	}
+	if conflict != string(library.RestoreRefuseConflicts) && conflict != string(library.RestoreRenameConflicts) {
+		return tui.OperationResult{}, errors.New("restore conflict policy must be refuse or rename")
+	}
+	report, err := extensions.app.restoreActiveProfile(ctx, archivePath, library.RestoreConflictPolicy(conflict))
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	return tui.OperationResult{Title: "Restore complete", Fields: map[string]string{
+		"archive": archivePath, "files": fmt.Sprint(report.RestoredFiles), "bytes": fmt.Sprint(report.RestoredBytes),
+		"profiles": fmt.Sprint(len(report.Profiles)), "conflict policy": conflict,
+	}}, nil
+}
+
 func (extensions *workspaceExtensions) exportConfiguration(ctx context.Context) (tui.OperationResult, error) {
 	active, err := extensions.active()
 	if err != nil {
@@ -300,6 +705,49 @@ func (extensions *workspaceExtensions) exportConfiguration(ctx context.Context) 
 		"Excel content": fmt.Sprint(preferences.ExcelIncludeContent), "JSON content": fmt.Sprint(preferences.JSONIncludeContent),
 		"JSON comments": fmt.Sprint(preferences.JSONIncludeComments), "HTML comments": fmt.Sprint(preferences.HTMLIncludeComments),
 	}, Message: "Select articles or an album before starting an export. Cobra exposes explicit format/output flags for automation."}, nil
+}
+
+func (extensions *workspaceExtensions) verifyExport(ctx context.Context, ids []string) (tui.OperationResult, error) {
+	active, err := extensions.active()
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	record, err := selectExportRecord(ctx, active, ids)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	if strings.TrimSpace(record.ProvenancePath) == "" {
+		return tui.OperationResult{}, fmt.Errorf("export %s has no ready provenance manifest", record.ID)
+	}
+	report, err := exporter.VerifyProvenanceManifest(ctx, record.OutputRoot, record.ProvenancePath)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	lines := make([]string, 0, len(report.Issues))
+	for _, issue := range report.Issues {
+		article := fallbackValue(string(issue.ArticleID), "batch")
+		line := fmt.Sprintf("%s · %s · article=%s", issue.Kind, fallbackValue(issue.Path, "manifest"), article)
+		if issue.Expected != "" || issue.Actual != "" {
+			line += fmt.Sprintf(" · expected=%s · actual=%s", fallbackValue(issue.Expected, "n/a"), fallbackValue(issue.Actual, "n/a"))
+		}
+		if issue.Message != "" {
+			line += " · " + issue.Message
+		}
+		lines = append(lines, line)
+	}
+	if len(report.AffectedArticleIDs) > 0 {
+		ids := make([]string, len(report.AffectedArticleIDs))
+		for index, id := range report.AffectedArticleIDs {
+			ids[index] = string(id)
+		}
+		lines = append(lines, "affected article IDs · "+strings.Join(ids, ", "))
+	}
+	return tui.OperationResult{Title: "Export verification", Fields: map[string]string{
+		"export": string(record.ID), "valid": fmt.Sprint(report.Valid),
+		"verified outputs": fmt.Sprint(report.VerifiedOutputs), "issues": fmt.Sprint(len(report.Issues)),
+		"affected articles": fmt.Sprint(len(report.AffectedArticleIDs)),
+		"manifest":          filepath.Join(record.OutputRoot, record.ProvenancePath),
+	}, Lines: lines}, nil
 }
 
 func loadWorkspaceArticle(
@@ -389,6 +837,24 @@ func (extensions *workspaceExtensions) diagnostics(ctx context.Context) (tui.Ope
 	}}, nil
 }
 
+func (extensions *workspaceExtensions) diagnosticBundle(ctx context.Context, path string) (tui.OperationResult, error) {
+	report, err := extensions.app.createDiagnosticBundle(ctx, path)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	return tui.OperationResult{
+		Title:   "Diagnostic bundle created",
+		Message: "Private archive created without article bodies or secret-store bytes.",
+		Fields: map[string]string{
+			"path": report.Path, "sha256": report.SHA256, "bytes": fmt.Sprint(report.Bytes),
+		},
+		Lines: []string{
+			"Included: " + strings.Join(report.Included, ", "),
+			"Omitted: " + strings.Join(report.Omitted, ", "),
+		},
+	}, nil
+}
+
 func (extensions *workspaceExtensions) jobDetails(ctx context.Context, ids []string) (tui.OperationResult, error) {
 	if len(ids) == 0 {
 		return tui.OperationResult{}, errors.New("select a job first")
@@ -406,7 +872,15 @@ func (extensions *workspaceExtensions) jobDetails(ctx context.Context, ids []str
 	if err != nil {
 		return tui.OperationResult{}, err
 	}
-	lines := make([]string, 0, len(items))
+	logs, err := active.Jobs.ListLogs(ctx, id, 100)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	lease, err := active.Jobs.Lease(ctx, id)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	lines := make([]string, 0, len(items)+len(logs))
 	for _, item := range items {
 		line := fmt.Sprintf("%s · %s · attempts=%d", item.ID, item.State, item.AttemptCount)
 		if item.ErrorClass != "" || item.ErrorMessage != "" {
@@ -414,9 +888,16 @@ func (extensions *workspaceExtensions) jobDetails(ctx context.Context, ids []str
 		}
 		lines = append(lines, line)
 	}
+	for _, entry := range logs {
+		lines = append(lines, fmt.Sprintf("log · %s · %s · %s", entry.CreatedAt.Local().Format(time.RFC3339), entry.Level, entry.Message))
+	}
+	leaseSummary := "none"
+	if lease.Owner != "" {
+		leaseSummary = fmt.Sprintf("owner=%s expires=%s active=%t", lease.Owner, formatOptionalTime(lease.ExpiresAt), lease.Active)
+	}
 	return tui.OperationResult{Title: "Job " + string(job.ID), Fields: map[string]string{
 		"kind": job.Kind, "state": string(job.State), "updated": job.UpdatedAt.Local().Format(time.RFC3339),
-		"items": fmt.Sprint(len(items)), "execution lease": "stored by the persistent job engine; controls reject invalid ownership/state transitions",
+		"items": fmt.Sprint(len(items)), "logs": fmt.Sprint(len(logs)), "execution lease": leaseSummary,
 	}, Lines: lines}, nil
 }
 
@@ -429,7 +910,32 @@ func (extensions *workspaceExtensions) jobOperation(
 	if len(ids) == 0 {
 		return tui.OperationResult{}, errors.New("select a job first")
 	}
-	job, err := operation(ctx, domain.JobID(ids[0]))
+	active, err := extensions.active()
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	current, err := active.Jobs.Get(ctx, domain.JobID(ids[0]))
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	lease, err := active.Jobs.Lease(ctx, current.ID)
+	if err != nil {
+		return tui.OperationResult{}, err
+	}
+	if lease.Active {
+		return tui.OperationResult{}, fmt.Errorf("job %s is owned by %s until %s; control is unavailable while the execution lease is active",
+			current.ID, lease.Owner, lease.ExpiresAt.Local().Format(time.RFC3339))
+	}
+	var job domain.Job
+	if operation == nil {
+		if current.Kind == "export" {
+			job, err = active.Jobs.RetryExport(ctx, current.ID)
+		} else {
+			job, err = active.Jobs.Retry(ctx, current.ID)
+		}
+	} else {
+		job, err = operation(ctx, current.ID)
+	}
 	if err != nil {
 		return tui.OperationResult{}, err
 	}
@@ -455,6 +961,11 @@ func (extensions *workspaceExtensions) exportManifest(ctx context.Context, ids [
 	}
 	return tui.OperationResult{Title: "Export " + string(record.ID), Fields: map[string]string{
 		"format": record.Format, "state": record.State, "output root": record.OutputRoot, "files": fmt.Sprint(len(files)),
+		"provenance state":      fallbackValue(record.ProvenanceState, "pending"),
+		"provenance path":       fallbackValue(record.ProvenancePath, "not written"),
+		"provenance sha256":     fallbackValue(record.ProvenanceSHA256, "not available"),
+		"provenance error":      fallbackValue(record.ProvenanceError, "none"),
+		"provenance generation": fmt.Sprint(record.ProvenanceGeneration),
 	}, Lines: lines}, nil
 }
 
@@ -477,19 +988,10 @@ func (extensions *workspaceExtensions) openExport(ctx context.Context, ids []str
 }
 
 func selectExportRecord(ctx context.Context, active *ProfileRuntime, ids []string) (library.ExportRecord, error) {
-	if len(ids) > 0 {
-		if record, err := active.Library.GetExport(ctx, domain.ExportID(ids[0])); err == nil {
-			return record, nil
-		}
+	if len(ids) == 0 || strings.TrimSpace(ids[0]) == "" {
+		return library.ExportRecord{}, errors.New("select an export record first")
 	}
-	page, err := active.Library.QueryExports(ctx, 0, 1)
-	if err != nil {
-		return library.ExportRecord{}, err
-	}
-	if len(page.Items) == 0 {
-		return library.ExportRecord{}, sql.ErrNoRows
-	}
-	return active.Library.GetExport(ctx, page.Items[0])
+	return active.Library.GetExport(ctx, domain.ExportID(ids[0]))
 }
 
 func (extensions *workspaceExtensions) backup(ctx context.Context) (tui.OperationResult, error) {
@@ -612,15 +1114,35 @@ func requireArticleIDs(ids []string) ([]domain.ArticleID, error) {
 }
 
 func writePrivateTextFile(path, value string) error {
-	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, []byte(value), 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create local preview directory: %w", err)
+	}
+	temporaryFile, err := createPrivateTemp(filepath.Dir(path), ".preview-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create local preview: %w", err)
+	}
+	temporary := temporaryFile.Name()
+	committed := false
+	defer func() {
+		_ = temporaryFile.Close()
+		if !committed {
+			_ = os.Remove(temporary)
+		}
+	}()
+	if _, err := temporaryFile.WriteString(value); err != nil {
 		return fmt.Errorf("write local preview: %w", err)
 	}
+	if err := temporaryFile.Sync(); err != nil {
+		return fmt.Errorf("sync local preview: %w", err)
+	}
+	if err := temporaryFile.Close(); err != nil {
+		return fmt.Errorf("close local preview: %w", err)
+	}
 	if err := os.Rename(temporary, path); err != nil {
-		_ = os.Remove(temporary)
 		return fmt.Errorf("commit local preview: %w", err)
 	}
-	return os.Chmod(path, 0o600)
+	committed = true
+	return nil
 }
 
 func displayPreferenceSummary(preferences profiles.DisplayPreferences) string {

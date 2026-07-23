@@ -71,24 +71,69 @@ func ExportHTMLArticle(
 	options HTMLOptions,
 	policy CollisionPolicy,
 ) (HTMLArticleResult, error) {
-	prepared, err := prepareHTMLArticle(input, options)
+	result, staged, err := StageHTMLArticle(ctx, manager, input, options, policy)
 	if err != nil {
 		return HTMLArticleResult{}, err
 	}
-	outputs := make([]OutputFile, 0, len(prepared.files))
+	committed := false
+	defer func() {
+		if !committed {
+			for _, output := range staged {
+				_ = manager.AbortStaged(output)
+			}
+		}
+	}()
+	outputs := make([]OutputFile, 0, len(staged))
+	for _, output := range staged {
+		published, err := manager.CommitStaged(ctx, output)
+		if err != nil {
+			return HTMLArticleResult{}, err
+		}
+		published.ArticleID = input.ArticleID
+		outputs = append(outputs, published)
+	}
+	committed = true
+	result.Outputs = outputs
+	return result, nil
+}
+
+// StageHTMLArticle prepares every file in a private, synced staging path but
+// does not publish any destination. Callers can persist the returned staged
+// descriptors before committing them to make multi-file HTML publication
+// crash-consistent.
+func StageHTMLArticle(
+	ctx context.Context,
+	manager *OutputManager,
+	input HTMLArticleInput,
+	options HTMLOptions,
+	policy CollisionPolicy,
+) (HTMLArticleResult, []StagedOutput, error) {
+	prepared, err := prepareHTMLArticle(input, options)
+	if err != nil {
+		return HTMLArticleResult{}, nil, err
+	}
+	outputs := make([]StagedOutput, 0, len(prepared.files))
+	committed := false
+	defer func() {
+		if !committed {
+			for _, output := range outputs {
+				_ = manager.AbortStaged(output)
+			}
+		}
+	}()
 	for _, file := range prepared.files {
-		output, err := manager.WriteFile(ctx, file.path, policy, func(writer io.Writer) error {
+		output, err := manager.StageFile(ctx, file.path, policy, func(writer io.Writer) error {
 			_, err := writer.Write(file.data)
 			return err
 		})
 		if err != nil {
-			return HTMLArticleResult{}, err
+			return HTMLArticleResult{}, nil, err
 		}
-		output.ArticleID = input.ArticleID
+		output.Output.ArticleID = input.ArticleID
 		outputs = append(outputs, output)
 	}
-	prepared.result.Outputs = outputs
-	return prepared.result, nil
+	committed = true
+	return prepared.result, outputs, nil
 }
 
 func ExportHTMLBatchArchive(
@@ -99,14 +144,47 @@ func ExportHTMLBatchArchive(
 	options HTMLOptions,
 	policy CollisionPolicy,
 ) (HTMLBatchResult, error) {
+	result, staged, err := StageHTMLBatchArchive(ctx, manager, relativePath, inputs, options, policy)
+	if err != nil {
+		return HTMLBatchResult{}, err
+	}
+	output, err := manager.CommitStaged(ctx, staged)
+	if err != nil {
+		_ = manager.AbortStaged(staged)
+		return HTMLBatchResult{}, err
+	}
+	result.Output = output
+	return result, nil
+}
+
+// StageHTMLBatchArchive builds and syncs the deterministic archive without
+// publishing its final destination.
+func StageHTMLBatchArchive(
+	ctx context.Context,
+	manager *OutputManager,
+	relativePath string,
+	inputs []HTMLArticleInput,
+	options HTMLOptions,
+	policy CollisionPolicy,
+) (HTMLBatchResult, StagedOutput, error) {
 	if len(inputs) == 0 {
-		return HTMLBatchResult{}, errors.New("HTML batch requires at least one article")
+		return HTMLBatchResult{}, StagedOutput{}, errors.New("HTML batch requires at least one article")
+	}
+	seenArticleIDs := make(map[domain.ArticleID]struct{}, len(inputs))
+	for index, input := range inputs {
+		if strings.TrimSpace(string(input.ArticleID)) == "" {
+			return HTMLBatchResult{}, StagedOutput{}, fmt.Errorf("HTML batch article %d has no article ID", index)
+		}
+		if _, duplicate := seenArticleIDs[input.ArticleID]; duplicate {
+			return HTMLBatchResult{}, StagedOutput{}, fmt.Errorf("HTML batch contains duplicate article ID %s", input.ArticleID)
+		}
+		seenArticleIDs[input.ArticleID] = struct{}{}
 	}
 	prepared := make([]preparedHTMLArticle, 0, len(inputs))
 	for _, input := range inputs {
 		article, err := prepareHTMLArticle(input, options)
 		if err != nil {
-			return HTMLBatchResult{}, fmt.Errorf("prepare article %s: %w", input.ArticleID, err)
+			return HTMLBatchResult{}, StagedOutput{}, fmt.Errorf("prepare article %s: %w", input.ArticleID, err)
 		}
 		prepared = append(prepared, article)
 	}
@@ -119,14 +197,18 @@ func ExportHTMLBatchArchive(
 
 	archiveBytes, err := buildHTMLArchive(ctx, prepared)
 	if err != nil {
-		return HTMLBatchResult{}, err
+		return HTMLBatchResult{}, StagedOutput{}, err
 	}
-	output, err := manager.WriteFile(ctx, relativePath, policy, func(writer io.Writer) error {
+	staged, err := manager.StageFile(ctx, relativePath, policy, func(writer io.Writer) error {
 		_, err := writer.Write(archiveBytes)
 		return err
 	})
 	if err != nil {
-		return HTMLBatchResult{}, err
+		return HTMLBatchResult{}, StagedOutput{}, err
+	}
+	staged.Output.ArticleIDs = make([]domain.ArticleID, 0, len(prepared))
+	for _, article := range prepared {
+		staged.Output.ArticleIDs = append(staged.Output.ArticleIDs, article.result.ArticleID)
 	}
 	articles := make([]HTMLArticleResult, len(prepared))
 	collector := NewWarningCollector()
@@ -136,7 +218,7 @@ func ExportHTMLBatchArchive(
 			collector.Add(warning.Code, warning.Message, warning.ArticleIDs...)
 		}
 	}
-	return HTMLBatchResult{Output: output, Articles: articles, Warnings: collector.Warnings()}, nil
+	return HTMLBatchResult{Output: staged.Output, Articles: articles, Warnings: collector.Warnings()}, staged, nil
 }
 
 func prepareHTMLArticle(input HTMLArticleInput, options HTMLOptions) (preparedHTMLArticle, error) {

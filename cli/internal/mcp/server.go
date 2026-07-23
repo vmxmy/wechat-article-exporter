@@ -36,6 +36,10 @@ type requestEnvelope struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
+type initializeParams struct {
+	ProtocolVersion string `json:"protocolVersion"`
+}
+
 type responseEnvelope struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
@@ -143,6 +147,11 @@ func (server *Server) handle(ctx context.Context, message []byte) (responseEnvel
 	}
 	switch request.Method {
 	case "initialize":
+		var parameters initializeParams
+		if err := json.Unmarshal(request.Params, &parameters); err != nil || strings.TrimSpace(parameters.ProtocolVersion) == "" {
+			response.Error = &rpcError{Code: -32602, Message: "initialize requires protocolVersion"}
+			break
+		}
 		response.Result = map[string]any{
 			"protocolVersion": protocolVersion,
 			"capabilities":    server.adapter.capabilities(),

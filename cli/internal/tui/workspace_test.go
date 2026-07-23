@@ -3,10 +3,12 @@ package tui
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +62,17 @@ func TestWorkspaceArticleSelectionStartsOneDownloadJobForStableIDs(t *testing.T)
 	if model.modal != modalActions {
 		t.Fatalf("modal = %q", model.modal)
 	}
+	for model.actions[model.modalCursor].Kind != "article_download" {
+		model = updateWorkspace(t, model, keyRune("j"))
+	}
 	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	if command != nil || model.modal != modalConfirm || model.confirm.Phrase != "download-2-articles" ||
+		!strings.Contains(model.confirm.Scope, "2 resolved") {
+		t.Fatalf("download confirmation=%#v command=%v", model.confirm, command)
+	}
+	model.confirm.Input = model.confirm.Phrase
+	next, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = next.(Model)
 	result := runCommand(t, command).(actionResultMsg)
 	model = updateWorkspace(t, model, result)
@@ -145,6 +157,46 @@ func TestWorkspaceCancellationCancelsInFlightCommandWithoutQuitting(t *testing.T
 	model = updateWorkspace(t, model, tea.KeyMsg{Type: tea.KeyCtrlC})
 	if ctx.Err() != context.Canceled || model.busy || model.Quitting() || model.notice != "operation cancelled" {
 		t.Fatalf("ctx=%v busy=%v quitting=%v notice=%q", ctx.Err(), model.busy, model.Quitting(), model.notice)
+	}
+}
+
+func TestWorkspaceLateCancelledCommandResultDoesNotAffectReplacementCommand(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, nil)
+	model.notice = "ready"
+
+	commandA := model.beginCommand(func(context.Context) tea.Msg {
+		return actionResultMsg{notice: "late command A"}
+	})
+	lateA := runCommand(t, commandA)
+	model = updateWorkspace(t, model, tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	commandB := model.beginCommand(func(context.Context) tea.Msg {
+		return actionResultMsg{notice: "command B"}
+	})
+	if commandB == nil || !model.busy {
+		t.Fatalf("replacement command not active: command=%v busy=%v", commandB, model.busy)
+	}
+	replacementGeneration := model.commandGeneration
+
+	model = updateWorkspace(t, model, lateA)
+	if !model.busy || model.commandGeneration != replacementGeneration || model.notice != "operation cancelled" {
+		t.Fatalf("late A affected B: busy=%v generation=%d notice=%q", model.busy, model.commandGeneration, model.notice)
+	}
+}
+
+func TestWorkspaceReplacementCommandCancelsPreviousContext(t *testing.T) {
+	model := loadedWorkspace(t, newFakeWorkspaceApplication(), nil)
+	previous := make(chan context.Context, 1)
+	first := model.beginCommand(func(ctx context.Context) tea.Msg {
+		previous <- ctx
+		return actionResultMsg{}
+	})
+	_ = runCommand(t, first)
+	previousContext := <-previous
+	_ = model.beginCommand(func(context.Context) tea.Msg { return actionResultMsg{} })
+	if previousContext.Err() != context.Canceled {
+		t.Fatalf("previous command context error=%v", previousContext.Err())
 	}
 }
 
@@ -236,18 +288,40 @@ func TestWorkspaceNoColorUnicodeFallbackStateRoundTripAndNonTTYGuard(t *testing.
 	}
 }
 
+func TestWorkspaceStateRestoreUsesConfiguredPageSizeAndClampsExportOffset(t *testing.T) {
+	state, err := ParseWorkspaceStateWithPageSize([]byte(`{"area":"exports","queries":{"accounts":{},"articles":{},"albums":{},"jobs":{},"exports":{"offset":-20}},"selection":{},"columns":{},"cursors":{}}`), 37)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Queries.Exports.Offset != 0 || state.Queries.Exports.Limit != 37 || state.Queries.Jobs.Limit != 37 {
+		t.Fatalf("restored state=%#v", state.Queries)
+	}
+}
+
+func TestExportSummaryOmitsUnsetCompletionTime(t *testing.T) {
+	encoded, err := json.Marshal(ExportSummary{ID: "export-a", CreatedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "completedAt") {
+		t.Fatalf("unfinished export encoded completion time: %s", encoded)
+	}
+}
+
 func TestWorkspaceAreasExposeAllOpenSpecWorkflows(t *testing.T) {
 	app := newFakeWorkspaceApplication()
 	model := loadedWorkspace(t, app, &fakeWorkspaceExtensions{})
 	want := map[Area][]string{
-		AreaAccounts:    {"Synchronize", "Import manifest", "Export manifest", "Delete local data"},
-		AreaArticles:    {"Download selected", "Export selected", "Comments", "Metrics", "Resource completeness"},
-		AreaAlbums:      {"Traverse all forward", "Traverse all reverse", "Batch download", "Export album"},
-		AreaJobs:        {"Show logs and lease", "Pause", "Resume", "Retry", "Route health", "Cancel"},
-		AreaExports:     {"Configure export", "Result manifest", "Open output"},
-		AreaSettings:    {"Credentials", "Proxies", "Preferences"},
-		AreaStorage:     {"Backup", "Restore", "Integrity check", "Garbage collection"},
-		AreaDiagnostics: {"Refresh diagnostics", "Route health"},
+		AreaAccounts: {"Synchronize", "Import manifest", "Export manifest", "Delete local data"},
+		AreaArticles: {"Edit compound filter", "Save current query", "Load saved query", "List saved queries", "Delete saved query",
+			"Download selected", "Export selected", "Comments", "Metrics", "Resource completeness"},
+		AreaAlbums:  {"Traverse all forward", "Traverse all reverse", "Batch download", "Export album"},
+		AreaJobs:    {"Show logs and lease", "Pause", "Resume", "Retry", "Route health", "Cancel"},
+		AreaExports: {"Configure export", "Result manifest", "Verify result", "Open output"},
+		AreaSettings: {"List credentials", "Import credential", "Validate credential", "Remove credential", "List proxies", "Add proxy",
+			"Enable proxy", "Disable proxy", "Test proxy", "Remove proxy", "Show preferences", "Set preference"},
+		AreaStorage:     {"Backup", "Restore", "Integrity check", "Garbage collection plan", "Apply garbage collection"},
+		AreaDiagnostics: {"Refresh diagnostics", "Create diagnostic bundle", "Route health"},
 	}
 	for area, labels := range want {
 		model.state.Area = area
@@ -262,10 +336,456 @@ func TestWorkspaceAreasExposeAllOpenSpecWorkflows(t *testing.T) {
 	}
 }
 
+func TestWorkspacePromptsForAccountImportRestoreAndExportParameters(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	extensions := &fakeWorkspaceExtensions{}
+	model := loadedWorkspace(t, app, extensions)
+
+	model.state.Area = AreaAccounts
+	next, _ := model.chooseAction(actionItem{Kind: string(OperationAccountImport)})
+	model = next.(Model)
+	if model.modal != modalInput || model.inputMode != inputAccountImport {
+		t.Fatalf("account import prompt = modal %q mode %q", model.modal, model.inputMode)
+	}
+	model.input = "/tmp/accounts.json"
+	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message := runCommand(t, command).(actionResultMsg)
+	if message.err != nil || len(extensions.requests) != 1 || extensions.requests[0].Kind != OperationAccountImport ||
+		extensions.requests[0].Parameters["path"] != "/tmp/accounts.json" {
+		t.Fatalf("account import request=%#v err=%v", extensions.requests, message.err)
+	}
+
+	model.state.Area = AreaStorage
+	next, _ = model.chooseAction(actionItem{Kind: string(OperationRestore), Destructive: true})
+	model = next.(Model)
+	model.input = "/tmp/backup.zip"
+	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	if model.modal != modalConfirm || model.confirm.Phrase != "restore-library" ||
+		model.inputParams["path"] != "/tmp/backup.zip" {
+		t.Fatalf("restore confirmation=%#v params=%#v", model.confirm, model.inputParams)
+	}
+	model.confirm.Input = model.confirm.Phrase
+	next, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message = runCommand(t, command).(actionResultMsg)
+	last := extensions.requests[len(extensions.requests)-1]
+	if message.err != nil || last.Kind != OperationRestore || last.Parameters["path"] != "/tmp/backup.zip" {
+		t.Fatalf("restore request=%#v err=%v", last, message.err)
+	}
+
+	model.state.Area = AreaArticles
+	model.state.Selection.Toggle(AreaArticles, "article-a")
+	next, _ = model.chooseAction(actionItem{Kind: "article_export"})
+	model = next.(Model)
+	if model.inputMode != inputExportFormat || model.input != "markdown" {
+		t.Fatalf("export format prompt mode=%q input=%q", model.inputMode, model.input)
+	}
+	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	model.input = "/tmp/exports"
+	next, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message = runCommand(t, command).(actionResultMsg)
+	last = extensions.requests[len(extensions.requests)-1]
+	if message.err != nil || last.Kind != OperationExportStart || last.Parameters["format"] != "markdown" ||
+		last.Parameters["outputRoot"] != "/tmp/exports" || !reflect.DeepEqual(last.IDs, []string{"article-a"}) {
+		t.Fatalf("export request=%#v err=%v", last, message.err)
+	}
+}
+
+func TestWorkspacePromptsForDiagnosticBundleDestination(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	extensions := &fakeWorkspaceExtensions{}
+	model := loadedWorkspace(t, app, extensions)
+	model.state.Area = AreaDiagnostics
+
+	next, _ := model.chooseAction(actionItem{Kind: string(OperationDiagnosticBundle)})
+	model = next.(Model)
+	if model.modal != modalInput || model.inputMode != inputDiagnosticBundle {
+		t.Fatalf("diagnostic bundle prompt = modal %q mode %q", model.modal, model.inputMode)
+	}
+	model.input = "/tmp/diagnostics.zip"
+	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message := runCommand(t, command).(actionResultMsg)
+	last := extensions.requests[len(extensions.requests)-1]
+	if message.err != nil || last.Kind != OperationDiagnosticBundle || last.Parameters["path"] != "/tmp/diagnostics.zip" {
+		t.Fatalf("diagnostic bundle request=%#v err=%v", last, message.err)
+	}
+}
+
+func TestWorkspacePromptsForHTMLPolicyAndOptionalBatchArchive(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	extensions := &fakeWorkspaceExtensions{}
+	model := loadedWorkspace(t, app, extensions)
+	model.state.Area = AreaArticles
+	model.state.Selection.Toggle(AreaArticles, "article-a")
+
+	next, _ := model.chooseAction(actionItem{Kind: "article_export"})
+	model = next.(Model)
+	model.input = "html"
+	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	if model.inputMode != inputExportPolicy || model.input != "best-effort" {
+		t.Fatalf("HTML policy prompt mode=%q input=%q", model.inputMode, model.input)
+	}
+	model.input = "strict"
+	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	if model.inputMode != inputExportArchive {
+		t.Fatalf("HTML archive prompt mode=%q", model.inputMode)
+	}
+	model.input = "articles.zip"
+	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	model.input = "/tmp/html-exports"
+	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message := runCommand(t, command).(actionResultMsg)
+	last := extensions.requests[len(extensions.requests)-1]
+	if message.err != nil || last.Parameters["format"] != "html" || last.Parameters["htmlResourcePolicy"] != "strict" ||
+		last.Parameters["htmlBatchArchive"] != "articles.zip" || last.Parameters["outputRoot"] != "/tmp/html-exports" {
+		t.Fatalf("HTML export request=%#v err=%v", last, message.err)
+	}
+}
+
+func TestWorkspaceSettingsAndStorageActionsCollectMutationParameters(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	extensions := &fakeWorkspaceExtensions{}
+	model := loadedWorkspace(t, app, extensions)
+
+	model.state.Area = AreaSettings
+	next, _ := model.chooseAction(actionItem{Kind: string(OperationCredentialImport)})
+	model = next.(Model)
+	model.input = "/tmp/credential.json"
+	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message := runCommand(t, command).(actionResultMsg)
+	last := extensions.requests[len(extensions.requests)-1]
+	if message.err != nil || last.Kind != OperationCredentialImport || last.Parameters["path"] != "/tmp/credential.json" {
+		t.Fatalf("credential import request=%#v err=%v", last, message.err)
+	}
+
+	next, _ = model.chooseAction(actionItem{Kind: string(OperationProxyAdd)})
+	model = next.(Model)
+	model.input = "public"
+	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	model.input = "https://proxy.example/wrap"
+	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	if !model.inputSecret {
+		t.Fatal("proxy authorization prompt is not marked secret")
+	}
+	model.input = "proxy-secret"
+	view := model.View()
+	if strings.Contains(view, "proxy-secret") {
+		t.Fatalf("secret prompt leaked authorization in view:\n%s", view)
+	}
+	next, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message = runCommand(t, command).(actionResultMsg)
+	last = extensions.requests[len(extensions.requests)-1]
+	if message.err != nil || last.Kind != OperationProxyAdd || last.Parameters["name"] != "public" ||
+		last.Parameters["endpoint"] != "https://proxy.example/wrap" || last.Parameters["authorization"] != "proxy-secret" {
+		t.Fatalf("proxy add request=%#v err=%v", last, message.err)
+	}
+
+	next, _ = model.chooseAction(actionItem{Kind: string(OperationPreferenceSet)})
+	model = next.(Model)
+	model.input = "download.concurrency"
+	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	model.input = "8"
+	next, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message = runCommand(t, command).(actionResultMsg)
+	last = extensions.requests[len(extensions.requests)-1]
+	if message.err != nil || last.Kind != OperationPreferenceSet || last.Parameters["key"] != "download.concurrency" ||
+		last.Parameters["value"] != "8" {
+		t.Fatalf("preference request=%#v err=%v", last, message.err)
+	}
+
+	model.state.Area = AreaStorage
+	next, _ = model.chooseAction(actionItem{Kind: "garbage_apply"})
+	model = next.(Model)
+	model.input = "garbage-collect:1:0:0:0"
+	next, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message = runCommand(t, command).(actionResultMsg)
+	last = extensions.requests[len(extensions.requests)-1]
+	if message.err != nil || last.Kind != OperationGarbageCollect || last.Parameters["mode"] != "apply" ||
+		last.Parameters["confirm"] != "garbage-collect:1:0:0:0" {
+		t.Fatalf("garbage apply request=%#v err=%v", last, message.err)
+	}
+}
+
 func TestWorkspaceQuerySearchPagesAndColumnSelection(t *testing.T) {
 	app := newFakeWorkspaceApplication()
 	model := loadedWorkspace(t, app, nil)
 	model.state.Area = AreaArticles
+	model = updateWorkspace(t, model, keyRune("/"))
+	model.input = "keyword=agent;author=Alice;content=true;read=10..100;sort=published:desc,title:asc"
+	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	model = updateWorkspace(t, model, runCommand(t, command))
+	query := app.articleQueries[len(app.articleQueries)-1]
+	if query.Keyword != "agent" || query.Author != "Alice" || query.HasContent == nil || !*query.HasContent ||
+		query.ReadMin == nil || *query.ReadMin != 10 || query.ReadMax == nil || *query.ReadMax != 100 || len(query.Sorts) != 2 {
+		t.Fatalf("compound query=%#v calls=%#v", model.state.Queries.Articles, app.articleQueries)
+	}
+	model = updateWorkspace(t, model, keyRune("c"))
+	before := append([]string(nil), model.state.Columns[AreaArticles]...)
+	model = updateWorkspace(t, model, tea.KeyMsg{Type: tea.KeySpace})
+	if reflect.DeepEqual(before, model.state.Columns[AreaArticles]) {
+		t.Fatalf("columns did not change: %#v", before)
+	}
+}
+
+func TestWorkspaceSavedArticleQueryAndExportSelectionWorkflows(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	extensions := &fakeWorkspaceExtensions{}
+	model := loadedWorkspace(t, app, extensions)
+	model.state.Area = AreaArticles
+	model.state.Queries.Articles = domain.ArticleQuery{Keyword: "agent", Limit: 20}
+
+	next, _ := model.chooseAction(actionItem{Kind: "article_query_save"})
+	model = next.(Model)
+	model.input = "agents"
+	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	model = updateWorkspace(t, model, runCommand(t, command))
+	if len(app.savedQueries) != 1 || app.savedQueries[0].Query.Keyword != "agent" {
+		t.Fatalf("saved queries=%#v", app.savedQueries)
+	}
+
+	model.state.Queries.Articles = domain.ArticleQuery{Limit: 20}
+	next, _ = model.chooseAction(actionItem{Kind: "article_query_load"})
+	model = next.(Model)
+	model.input = "agents"
+	next, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	next, command = model.Update(runCommand(t, command))
+	model = next.(Model)
+	model = updateWorkspace(t, model, runCommand(t, command))
+	if model.state.Queries.Articles.Keyword != "agent" {
+		t.Fatalf("loaded query=%#v", model.state.Queries.Articles)
+	}
+
+	model.state.Area = AreaExports
+	if model.currentID() != "export-a" {
+		t.Fatalf("current export ID=%q", model.currentID())
+	}
+	model = updateWorkspace(t, model, keyRune("a"))
+	for model.actions[model.modalCursor].Kind != string(OperationExportManifest) {
+		model = updateWorkspace(t, model, keyRune("j"))
+	}
+	next, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message := runCommand(t, command).(actionResultMsg)
+	last := extensions.requests[len(extensions.requests)-1]
+	if message.err != nil || last.Kind != OperationExportManifest || !reflect.DeepEqual(last.IDs, []string{"export-a"}) {
+		t.Fatalf("export request=%#v err=%v", last, message.err)
+	}
+}
+
+func TestWorkspaceAutomaticRefreshPreservesModalInputSelectionAndCursor(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, &fakeWorkspaceExtensions{})
+	model.state.Area = AreaJobs
+	model.state.Cursors[AreaJobs] = 0
+	model.state.Selection.Toggle(AreaJobs, "job-a")
+	model.modal, model.inputMode, model.input = modalInput, inputSearch, "unchanged"
+
+	model.refreshGeneration = 1
+	message := runCommand(t, model.refreshActiveWorkCmd(model.refreshGeneration)).(workspaceRefreshMsg)
+	model = updateWorkspace(t, model, message)
+	if model.modal != modalInput || model.input != "unchanged" || !model.state.Selection.Has(AreaJobs, "job-a") ||
+		model.state.Cursors[AreaJobs] != 0 {
+		t.Fatalf("refresh mutated interaction state: modal=%q input=%q state=%#v", model.modal, model.input, model.state)
+	}
+}
+
+func TestWorkspaceAutomaticRefreshQueriesOnlyCapturedActiveArea(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	extensions := &fakeWorkspaceExtensions{}
+	model := loadedWorkspace(t, app, extensions)
+	app.calls = nil
+	model.state.Area = AreaExports
+	message := runCommand(t, model.refreshActiveWorkCmd(1)).(workspaceRefreshMsg)
+	if message.err != nil || slices.Contains(app.calls, "QueryJobs") {
+		t.Fatalf("exports refresh calls=%#v err=%v", app.calls, message.err)
+	}
+	model.state.Area = AreaJobs
+	app.calls = nil
+	message = runCommand(t, model.refreshActiveWorkCmd(2)).(workspaceRefreshMsg)
+	if message.err != nil || !slices.Contains(app.calls, "QueryJobs") {
+		t.Fatalf("jobs refresh calls=%#v err=%v", app.calls, message.err)
+	}
+}
+
+func TestTerminalJobThroughputUsesStableUpdatedTime(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, nil)
+	model.state.Area = AreaJobs
+	created := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	model.jobs.Items = []domain.Job{{ID: "job-a", Kind: "export", State: domain.JobCompleted,
+		CreatedAt: created, UpdatedAt: created.Add(2 * time.Minute), Counts: map[string]int{string(domain.JobCompleted): 2, "total": 2}}}
+	model.options.Now = func() time.Time { return created.Add(24 * time.Hour) }
+	if view := model.renderJobs(theme(true)); !strings.Contains(view, "1.0/min") {
+		t.Fatalf("terminal throughput view=%s", view)
+	}
+}
+
+func TestWorkspaceAutomaticRefreshRejectsStaleOrChangedQueries(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, &fakeWorkspaceExtensions{})
+	model.state.Area = AreaJobs
+	model.refreshGeneration = 2
+	model.refreshInFlight = true
+	original := model.jobs
+
+	stale := workspaceRefreshMsg{generation: 1, area: AreaJobs, jobsQuery: model.state.Queries.Jobs,
+		jobs: domain.Page[domain.Job]{Items: []domain.Job{{ID: "stale"}}, Total: 1}}
+	model = updateWorkspace(t, model, stale)
+	if !reflect.DeepEqual(model.jobs, original) || !model.refreshInFlight {
+		t.Fatalf("stale refresh mutated model: jobs=%#v inFlight=%v", model.jobs, model.refreshInFlight)
+	}
+
+	oldQuery := model.state.Queries.Jobs
+	model.state.Queries.Jobs.Offset = 20
+	changed := workspaceRefreshMsg{generation: 2, area: AreaJobs, jobsQuery: oldQuery,
+		jobs: domain.Page[domain.Job]{Items: []domain.Job{{ID: "old-page"}}, Total: 1}}
+	model = updateWorkspace(t, model, changed)
+	if !reflect.DeepEqual(model.jobs, original) || model.refreshInFlight {
+		t.Fatalf("changed-query refresh mutated model: jobs=%#v inFlight=%v", model.jobs, model.refreshInFlight)
+	}
+}
+
+func TestWorkspaceManualJobsLoadInvalidatesOlderAutomaticRefresh(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, nil)
+	model.state.Area = AreaJobs
+	model.refreshGeneration = 4
+	model.refreshInFlight = true
+	oldQuery := model.state.Queries.Jobs
+	_ = model.loadAreaCmd(AreaJobs)
+	if model.refreshGeneration != 5 || model.refreshInFlight {
+		t.Fatalf("manual load refresh state generation=%d inFlight=%v", model.refreshGeneration, model.refreshInFlight)
+	}
+	original := model.jobs
+	model = updateWorkspace(t, model, workspaceRefreshMsg{generation: 4, area: AreaJobs, jobsQuery: oldQuery,
+		jobs: domain.Page[domain.Job]{Items: []domain.Job{{ID: "stale"}}, Total: 1}})
+	if !reflect.DeepEqual(model.jobs, original) {
+		t.Fatalf("older automatic refresh replaced manual result: %#v", model.jobs)
+	}
+}
+
+func TestWorkspaceJobConfirmationUsesSnapshottedID(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, nil)
+	model.state.Area = AreaJobs
+	model.jobs.Items = []domain.Job{{ID: "job-original", State: domain.JobRunning}, {ID: "job-new", State: domain.JobRunning}}
+	model.state.Cursors[AreaJobs] = 0
+	model.confirm = model.confirmationFor("job_cancel")
+	model.confirm.Input = model.confirm.Phrase
+	model.modal = modalConfirm
+	model.jobs.Items[0], model.jobs.Items[1] = model.jobs.Items[1], model.jobs.Items[0]
+	next, command := model.executeConfirmedAction()
+	model = next.(Model)
+	model = updateWorkspace(t, model, runCommand(t, command))
+	if !reflect.DeepEqual(app.cancelled, []domain.JobID{"job-original"}) {
+		t.Fatalf("cancelled IDs=%#v", app.cancelled)
+	}
+}
+
+func TestSanitizeTableCellRejectsC0C1AndFormatControls(t *testing.T) {
+	value := sanitizeTableCell("safe\x1b[31m\u009bspoof\u009d\u202ebad")
+	if value != "safe[31mspoofbad" {
+		t.Fatalf("sanitized value=%q", value)
+	}
+}
+
+func TestWorkspaceManualAreaLoadRejectsOutOfOrderQueryResult(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, nil)
+	model.state.Area = AreaArticles
+
+	model.state.Queries.Articles = domain.ArticleQuery{Keyword: "old", Offset: 0, Limit: 20}
+	oldCommand := model.loadAreaCmd(AreaArticles)
+	model.state.Queries.Articles = domain.ArticleQuery{Keyword: "current", Offset: 20, Limit: 20}
+	currentCommand := model.loadAreaCmd(AreaArticles)
+
+	current := runCommand(t, currentCommand).(areaLoadedMsg)
+	current.articles.Items = []domain.Article{{ID: "current-page", Title: "Current page"}}
+	current.articles.Total = 40
+	model = updateWorkspace(t, model, current)
+	if got := model.articles.Items[0].ID; got != "current-page" {
+		t.Fatalf("current result was not applied: %q", got)
+	}
+
+	old := runCommand(t, oldCommand).(areaLoadedMsg)
+	old.articles.Items = []domain.Article{{ID: "old-page", Title: "Old page"}}
+	old.articles.Total = 40
+	model = updateWorkspace(t, model, old)
+	if got := model.articles.Items[0].ID; got != "current-page" {
+		t.Fatalf("out-of-order result replaced current page: %q", got)
+	}
+}
+
+func TestWorkspaceExportAreaNeverUsesExportIDsAsArticleSelection(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	extensions := &fakeWorkspaceExtensions{}
+	model := loadedWorkspace(t, app, extensions)
+	model.state.Area = AreaExports
+	model.state.Selection.Toggle(AreaExports, "export-a")
+	if ids := model.exportSelectionIDs(); len(ids) != 0 {
+		t.Fatalf("export selection IDs=%#v", ids)
+	}
+	if actions := model.actionsForArea(); actions[0].Kind != string(OperationExportConfig) {
+		t.Fatalf("first export action=%#v", actions[0])
+	}
+}
+
+func TestParseArticleQueryInputRejectsUnknownAndMalformedFilters(t *testing.T) {
+	for _, value := range []string{"unknown=value", "read=100..10", "content=maybe", "sort=published:sideways",
+		`{"readMin":100,"readMax":10}`, `{"sorts":[{"field":"not-a-field","direction":"asc"}]}`,
+		`{"sort":"invalid"}`,
+		`{"keyword":"ok"} trailing`} {
+		if _, err := parseArticleQueryInput(value, 20); err == nil {
+			t.Fatalf("parseArticleQueryInput(%q) error=nil", value)
+		}
+	}
+}
+
+func TestParseArticleQueryInputNormalizesDateEndAndLimit(t *testing.T) {
+	query, err := parseArticleQueryInput(`{"publishedTo":"2026-07-22T00:00:00Z","limit":9999}`, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query.Limit != 500 {
+		t.Fatalf("limit=%d", query.Limit)
+	}
+	query, err = parseArticleQueryInput("to=2026-07-22", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 7, 22, 23, 59, 59, 999999999, time.UTC)
+	if !query.PublishedTo.Equal(want) {
+		t.Fatalf("publishedTo=%s want=%s", query.PublishedTo, want)
+	}
+	query, err = parseArticleQueryInput("", 9999)
+	if err != nil || query.Limit != 500 {
+		t.Fatalf("empty query=%#v error=%v", query, err)
+	}
+}
+
+func TestWorkspaceLegacyKeywordInputStillAvailableForAccounts(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, nil)
+	model.state.Area = AreaAccounts
 	model = updateWorkspace(t, model, keyRune("/"))
 	for _, character := range "agent" {
 		model = updateWorkspace(t, model, keyRune(string(character)))
@@ -273,14 +793,24 @@ func TestWorkspaceQuerySearchPagesAndColumnSelection(t *testing.T) {
 	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = next.(Model)
 	model = updateWorkspace(t, model, runCommand(t, command))
-	if model.state.Queries.Articles.Keyword != "agent" || app.articleQueries[len(app.articleQueries)-1].Keyword != "agent" {
-		t.Fatalf("query=%#v calls=%#v", model.state.Queries.Articles, app.articleQueries)
+	if model.state.Queries.Accounts.Keyword != "agent" || app.accountQueries[len(app.accountQueries)-1].Keyword != "agent" {
+		t.Fatalf("query=%#v calls=%#v", model.state.Queries.Accounts, app.accountQueries)
 	}
-	model = updateWorkspace(t, model, keyRune("c"))
-	before := append([]string(nil), model.state.Columns[AreaArticles]...)
-	model = updateWorkspace(t, model, tea.KeyMsg{Type: tea.KeySpace})
-	if reflect.DeepEqual(before, model.state.Columns[AreaArticles]) {
-		t.Fatalf("columns did not change: %#v", before)
+}
+
+func TestWorkspaceAccountDiscoverySavesReturnedAccounts(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, nil)
+	model.state.Area = AreaAccounts
+	model = updateWorkspace(t, model, keyRune("d"))
+	for _, character := range "fixture" {
+		model = updateWorkspace(t, model, keyRune(string(character)))
+	}
+	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message := runCommand(t, command).(actionResultMsg)
+	if message.err != nil || len(app.savedAccounts) != 1 || app.savedAccounts[0].FakeID != "search-a" {
+		t.Fatalf("saved accounts=%#v message=%#v", app.savedAccounts, message)
 	}
 }
 
@@ -330,6 +860,12 @@ type fakeWorkspaceExtensions struct {
 func (extensions *fakeWorkspaceExtensions) Panel(_ context.Context, area Area) (OperationResult, error) {
 	return OperationResult{Title: areaLabel(area), Message: "fixture panel"}, nil
 }
+func (*fakeWorkspaceExtensions) QueryExports(_ context.Context, offset, limit int) (domain.Page[ExportSummary], error) {
+	return domain.Page[ExportSummary]{Items: []ExportSummary{{
+		ID: "export-a", Format: "markdown", State: "completed", OutputRoot: "/tmp/export-a",
+		ProvenanceState: "ready", ProvenancePath: "export-a-manifest.json", ProvenanceGeneration: 1,
+	}}, Total: 1, Offset: offset, Limit: limit}, nil
+}
 func (extensions *fakeWorkspaceExtensions) PreviewArticle(context.Context, domain.ArticleID) (PreviewDocument, error) {
 	return extensions.preview, nil
 }
@@ -353,7 +889,10 @@ type fakeWorkspaceApplication struct {
 	exports        []domain.ExportRequest
 	syncs          []domain.SynchronizeAccountRequest
 	deleted        [][]domain.AccountID
+	cancelled      []domain.JobID
 	loginSessions  []string
+	savedAccounts  []domain.Account
+	savedQueries   []domain.SavedArticleQuery
 }
 
 func newFakeWorkspaceApplication() *fakeWorkspaceApplication {
@@ -413,7 +952,11 @@ func (*fakeWorkspaceApplication) AuthorInfo(context.Context, string) (wechat.Aut
 func (*fakeWorkspaceApplication) ListArticles(context.Context, wechat.ArticleListRequest) (wechat.ArticlePage, error) {
 	return wechat.ArticlePage{}, nil
 }
-func (*fakeWorkspaceApplication) SaveAccount(_ context.Context, account domain.Account) (domain.Account, error) {
+func (app *fakeWorkspaceApplication) SaveAccount(_ context.Context, account domain.Account) (domain.Account, error) {
+	if account.ID == "" {
+		account.ID = domain.AccountID("saved-" + account.FakeID)
+	}
+	app.savedAccounts = append(app.savedAccounts, account)
 	return account, nil
 }
 func (*fakeWorkspaceApplication) UpdateAccount(_ context.Context, account domain.Account) (domain.Account, error) {
@@ -452,6 +995,23 @@ func (app *fakeWorkspaceApplication) QueryArticles(_ context.Context, query doma
 		{ID: "article-b", Title: "Second article", Author: "Bob"},
 	}, Total: 2, Offset: query.Offset, Limit: query.Limit}, nil
 }
+func (app *fakeWorkspaceApplication) SaveArticleQuery(_ context.Context, name string, query domain.ArticleQuery) (domain.SavedArticleQuery, error) {
+	item := domain.SavedArticleQuery{Name: name, Query: query}
+	app.savedQueries = append(app.savedQueries, item)
+	return item, nil
+}
+func (app *fakeWorkspaceApplication) ListSavedArticleQueries(context.Context) ([]domain.SavedArticleQuery, error) {
+	return append([]domain.SavedArticleQuery(nil), app.savedQueries...), nil
+}
+func (app *fakeWorkspaceApplication) DeleteSavedArticleQuery(_ context.Context, name string) (bool, error) {
+	for index, item := range app.savedQueries {
+		if item.Name == name {
+			app.savedQueries = append(app.savedQueries[:index], app.savedQueries[index+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
+}
 func (app *fakeWorkspaceApplication) QueryAlbums(_ context.Context, query domain.AlbumQuery) (domain.Page[domain.Album], error) {
 	app.record("QueryAlbums")
 	app.albumQueries = append(app.albumQueries, query)
@@ -462,6 +1022,9 @@ func (app *fakeWorkspaceApplication) SynchronizeAccount(_ context.Context, reque
 	app.record("SynchronizeAccount")
 	app.syncs = append(app.syncs, request)
 	return domain.Job{ID: "job-sync", Kind: "account_sync", State: domain.JobQueued}, nil
+}
+func (app *fakeWorkspaceApplication) SynchronizeAlbum(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error) {
+	return domain.Job{}, nil
 }
 func (app *fakeWorkspaceApplication) StartDownload(_ context.Context, request domain.DownloadRequest) (domain.Job, error) {
 	app.record("StartDownload")
@@ -482,9 +1045,10 @@ func (app *fakeWorkspaceApplication) QueryJobs(_ context.Context, query domain.J
 	return domain.Page[domain.Job]{Items: []domain.Job{{ID: "job-a", Kind: "account_sync", State: domain.JobRunning,
 		Counts: map[string]int{"done": 2, "total": 5}}}, Total: 1, Offset: query.Offset, Limit: query.Limit}, nil
 }
-func (app *fakeWorkspaceApplication) CancelJob(context.Context, domain.JobID) (domain.Job, error) {
+func (app *fakeWorkspaceApplication) CancelJob(_ context.Context, id domain.JobID) (domain.Job, error) {
 	app.record("CancelJob")
-	return domain.Job{ID: "job-a", Kind: "account_sync", State: domain.JobCancelled}, nil
+	app.cancelled = append(app.cancelled, id)
+	return domain.Job{ID: id, Kind: "account_sync", State: domain.JobCancelled}, nil
 }
 func (app *fakeWorkspaceApplication) StorageStatus(context.Context) (domain.StorageStatus, error) {
 	app.record("StorageStatus")

@@ -58,8 +58,12 @@ func TestWriteAndVerifyProvenanceDetectsChangedAndMissingOutputs(t *testing.T) {
 	if err := builder.AddSource(SourceArticle{ArticleID: "article-b", SHA256: sha256Hex("source-b")}); err != nil {
 		t.Fatal(err)
 	}
-	builder.AddOutput(first)
-	builder.AddOutput(second)
+	if err := builder.AddOutput(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.AddOutput(second); err != nil {
+		t.Fatal(err)
+	}
 	builder.AddMissingResource(MissingResource{ArticleID: "article-b", Resource: "cover.jpg", Reason: "not downloaded"})
 	builder.Warn("missing_resource", "cover image unavailable", "article-b")
 	manifest, err := builder.Complete(ExportCompleted, time.Date(2026, 7, 22, 1, 0, 2, 0, time.UTC))
@@ -100,17 +104,48 @@ func TestWriteAndVerifyProvenanceDetectsChangedAndMissingOutputs(t *testing.T) {
 	}
 }
 
+func TestProvenanceRejectsOutputArticlesOutsideSelection(t *testing.T) {
+	selection, err := BuildSelectionManifest(context.Background(), nil, domain.ExportRequest{Format: "text",
+		Selection: domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs,
+			ArticleIDs: []domain.ArticleID{"article-a"}}}, time.Now().Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	builder := NewProvenanceBuilder("v1", "export-a", "text", selection, time.Now())
+	if err := builder.AddOutput(OutputFile{ArticleID: "article-x", Path: "x.txt", Size: 1, SHA256: sha256Hex("x"), Status: OutputWritten}); err == nil {
+		t.Fatal("builder accepted an output outside the selection")
+	}
+	manifest := ProvenanceManifest{
+		SchemaVersion: ProvenanceManifestVersion, ApplicationVersion: "v1", ExportID: "export-a", Format: "text",
+		Status: ExportCompleted, Selection: selection,
+		Sources:   []SourceArticle{{ArticleID: "article-a", SHA256: sha256Hex("source")}},
+		Outputs:   []OutputFile{{ArticleIDs: []domain.ArticleID{"article-a", "article-x"}, Path: "x.txt", Size: 1, SHA256: sha256Hex("x"), Status: OutputWritten}},
+		StartedAt: time.Now().Add(-time.Second), CompletedAt: time.Now(),
+	}
+	if err := validateProvenanceManifest(manifest); err == nil {
+		t.Fatal("manifest accepted an output outside the selection")
+	}
+}
+
 func TestVerifyProvenanceRejectsUnsafeManifestOutputPath(t *testing.T) {
 	root := t.TempDir()
+	started := time.Unix(1_700_000_000, 0).UTC()
+	selection, err := BuildSelectionManifest(context.Background(), nil, domain.ExportRequest{Format: "text",
+		Selection: domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs,
+			ArticleIDs: []domain.ArticleID{"article-a"}}}, started.Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
 	manifest := ProvenanceManifest{
 		SchemaVersion:      ProvenanceManifestVersion,
 		ApplicationVersion: "test",
 		ExportID:           "export-unsafe",
 		Format:             "text",
 		Status:             ExportCompleted,
-		Selection: SelectionManifest{SchemaVersion: SelectionManifestVersion,
-			ArticleIDs: []domain.ArticleID{"article-a"}},
-		Outputs: []OutputFile{{ArticleID: "article-a", Path: "../outside.txt", Size: 1, SHA256: sha256Hex("x"), Status: OutputWritten}},
+		Selection:          selection,
+		Sources:            []SourceArticle{{ArticleID: "article-a", SHA256: sha256Hex("source")}},
+		Outputs:            []OutputFile{{ArticleID: "article-a", Path: "../outside.txt", Size: 1, SHA256: sha256Hex("x"), Status: OutputWritten}},
+		StartedAt:          started, CompletedAt: started.Add(time.Second),
 	}
 	data, err := marshalManifest(manifest)
 	if err != nil {
@@ -123,7 +158,85 @@ func TestVerifyProvenanceRejectsUnsafeManifestOutputPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Valid || len(report.Issues) != 1 || report.Issues[0].Kind != VerificationUnsafePath {
+	if report.Valid || len(report.Issues) != 2 || report.Issues[0].Kind != VerificationUnsafePath ||
+		report.Issues[1].Kind != VerificationInvalidManifest ||
+		!reflect.DeepEqual(report.AffectedArticleIDs, []domain.ArticleID{"article-a"}) {
 		t.Fatalf("verification = %#v", report)
+	}
+}
+
+func TestVerifyUnsafeBatchPathReportsEveryAffectedArticle(t *testing.T) {
+	root := t.TempDir()
+	started := time.Unix(1_700_000_000, 0).UTC()
+	selection, err := BuildSelectionManifest(context.Background(), nil, domain.ExportRequest{Format: "html",
+		Selection: domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs,
+			ArticleIDs: []domain.ArticleID{"article-a", "article-b"}}}, started.Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := ProvenanceManifest{
+		SchemaVersion: ProvenanceManifestVersion, ApplicationVersion: "test", ExportID: "export-unsafe-batch", Format: "html",
+		Status: ExportCompleted, Selection: selection,
+		Sources: []SourceArticle{{ArticleID: "article-a", SHA256: sha256Hex("source-a")}, {ArticleID: "article-b", SHA256: sha256Hex("source-b")}},
+		Outputs: []OutputFile{{ArticleIDs: []domain.ArticleID{"article-a", "article-b"}, Path: "../batch.zip",
+			Size: 1, SHA256: sha256Hex("batch"), Status: OutputWritten}},
+		StartedAt: started, CompletedAt: started.Add(time.Second),
+	}
+	data, err := marshalManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := VerifyProvenanceManifest(context.Background(), root, "manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Valid || !reflect.DeepEqual(report.AffectedArticleIDs, []domain.ArticleID{"article-a", "article-b"}) {
+		t.Fatalf("unsafe batch verification=%#v", report)
+	}
+}
+
+func TestVerifyBatchOutputReportsEveryAffectedArticle(t *testing.T) {
+	root := t.TempDir()
+	started := time.Unix(1_700_000_000, 0).UTC()
+	selection, err := BuildSelectionManifest(context.Background(), nil, domain.ExportRequest{Format: "html",
+		Selection: domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs,
+			ArticleIDs: []domain.ArticleID{"article-a", "article-b"}}}, started.Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := ProvenanceManifest{
+		SchemaVersion:      ProvenanceManifestVersion,
+		ApplicationVersion: "test",
+		ExportID:           "export-batch",
+		Format:             "html",
+		Status:             ExportCompleted,
+		Selection:          selection,
+		Sources: []SourceArticle{
+			{ArticleID: "article-a", SHA256: sha256Hex("source-a")},
+			{ArticleID: "article-b", SHA256: sha256Hex("source-b")},
+		},
+		Outputs: []OutputFile{{ArticleIDs: []domain.ArticleID{"article-a", "article-b"}, Path: "batch.zip",
+			Size: 3, SHA256: sha256Hex("zip"), Status: OutputWritten}},
+		StartedAt: started, CompletedAt: started.Add(time.Second),
+	}
+	data, err := marshalManifest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "batch.zip"), []byte("bad"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := VerifyProvenanceManifest(context.Background(), root, "manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Valid || !reflect.DeepEqual(report.AffectedArticleIDs, []domain.ArticleID{"article-a", "article-b"}) {
+		t.Fatalf("batch verification=%#v", report)
 	}
 }

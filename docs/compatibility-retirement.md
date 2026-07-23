@@ -20,4 +20,4 @@
 
 ## 云端关闭证据
 
-项目关闭远程资源时必须保留不含 secret 和用户内容的操作收据：关闭前/后资源清单、删除响应、域名负向检查、时间戳、日志保留策略以及 KV/D1 不再保存用户文章或 Credential 的核验。具体证据记录在最终退役运维报告中，而不是在生产配置中保留 binding 或 secret。
+远程资源已经关闭。关闭前/后资源清单、空存储核验、删除结果、域名与 provider API 负向检查、日志保留边界及无用户文章/Credential 数据证明见 [cloud-retirement-report.md](./operations/cloud-retirement-report.md)。该收据不含 secret，也没有为了“保留证据”而在生产配置中继续保存 binding。

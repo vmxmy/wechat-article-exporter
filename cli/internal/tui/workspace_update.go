@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -20,21 +21,25 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return model, nil
 	case workspaceLoadedMsg:
 		model.loading = false
-		model.finishCommand()
 		if typed.err != nil {
 			model.err = typed.err.Error()
 			return model, nil
 		}
 		model.runtime, model.session, model.storage = typed.runtime, typed.session, typed.storage
-		model.accounts, model.articles, model.albums, model.jobs = typed.accounts, typed.articles, typed.albums, typed.jobs
+		model.accounts, model.articles, model.albums, model.jobs, model.exports = typed.accounts, typed.articles, typed.albums, typed.jobs, typed.exports
+		if typed.warning != "" {
+			model.notice = typed.warning
+		}
 		for area, panel := range typed.panels {
 			model.panels[area] = panel
 		}
 		model.clampCursor()
-		return model, nil
+		return model, model.scheduleRefreshCmd()
 	case areaLoadedMsg:
+		if !model.areaLoadMatches(typed) {
+			return model, nil
+		}
 		model.loading = false
-		model.finishCommand()
 		if typed.err != nil {
 			model.err = typed.err.Error()
 			return model, nil
@@ -48,13 +53,45 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.albums = typed.albums
 		case AreaJobs:
 			model.jobs = typed.jobs
+		case AreaExports:
+			model.exports = typed.exports
 		default:
 			model.panels[typed.area] = typed.panel
 		}
 		model.clampCursor()
 		return model, nil
+	case workspaceRefreshTickMsg:
+		next := model.scheduleRefreshCmd()
+		if model.loading || model.busy || model.refreshInFlight || model.modal == modalConfirm ||
+			model.state.Area != AreaJobs && model.state.Area != AreaExports {
+			return model, next
+		}
+		model.refreshGeneration++
+		model.refreshInFlight = true
+		return model, tea.Batch(next, model.refreshActiveWorkCmd(model.refreshGeneration))
+	case workspaceRefreshMsg:
+		if typed.generation != model.refreshGeneration {
+			return model, nil
+		}
+		model.refreshInFlight = false
+		if typed.err != nil {
+			model.notice = "automatic refresh failed: " + typed.err.Error()
+			return model, nil
+		}
+		if typed.area == AreaJobs && model.state.Area == AreaJobs && model.modal != modalConfirm &&
+			reflect.DeepEqual(typed.jobsQuery, model.state.Queries.Jobs) {
+			model.jobs = typed.jobs
+		}
+		if typed.area == AreaExports && model.state.Area == AreaExports && model.modal != modalConfirm &&
+			typed.exportsQuery == model.state.Queries.Exports {
+			model.exports = typed.exports
+		}
+		model.clampCursor()
+		return model, nil
 	case actionResultMsg:
-		model.finishCommand()
+		if !model.finishCommand(typed.generation) {
+			return model, nil
+		}
 		if typed.err != nil {
 			model.err = typed.err.Error()
 			return model, nil
@@ -70,7 +107,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return model, model.loadAreaCmd(model.state.Area)
 	case loginStartedMsg:
-		model.finishCommand()
+		if !model.finishCommand(typed.generation) {
+			return model, nil
+		}
 		if typed.err != nil {
 			model.err = typed.err.Error()
 			return model, nil
@@ -80,7 +119,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.notice = "scan the QR code in WeChat, then press r to check status"
 		return model, nil
 	case loginPolledMsg:
-		model.finishCommand()
+		if !model.finishCommand(typed.generation) {
+			return model, nil
+		}
 		if typed.err != nil {
 			model.err = typed.err.Error()
 			return model, nil
@@ -99,7 +140,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return model, nil
 	case loginCompletedMsg:
-		model.finishCommand()
+		if !model.finishCommand(typed.generation) {
+			return model, nil
+		}
 		if typed.err != nil {
 			model.err = typed.err.Error()
 			return model, nil
@@ -109,7 +152,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.notice = "WeChat session authenticated"
 		return model, nil
 	case previewLoadedMsg:
-		model.finishCommand()
+		if !model.finishCommand(typed.generation) {
+			return model, nil
+		}
 		if typed.err != nil {
 			model.err = typed.err.Error()
 			return model, nil
@@ -117,6 +162,15 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.preview = typed.preview
 		model.modal = modalPreview
 		return model, nil
+	case articleQueryLoadedMsg:
+		if !model.finishCommand(typed.generation) {
+			return model, nil
+		}
+		model.state.Queries.Articles = typed.query
+		model.state.Queries.Articles.Offset = 0
+		model.notice = "loaded saved article query " + typed.name
+		model.loading = true
+		return model, model.loadAreaCmd(AreaArticles)
 	case tea.KeyMsg:
 		return model.updateKey(typed)
 	}
@@ -127,8 +181,7 @@ func (model Model) updateKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	value := key.String()
 	if keyMatches(value, model.keys.Cancel) {
 		if model.busy && model.cancel != nil {
-			model.cancel()
-			model.finishCommand()
+			model.cancelCommand()
 			model.notice = "operation cancelled"
 			return model, nil
 		}
@@ -181,6 +234,12 @@ func (model Model) updateKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return model, nil
 	}
 	if keyMatches(value, model.keys.Search) {
+		if model.state.Area == AreaArticles {
+			model.inputMode, model.inputLabel = inputArticleQuery, articleQueryPrompt()
+			model.input = formatArticleQueryInput(model.state.Queries.Articles)
+			model.modal = modalInput
+			return model, nil
+		}
 		model.inputMode = inputSearch
 		model.inputLabel = "Local filter"
 		model.input = model.currentKeyword()
@@ -311,6 +370,10 @@ func (model Model) updateModalKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (model *Model) closeModal() {
 	model.modal = modalNone
 	model.input = ""
+	model.inputParams = nil
+	model.exportIDs = nil
+	model.exportArea = ""
+	model.inputSecret = false
 	model.confirm = confirmation{}
 	model.actions = nil
 	model.operation = OperationResult{}
@@ -366,13 +429,26 @@ func (model Model) submitInput() (tea.Model, tea.Cmd) {
 		}
 		return model, model.beginCommand(func(ctx context.Context) tea.Msg {
 			page, err := model.options.Application.SearchAccounts(ctx, domain.AccountQuery{Keyword: value, Limit: 20})
-			operation := OperationResult{Title: "Account search", Message: fmt.Sprintf("%d upstream matches", page.Total)}
-			if err == nil {
-				for _, account := range page.Items {
-					operation.Lines = append(operation.Lines, account.Name+" · "+account.FakeID)
-				}
+			if err != nil {
+				return actionResultMsg{err: err}
 			}
-			return actionResultMsg{operation: operation, err: err}
+			added := 0
+			operation := OperationResult{Title: "Account search", Message: fmt.Sprintf("%d upstream matches; saved returned accounts locally", page.Total)}
+			for _, account := range page.Items {
+				saved, saveErr := model.options.Application.SaveAccount(ctx, account)
+				if saveErr != nil {
+					operation.Lines = append(operation.Lines, "FAILED · "+account.Name+" · "+saveErr.Error())
+					continue
+				}
+				added++
+				operation.Lines = append(operation.Lines, saved.Name+" · "+saved.FakeID+" · "+string(saved.ID))
+			}
+			failed := len(page.Items) - added
+			operation.Fields = map[string]string{"saved": fmt.Sprint(added), "failed": fmt.Sprint(failed)}
+			if failed > 0 {
+				operation.Message = fmt.Sprintf("saved %d of %d returned accounts; failed rows are listed explicitly", added, len(page.Items))
+			}
+			return actionResultMsg{operation: operation}
 		})
 	case inputSingleArticle:
 		model.closeModal()
@@ -384,6 +460,230 @@ func (model Model) submitInput() (tea.Model, tea.Cmd) {
 			job, err := model.options.Application.StartDownload(ctx, domain.DownloadRequest{URLs: []string{value}})
 			return actionResultMsg{job: job, err: err}
 		})
+	case inputAccountImport:
+		model.closeModal()
+		if value == "" {
+			model.err = "account manifest path is required"
+			return model, nil
+		}
+		return model.executeExtension(OperationAccountImport, nil, map[string]string{"path": value})
+	case inputAccountExport:
+		model.closeModal()
+		if value == "" {
+			model.err = "account manifest output path is required"
+			return model, nil
+		}
+		return model.executeExtension(OperationAccountExport, nil, map[string]string{"path": value})
+	case inputRestoreArchive:
+		model.input = value
+		if value == "" {
+			model.err = "backup archive path is required"
+			return model, nil
+		}
+		model.confirm = confirmation{Title: "Restore library backup", Scope: "Replace the active local profile library from " + value,
+			Recoverability: "The archive is staged and verified; create a backup first.", Phrase: "restore-library", Action: string(OperationRestore)}
+		model.inputParams = map[string]string{"path": value, "conflict": "refuse"}
+		model.modal = modalConfirm
+		return model, nil
+	case inputExportFormat:
+		format := strings.ToLower(value)
+		allowed := map[string]struct{}{"html": {}, "markdown": {}, "text": {}, "json": {}, "xlsx": {}, "docx": {}, "pdf": {}}
+		if _, ok := allowed[format]; !ok {
+			model.err = "export format must be html, markdown, text, json, xlsx, docx, or pdf"
+			return model, nil
+		}
+		model.inputParams = map[string]string{"format": format}
+		model.exportIDs = model.exportSelectionIDs()
+		model.exportArea = model.state.Area
+		if format == "html" {
+			model.inputMode = inputExportPolicy
+			model.inputLabel = "HTML resource policy (best-effort or strict)"
+			model.input = "best-effort"
+			model.modal = modalInput
+			return model, nil
+		}
+		model.inputMode = inputExportOutput
+		model.inputLabel = "Export output directory"
+		model.input = ""
+		model.modal = modalInput
+		return model, nil
+	case inputExportPolicy:
+		policy := strings.ToLower(value)
+		if policy != "best-effort" && policy != "strict" {
+			model.err = "HTML resource policy must be best-effort or strict"
+			return model, nil
+		}
+		model.inputParams["htmlResourcePolicy"] = policy
+		model.inputMode = inputExportArchive
+		model.inputLabel = "HTML batch archive file (optional .zip; blank for per-article directories)"
+		model.input = ""
+		return model, nil
+	case inputExportArchive:
+		if value != "" && !strings.HasSuffix(strings.ToLower(value), ".zip") {
+			model.err = "HTML batch archive must end with .zip"
+			return model, nil
+		}
+		model.inputParams["htmlBatchArchive"] = value
+		model.inputMode = inputExportOutput
+		model.inputLabel = "Export output directory"
+		model.input = ""
+		return model, nil
+	case inputExportOutput:
+		if value == "" {
+			model.err = "export output directory is required"
+			return model, nil
+		}
+		parameters := model.inputParams
+		if parameters == nil {
+			parameters = map[string]string{}
+		}
+		parameters["outputRoot"] = value
+		ids := append([]string(nil), model.exportIDs...)
+		area := model.exportArea
+		model.closeModal()
+		return model.executeExtensionForArea(OperationExportStart, area, ids, parameters)
+	case inputArticleQuery:
+		query, err := parseArticleQueryInput(value, model.state.Queries.Articles.Limit)
+		if err != nil {
+			model.err = err.Error()
+			return model, nil
+		}
+		model.state.Queries.Articles = query
+		model.closeModal()
+		model.loading = true
+		return model, model.loadAreaCmd(AreaArticles)
+	case inputSavedQueryName:
+		if value == "" {
+			model.err = "saved query name is required"
+			return model, nil
+		}
+		model.closeModal()
+		return model, model.beginCommand(func(ctx context.Context) tea.Msg {
+			saved, err := model.options.Application.SaveArticleQuery(ctx, value, model.state.Queries.Articles)
+			return actionResultMsg{notice: "saved article query " + saved.Name, err: err}
+		})
+	case inputLoadQueryName:
+		if value == "" {
+			model.err = "saved query name is required"
+			return model, nil
+		}
+		model.closeModal()
+		return model, model.beginCommand(func(ctx context.Context) tea.Msg {
+			items, err := model.options.Application.ListSavedArticleQueries(ctx)
+			if err != nil {
+				return actionResultMsg{err: err}
+			}
+			for _, item := range items {
+				if item.Name == value {
+					return articleQueryLoadedMsg{name: item.Name, query: item.Query}
+				}
+			}
+			return actionResultMsg{err: fmt.Errorf("saved article query %q was not found", value)}
+		})
+	case inputDeleteQueryName:
+		if value == "" {
+			model.err = "saved query name is required"
+			return model, nil
+		}
+		model.closeModal()
+		return model, model.beginCommand(func(ctx context.Context) tea.Msg {
+			removed, err := model.options.Application.DeleteSavedArticleQuery(ctx, value)
+			if err != nil {
+				return actionResultMsg{err: err}
+			}
+			if !removed {
+				return actionResultMsg{err: fmt.Errorf("saved article query %q was not found", value)}
+			}
+			return actionResultMsg{notice: "deleted saved article query " + value}
+		})
+	case inputGCPreview:
+		model.closeModal()
+		return model.executeExtension(OperationGarbageCollect, nil, map[string]string{"mode": "plan"})
+	case inputGCApply:
+		model.closeModal()
+		if value == "" {
+			model.err = "garbage collection confirmation is required"
+			return model, nil
+		}
+		return model.executeExtension(OperationGarbageCollect, nil, map[string]string{"mode": "apply", "confirm": value})
+	case inputCredentialFile:
+		model.closeModal()
+		if value == "" {
+			model.err = "credential JSON path is required"
+			return model, nil
+		}
+		return model.executeExtension(OperationCredentialImport, nil, map[string]string{"path": value})
+	case inputCredentialID:
+		operation := OperationKind(model.inputParams["operation"])
+		model.closeModal()
+		if value == "" {
+			model.err = "credential ID is required"
+			return model, nil
+		}
+		if operation == OperationCredentialRemove {
+			model.inputParams = map[string]string{"id": value}
+			model.confirm = confirmation{Title: "Remove credential", Scope: "Credential metadata and secret bytes for " + value,
+				Recoverability: "Import the credential again to restore access.", Phrase: "remove-credential", Action: string(operation)}
+			model.modal = modalConfirm
+			return model, nil
+		}
+		return model.executeExtension(operation, nil, map[string]string{"id": value})
+	case inputProxyName:
+		if value == "" {
+			model.err = "proxy name is required"
+			return model, nil
+		}
+		model.inputParams = map[string]string{"name": value}
+		model.inputMode, model.inputLabel, model.input = inputProxyEndpoint, "Proxy endpoint URL", ""
+		return model, nil
+	case inputProxyEndpoint:
+		if value == "" {
+			model.err = "proxy endpoint is required"
+			return model, nil
+		}
+		model.inputParams["endpoint"] = value
+		model.inputMode, model.inputLabel, model.input, model.inputSecret = inputProxyAuth, "Proxy authorization (optional, hidden)", "", true
+		return model, nil
+	case inputProxyAuth:
+		parameters := model.inputParams
+		parameters["authorization"] = value
+		model.closeModal()
+		return model.executeExtension(OperationProxyAdd, nil, parameters)
+	case inputProxyTarget:
+		operation := OperationKind(model.inputParams["operation"])
+		model.closeModal()
+		if value == "" {
+			model.err = "proxy name or ID is required"
+			return model, nil
+		}
+		if operation == OperationProxyRemove {
+			model.inputParams = map[string]string{"id": value}
+			model.confirm = confirmation{Title: "Remove proxy route", Scope: "Route metadata and authorization for " + value,
+				Recoverability: "Add the proxy route again to restore it.", Phrase: "remove-proxy", Action: string(operation)}
+			model.modal = modalConfirm
+			return model, nil
+		}
+		return model.executeExtension(operation, nil, map[string]string{"id": value})
+	case inputPreferenceKey:
+		if value == "" {
+			model.err = "preference key is required"
+			return model, nil
+		}
+		model.inputParams = map[string]string{"key": value}
+		model.inputMode, model.inputLabel, model.input = inputPreferenceValue, "Preference value", ""
+		return model, nil
+	case inputPreferenceValue:
+		parameters := model.inputParams
+		parameters["value"] = value
+		model.closeModal()
+		return model.executeExtension(OperationPreferenceSet, nil, parameters)
+	case inputDiagnosticBundle:
+		model.closeModal()
+		if value == "" {
+			model.err = "diagnostic bundle output path is required"
+			return model, nil
+		}
+		return model.executeExtension(OperationDiagnosticBundle, nil, map[string]string{"path": value})
 	}
 	return model, nil
 }
@@ -398,6 +698,8 @@ func (model Model) movePage(direction int) bool {
 		return moveOffset(&model.state.Queries.Albums.Offset, model.state.Queries.Albums.Limit, model.albums.Total, direction)
 	case AreaJobs:
 		return moveOffset(&model.state.Queries.Jobs.Offset, model.state.Queries.Jobs.Limit, model.jobs.Total, direction)
+	case AreaExports:
+		return moveOffset(&model.state.Queries.Exports.Offset, model.state.Queries.Exports.Limit, model.exports.Total, direction)
 	}
 	return false
 }
@@ -448,8 +750,9 @@ func (model Model) startArticlePreview() (tea.Model, tea.Cmd) {
 }
 
 type previewLoadedMsg struct {
-	preview PreviewDocument
-	err     error
+	generation uint64
+	preview    PreviewDocument
+	err        error
 }
 
 func (model Model) startHTMLPreview() (tea.Model, tea.Cmd) {
@@ -478,6 +781,85 @@ func (model Model) startLogin() (tea.Model, tea.Cmd) {
 }
 
 func (model Model) chooseAction(action actionItem) (tea.Model, tea.Cmd) {
+	switch action.Kind {
+	case string(OperationAccountImport):
+		model.inputMode, model.inputLabel, model.input = inputAccountImport, "Account manifest path", ""
+		model.modal = modalInput
+		return model, nil
+	case string(OperationAccountExport):
+		model.inputMode, model.inputLabel, model.input = inputAccountExport, "Account manifest output path", ""
+		model.modal = modalInput
+		return model, nil
+	case string(OperationRestore):
+		model.inputMode, model.inputLabel, model.input = inputRestoreArchive, "Backup archive path", ""
+		model.modal = modalInput
+		return model, nil
+	case "article_export", "album_export":
+		model.inputMode, model.inputLabel, model.input = inputExportFormat, "Export format", "markdown"
+		model.modal = modalInput
+		return model, nil
+	case "article_filter":
+		model.inputMode, model.inputLabel = inputArticleQuery, articleQueryPrompt()
+		model.input = formatArticleQueryInput(model.state.Queries.Articles)
+		model.modal = modalInput
+		return model, nil
+	case "article_query_save":
+		model.inputMode, model.inputLabel, model.input = inputSavedQueryName, "Saved article query name", ""
+		model.modal = modalInput
+		return model, nil
+	case "article_query_load":
+		model.inputMode, model.inputLabel, model.input = inputLoadQueryName, "Saved article query name to load", ""
+		model.modal = modalInput
+		return model, nil
+	case "article_query_list":
+		model.closeModal()
+		return model, model.beginCommand(func(ctx context.Context) tea.Msg {
+			items, err := model.options.Application.ListSavedArticleQueries(ctx)
+			operation := OperationResult{Title: "Saved article queries", Message: fmt.Sprintf("%d saved queries", len(items))}
+			for _, item := range items {
+				operation.Lines = append(operation.Lines, item.Name+" · "+formatArticleQueryInput(item.Query))
+			}
+			return actionResultMsg{operation: operation, err: err}
+		})
+	case "article_query_delete":
+		model.inputMode, model.inputLabel, model.input = inputDeleteQueryName, "Saved article query name to delete", ""
+		model.modal = modalInput
+		return model, nil
+	case "garbage_plan":
+		model.inputMode, model.inputLabel, model.input = inputGCPreview, "Press Enter to generate a fresh garbage-collection plan", ""
+		model.modal = modalInput
+		return model, nil
+	case "garbage_apply":
+		model.inputMode, model.inputLabel, model.input = inputGCApply, "Paste exact confirmation from the latest plan", ""
+		model.modal = modalInput
+		return model, nil
+	case string(OperationCredentialImport):
+		model.inputMode, model.inputLabel, model.input = inputCredentialFile, "Credential JSON path", ""
+		model.modal = modalInput
+		return model, nil
+	case string(OperationCredentialCheck), string(OperationCredentialRemove):
+		model.inputParams = map[string]string{"operation": action.Kind}
+		model.inputMode, model.inputLabel, model.input = inputCredentialID, "Credential ID", ""
+		model.modal = modalInput
+		return model, nil
+	case string(OperationProxyAdd):
+		model.inputMode, model.inputLabel, model.input = inputProxyName, "Proxy name", ""
+		model.modal = modalInput
+		return model, nil
+	case string(OperationProxyEnable), string(OperationProxyDisable), string(OperationProxyTest), string(OperationProxyRemove):
+		model.inputParams = map[string]string{"operation": action.Kind}
+		model.inputMode, model.inputLabel, model.input = inputProxyTarget, "Proxy name or ID", ""
+		model.modal = modalInput
+		return model, nil
+	case string(OperationPreferenceSet):
+		model.inputMode, model.inputLabel, model.input = inputPreferenceKey, "Preference key", ""
+		model.modal = modalInput
+		return model, nil
+	case string(OperationDiagnosticBundle):
+		model.inputMode, model.inputLabel, model.input = inputDiagnosticBundle, "Diagnostic bundle output path", ""
+		model.modal = modalInput
+		return model, nil
+	}
 	if action.Destructive {
 		model.confirm = model.confirmationFor(action.Kind)
 		model.modal = modalConfirm
@@ -489,12 +871,27 @@ func (model Model) chooseAction(action actionItem) (tea.Model, tea.Cmd) {
 
 func (model Model) executeConfirmedAction() (tea.Model, tea.Cmd) {
 	action := model.confirm.Action
+	confirmedIDs := append([]string(nil), model.confirm.IDs...)
+	parameters := model.inputParams
 	model.closeModal()
-	return model.executeAction(action)
+	if action == string(OperationRestore) {
+		return model.executeExtension(OperationRestore, nil, parameters)
+	}
+	if action == string(OperationCredentialRemove) || action == string(OperationProxyRemove) {
+		return model.executeExtension(OperationKind(action), nil, parameters)
+	}
+	return model.executeActionWithIDs(action, confirmedIDs)
 }
 
 func (model Model) executeAction(action string) (tea.Model, tea.Cmd) {
-	ids := model.selectedIDs()
+	return model.executeActionWithIDs(action, nil)
+}
+
+func (model Model) executeActionWithIDs(action string, confirmedIDs []string) (tea.Model, tea.Cmd) {
+	ids := confirmedIDs
+	if ids == nil {
+		ids = model.selectedIDs()
+	}
 	switch action {
 	case "login":
 		return model.startLogin()
@@ -526,14 +923,27 @@ func (model Model) executeAction(action string) (tea.Model, tea.Cmd) {
 		for index, id := range ids {
 			articleIDs[index] = domain.ArticleID(id)
 		}
+		if len(articleIDs) == 0 {
+			model.err = "select one or more articles before starting a download"
+			return model, nil
+		}
+		model.confirm = confirmation{
+			Title: "Start article download", Scope: fmt.Sprintf("%d resolved stable article IDs", len(articleIDs)),
+			Recoverability: "The persistent job can be paused, resumed, cancelled, and retried.",
+			Phrase:         fmt.Sprintf("download-%d-articles", len(articleIDs)), Action: "article_download_confirmed",
+		}
+		model.modal = modalConfirm
+		return model, nil
+	case "article_download_confirmed":
+		articleIDs := make([]domain.ArticleID, len(ids))
+		for index, id := range ids {
+			articleIDs[index] = domain.ArticleID(id)
+		}
 		return model, model.beginCommand(func(ctx context.Context) tea.Msg {
 			job, err := model.options.Application.StartDownload(ctx, domain.DownloadRequest{ArticleIDs: articleIDs})
 			return actionResultMsg{job: job, err: err}
 		})
-	case "article_export", "album_export", "export_start":
-		if action == "export_start" && len(ids) == 0 {
-			return model.executeExtension(OperationExportConfig, nil, nil)
-		}
+	case "article_export", "album_export":
 		selection := domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs}
 		for _, id := range ids {
 			selection.ArticleIDs = append(selection.ArticleIDs, domain.ArticleID(id))
@@ -545,6 +955,9 @@ func (model Model) executeAction(action string) (tea.Model, tea.Cmd) {
 			job, err := model.options.Application.StartExport(ctx, domain.ExportRequest{Selection: selection, Format: "markdown"})
 			return actionResultMsg{job: job, err: err}
 		})
+	case "export_start":
+		model.err = "start exports from Articles or Albums so the selection uses stable article or album IDs"
+		return model, nil
 	case "album_download":
 		return model.executeExtension(OperationAlbumTraverse, ids, map[string]string{"mode": "download", "order": "forward"})
 	case "album_reverse":
@@ -572,11 +985,15 @@ func (model Model) executeAction(action string) (tea.Model, tea.Cmd) {
 }
 
 func (model Model) executeExtension(kind OperationKind, ids []string, parameters map[string]string) (tea.Model, tea.Cmd) {
+	return model.executeExtensionForArea(kind, model.state.Area, ids, parameters)
+}
+
+func (model Model) executeExtensionForArea(kind OperationKind, area Area, ids []string, parameters map[string]string) (tea.Model, tea.Cmd) {
 	if model.options.Extensions == nil {
 		model.err = "this operation is unavailable in the current application seam"
 		return model, nil
 	}
-	request := OperationRequest{Kind: kind, Area: model.state.Area, IDs: ids, Parameters: parameters}
+	request := OperationRequest{Kind: kind, Area: area, IDs: append([]string(nil), ids...), Parameters: parameters}
 	return model, model.beginCommand(func(ctx context.Context) tea.Msg {
 		result, err := model.options.Extensions.Operate(ctx, request)
 		return actionResultMsg{operation: result, err: err}
@@ -599,10 +1016,11 @@ func (model Model) confirmationFor(action string) confirmation {
 		return confirmation{Title: "Delete local account data",
 			Scope:          fmt.Sprintf("%d accounts, approximately %d articles, and eligible unshared objects", len(ids), articleCount),
 			Recoverability: "Create a backup first. Shared objects remain; unreferenced objects become garbage-collection eligible.",
-			Phrase:         phrase, Action: action}
+			Phrase:         phrase, Action: action, IDs: append([]string(nil), ids...)}
 	case "job_cancel":
 		return confirmation{Title: "Cancel persistent job", Scope: fmt.Sprintf("%d selected jobs", len(ids)),
-			Recoverability: "Committed work is retained and safe checkpoints remain available.", Phrase: "cancel-job", Action: action}
+			Recoverability: "Committed work is retained and safe checkpoints remain available.", Phrase: "cancel-job", Action: action,
+			IDs: append([]string(nil), ids...)}
 	case string(OperationRestore):
 		return confirmation{Title: "Restore library backup", Scope: "Replace the active local profile library",
 			Recoverability: "A pre-restore backup is strongly recommended.", Phrase: "restore-library", Action: string(OperationRestore)}
@@ -631,6 +1049,9 @@ func (model Model) actionsForArea() []actionItem {
 		}
 	case AreaArticles:
 		return []actionItem{
+			{Label: "Edit compound filter", Description: "key=value pairs for all article query fields", Kind: "article_filter"},
+			{Label: "Save current query", Kind: "article_query_save"}, {Label: "Load saved query", Kind: "article_query_load"},
+			{Label: "List saved queries", Kind: "article_query_list"}, {Label: "Delete saved query", Kind: "article_query_delete"},
 			{Label: "Download selected", Description: "Creates one persistent job for stable article IDs", Kind: "article_download"},
 			{Label: "Export selected", Kind: "article_export"},
 			{Label: "Comments", Kind: string(OperationArticleComments)},
@@ -653,25 +1074,42 @@ func (model Model) actionsForArea() []actionItem {
 		}
 	case AreaExports:
 		return []actionItem{
-			{Label: "Configure export", Kind: string(OperationExportConfig)}, {Label: "Result manifest", Kind: string(OperationExportManifest)},
+			{Label: "Configure export", Kind: string(OperationExportConfig)},
+			{Label: "Result manifest", Kind: string(OperationExportManifest)},
+			{Label: "Verify result", Kind: string(OperationExportVerify)},
 			{Label: "Open output", Kind: string(OperationOpenExport)},
 		}
 	case AreaSettings:
 		return []actionItem{
-			{Label: "Credentials", Kind: string(OperationCredentials)}, {Label: "Proxies", Kind: string(OperationProxies)},
-			{Label: "Preferences", Kind: string(OperationPreferences)},
+			{Label: "List credentials", Kind: string(OperationCredentials)}, {Label: "Import credential", Kind: string(OperationCredentialImport)},
+			{Label: "Validate credential", Kind: string(OperationCredentialCheck)}, {Label: "Remove credential", Kind: string(OperationCredentialRemove)},
+			{Label: "List proxies", Kind: string(OperationProxies)}, {Label: "Add proxy", Kind: string(OperationProxyAdd)},
+			{Label: "Enable proxy", Kind: string(OperationProxyEnable)}, {Label: "Disable proxy", Kind: string(OperationProxyDisable)},
+			{Label: "Test proxy", Kind: string(OperationProxyTest)}, {Label: "Remove proxy", Kind: string(OperationProxyRemove)},
+			{Label: "Show preferences", Kind: string(OperationPreferences)}, {Label: "Set preference", Kind: string(OperationPreferenceSet)},
 		}
 	case AreaStorage:
 		return []actionItem{
 			{Label: "Backup", Kind: string(OperationBackup)},
 			{Label: "Restore", Kind: string(OperationRestore), Destructive: true},
 			{Label: "Integrity check", Kind: string(OperationIntegrity)},
-			{Label: "Garbage collection", Kind: string(OperationGarbageCollect), Destructive: true},
+			{Label: "Garbage collection plan", Kind: "garbage_plan"},
+			{Label: "Apply garbage collection", Kind: "garbage_apply"},
 		}
 	case AreaDiagnostics:
-		return []actionItem{{Label: "Refresh diagnostics", Kind: string(OperationDiagnostics)}, {Label: "Route health", Kind: string(OperationRouteHealth)}}
+		return []actionItem{
+			{Label: "Refresh diagnostics", Kind: string(OperationDiagnostics)},
+			{Label: "Create diagnostic bundle", Kind: string(OperationDiagnosticBundle)},
+			{Label: "Route health", Kind: string(OperationRouteHealth)},
+		}
 	}
 	return nil
+}
+
+type articleQueryLoadedMsg struct {
+	generation uint64
+	name       string
+	query      domain.ArticleQuery
 }
 
 func availableColumns(area Area) []string {
@@ -735,6 +1173,17 @@ func (model Model) currentDetail() OperationResult {
 				"state": string(job.State), "profile": string(job.Profile), "updated": formatTime(job.UpdatedAt)},
 				Message: "Persisted progress remains observable even when another process holds the execution lease."}
 		}
+	case AreaExports:
+		if index < len(model.exports.Items) {
+			export := model.exports.Items[index]
+			return OperationResult{Title: string(export.ID), Fields: map[string]string{
+				"format": export.Format, "state": export.State, "output root": export.OutputRoot,
+				"provenance state":      fallback(export.ProvenanceState, "pending"),
+				"provenance path":       fallback(export.ProvenancePath, "not written"),
+				"provenance generation": fmt.Sprint(export.ProvenanceGeneration),
+				"created":               formatTime(export.CreatedAt), "completed": formatOptionalTimePointer(export.CompletedAt),
+			}, Message: "Manifest, verification, and output-opening actions target this stable export ID."}
+		}
 	}
 	return OperationResult{}
 }
@@ -744,4 +1193,11 @@ func formatTime(value time.Time) string {
 		return "—"
 	}
 	return value.Local().Format("2006-01-02 15:04")
+}
+
+func formatOptionalTimePointer(value *time.Time) string {
+	if value == nil {
+		return "—"
+	}
+	return formatTime(*value)
 }

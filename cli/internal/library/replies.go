@@ -22,6 +22,10 @@ type ReplyPageResult struct {
 	Received   int
 	Stored     int
 	Duplicates int
+	Fetched    int
+	Total      int
+	Complete   bool
+	MaxReplyID int64
 }
 
 type ReplyThread struct {
@@ -79,7 +83,14 @@ func (database *Database) CommitReplyPage(ctx context.Context, articleID domain.
 			return err
 		}
 		complete := total == 0 || fetched >= total
-		return upsertReplyCheckpoint(ctx, transaction, articleID, contentID, page.MaxReplyID, total, complete, "", fetchedAt)
+		result.Fetched = fetched
+		result.Total = total
+		result.Complete = complete
+		if err := upsertReplyCheckpoint(ctx, transaction, articleID, contentID, page.MaxReplyID, total, complete, "", fetchedAt); err != nil {
+			return err
+		}
+		return transaction.QueryRowContext(ctx, `SELECT max_reply_id FROM reply_checkpoints
+WHERE article_id=? AND content_id=?`, articleID, contentID).Scan(&result.MaxReplyID)
 	})
 	if err != nil {
 		return ReplyPageResult{}, fmt.Errorf("commit reply page: %w", err)

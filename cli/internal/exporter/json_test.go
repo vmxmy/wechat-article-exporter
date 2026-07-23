@@ -51,14 +51,11 @@ func TestMarshalJSONExportMetadataOnlyOmitsOptionalSections(t *testing.T) {
 }
 
 func TestMarshalJSONExportIncludesOptionalContentMetricsCommentsRepliesAlbumsAndProvenance(t *testing.T) {
-	selection := SelectionManifest{
-		SchemaVersion: SelectionManifestVersion,
-		ID:            "selection-a",
-		DigestSHA256:  sha256Hex("selection"),
-		Kind:          domain.ExportSelectionExplicitIDs,
-		ArticleIDs:    []domain.ArticleID{"article-json"},
-		Format:        "json",
-		CreatedAt:     time.Date(2026, 7, 22, 0, 0, 0, 0, time.UTC),
+	selection, err := BuildSelectionManifest(context.Background(), nil, domain.ExportRequest{Format: "json",
+		Selection: domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs,
+			ArticleIDs: []domain.ArticleID{"article-json"}}}, time.Date(2026, 7, 22, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
 	}
 	provenance := ProvenanceManifest{
 		SchemaVersion: ProvenanceManifestVersion, ApplicationVersion: "v1", ExportID: "export-json", Format: "json",

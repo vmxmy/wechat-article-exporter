@@ -141,7 +141,7 @@ func TestPersistentCommentsJobStoresPartialResultInCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	final, err := service.Run(context.Background(), job.ID)
-	if err != nil || final.State != domain.JobFailed {
+	if err != nil || final.State != domain.JobPartial {
 		t.Fatalf("final=%#v err=%v", final, err)
 	}
 	if len(commentStore.comments) != 2 || commentStore.threads["comment-1"].Complete != true ||
@@ -149,8 +149,33 @@ func TestPersistentCommentsJobStoresPartialResultInCheckpoint(t *testing.T) {
 		t.Fatalf("comments=%#v threads=%#v", commentStore.comments, commentStore.threads)
 	}
 	items, err := store.ListItems(context.Background(), job.ID)
-	if err != nil || len(items) != 1 || !containsJSONField(items[0].Checkpoint, `"partial":true`) {
+	if err != nil || len(items) != 1 || items[0].State != domain.JobPartial ||
+		!containsJSONField(items[0].Checkpoint, `"partial":true`) {
 		t.Fatalf("items=%#v err=%v", items, err)
+	}
+
+	source.replyResults["comment-2"] = []replySourceResult{{page: wechat.ReplyPage{
+		ContentID: "comment-2", MaxReplyID: 1, Replies: []wechat.Reply{{ID: "reply-2", Content: "resumed"}},
+	}}}
+	resumed, err := store.Retry(context.Background(), job.ID)
+	if err != nil || resumed.State != domain.JobQueued {
+		t.Fatalf("retry=%#v err=%v", resumed, err)
+	}
+	final, err = service.Run(context.Background(), job.ID)
+	if err != nil || final.State != domain.JobCompleted {
+		t.Fatalf("resumed final=%#v err=%v", final, err)
+	}
+	commentOneCalls, commentTwoCalls := 0, 0
+	for _, request := range source.replyRequests {
+		switch request.ContentID {
+		case "comment-1":
+			commentOneCalls++
+		case "comment-2":
+			commentTwoCalls++
+		}
+	}
+	if commentOneCalls != 1 || commentTwoCalls != 2 {
+		t.Fatalf("reply requests after resume = %#v", source.replyRequests)
 	}
 }
 

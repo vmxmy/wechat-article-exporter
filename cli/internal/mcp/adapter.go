@@ -1,12 +1,15 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -17,10 +20,11 @@ import (
 )
 
 const (
-	defaultVersion      = "1.0.0"
-	defaultMaxMessage   = 1 << 20
-	protocolVersion     = "2025-06-18"
-	destructiveArgument = "confirm"
+	defaultVersion         = "1.0.0"
+	DefaultMaxMessageBytes = 1 << 20
+	toolSuccessMessage     = "Tool completed successfully; use structuredContent for the result."
+	protocolVersion        = "2025-06-18"
+	destructiveArgument    = "confirm"
 )
 
 var (
@@ -50,21 +54,25 @@ type Options struct {
 	AllowSensitive     bool
 	SensitiveConfirm   string
 	ImplementationName string
+	AllowedRoots       []string
+	DefaultOutputRoot  string
 }
 
 type Adapter struct {
-	application application.Application
-	version     string
-	profile     string
-	policy      profiles.MCPPolicy
-	logger      *slog.Logger
-	maxMessage  int
-	content     ContentReader
-	sensitive   SensitiveHandler
-	allowSecret bool
-	secretProof string
-	name        string
-	tools       map[string]ToolDefinition
+	application       application.Application
+	version           string
+	profile           string
+	policy            profiles.MCPPolicy
+	logger            *slog.Logger
+	maxMessage        int
+	content           ContentReader
+	sensitive         SensitiveHandler
+	allowSecret       bool
+	secretProof       string
+	name              string
+	allowedRoots      []string
+	defaultOutputRoot string
+	tools             map[string]ToolDefinition
 }
 
 type ToolDefinition struct {
@@ -97,7 +105,7 @@ func New(shared application.Application, options ...Options) *Adapter {
 		configuration.Version = defaultVersion
 	}
 	if configuration.MaxMessageBytes <= 0 {
-		configuration.MaxMessageBytes = defaultMaxMessage
+		configuration.MaxMessageBytes = DefaultMaxMessageBytes
 	}
 	if configuration.Logger == nil {
 		configuration.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -106,17 +114,19 @@ func New(shared application.Application, options ...Options) *Adapter {
 		configuration.ImplementationName = "wechat-article-local"
 	}
 	adapter := &Adapter{
-		application: shared,
-		version:     configuration.Version,
-		profile:     configuration.Profile,
-		policy:      configuration.Policy,
-		logger:      configuration.Logger,
-		maxMessage:  configuration.MaxMessageBytes,
-		content:     configuration.Content,
-		sensitive:   configuration.Sensitive,
-		allowSecret: configuration.AllowSensitive,
-		secretProof: configuration.SensitiveConfirm,
-		name:        configuration.ImplementationName,
+		application:       shared,
+		version:           configuration.Version,
+		profile:           configuration.Profile,
+		policy:            configuration.Policy,
+		logger:            configuration.Logger,
+		maxMessage:        configuration.MaxMessageBytes,
+		content:           configuration.Content,
+		sensitive:         configuration.Sensitive,
+		allowSecret:       configuration.AllowSensitive,
+		secretProof:       configuration.SensitiveConfirm,
+		name:              configuration.ImplementationName,
+		allowedRoots:      normalizeAllowedRoots(configuration.AllowedRoots),
+		defaultOutputRoot: strings.TrimSpace(configuration.DefaultOutputRoot),
 	}
 	adapter.tools = adapter.buildTools()
 	return adapter
@@ -155,6 +165,41 @@ func (adapter *Adapter) Call(ctx context.Context, name string, arguments json.Ra
 	if !json.Valid(arguments) {
 		return nil, errors.New("tool arguments must be valid JSON")
 	}
+	if name == "exports.start" {
+		var request domain.ExportRequest
+		if err := json.Unmarshal(arguments, &request); err != nil {
+			return nil, err
+		}
+		if bytes.Equal(bytes.TrimSpace(arguments), []byte("null")) {
+			return nil, errors.New("exports.start arguments must be a JSON object")
+		}
+		outputRoot := strings.TrimSpace(request.OutputRoot)
+		if outputRoot == "" {
+			outputRoot = adapter.defaultOutputRoot
+		}
+		if outputRoot == "" {
+			return nil, errors.New("exports.start requires outputRoot or a configured default export root")
+		}
+		if outputRoot != "" {
+			validated, authorization, err := adapter.validateAllowedPath(outputRoot)
+			if err != nil {
+				return nil, err
+			}
+			if definition.handler == nil {
+				return nil, application.ErrUnavailable
+			}
+			if definition.Destructive || definition.Sensitive {
+				return nil, errors.New("exports.start policy metadata is invalid")
+			}
+			request.OutputRoot = validated
+			request.OutputAuthorization = authorization
+			job, err := adapter.application.StartExport(ctx, request)
+			if err != nil {
+				return nil, safety.RedactError(err)
+			}
+			return safety.Redact(jobResult{JobID: job.ID, State: job.State, Kind: job.Kind, Profile: job.Profile}, ""), nil
+		}
+	}
 	if definition.Destructive {
 		var envelope struct {
 			Confirmation string `json:"confirm"`
@@ -186,6 +231,87 @@ func (adapter *Adapter) Call(ctx context.Context, name string, arguments json.Ra
 		return nil, safety.RedactError(err)
 	}
 	return safety.Redact(result, ""), nil
+}
+
+func normalizeAllowedRoots(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		absolute, err := filepath.Abs(strings.TrimSpace(value))
+		if err != nil || strings.TrimSpace(value) == "" {
+			continue
+		}
+		absolute = filepath.Clean(absolute)
+		if _, ok := seen[absolute]; ok {
+			continue
+		}
+		seen[absolute] = struct{}{}
+		result = append(result, absolute)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func (adapter *Adapter) validateAllowedPath(value string) (string, *domain.ExportOutputAuthorization, error) {
+	if len(adapter.allowedRoots) == 0 {
+		return "", nil, errors.New("MCP file output is disabled because no allowed root is configured")
+	}
+	absolute, err := filepath.Abs(strings.TrimSpace(value))
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve MCP output path: %w", err)
+	}
+	absolute = filepath.Clean(absolute)
+	for _, root := range adapter.allowedRoots {
+		relative, relErr := filepath.Rel(root, absolute)
+		if relErr != nil || relative == ".." || filepath.IsAbs(relative) || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		resolvedRoot, rootErr := evalExistingPath(root)
+		resolvedParent, parentErr := evalExistingPath(filepath.Dir(absolute))
+		if rootErr == nil && parentErr == nil {
+			symlinkRelative, symlinkErr := filepath.Rel(resolvedRoot, resolvedParent)
+			if symlinkErr != nil || symlinkRelative == ".." || filepath.IsAbs(symlinkRelative) || strings.HasPrefix(symlinkRelative, ".."+string(filepath.Separator)) {
+				continue
+			}
+		}
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			return "", nil, fmt.Errorf("create MCP allowed output root: %w", err)
+		}
+		info, err := os.Lstat(root)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return "", nil, errors.New("MCP allowed output root is unavailable or unsafe")
+		}
+		identityFile, err := os.Open(root)
+		if err != nil {
+			return "", nil, fmt.Errorf("open MCP allowed output root identity handle: %w", err)
+		}
+		device, inode, identityErr := allowedRootIdentityFromFile(identityFile)
+		closeErr := identityFile.Close()
+		err = errors.Join(identityErr, closeErr)
+		if err != nil {
+			return "", nil, fmt.Errorf("identify MCP allowed output root: %w", err)
+		}
+		return absolute, &domain.ExportOutputAuthorization{Root: root, RelativePath: filepath.ToSlash(relative), Device: device, Inode: inode}, nil
+	}
+	return "", nil, fmt.Errorf("MCP output path %q is outside configured allowed roots", value)
+}
+
+func evalExistingPath(value string) (string, error) {
+	candidate := filepath.Clean(value)
+	for {
+		resolved, err := filepath.EvalSymlinks(candidate)
+		if err == nil {
+			return resolved, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			return "", err
+		}
+		candidate = parent
+	}
 }
 
 func DestructiveConfirmation(name string) string { return "confirm:" + name }
@@ -276,7 +402,13 @@ func (adapter *Adapter) buildTools() map[string]ToolDefinition {
 				AlbumID   domain.AlbumID   `json:"albumId"`
 			}
 			return decodeJob(raw, &input, func() (domain.Job, error) {
-				return adapter.application.SynchronizeAccount(ctx, domain.SynchronizeAccountRequest{AccountID: input.AccountID, Incremental: true})
+				albumApplication, ok := adapter.application.(interface {
+					SynchronizeAlbum(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error)
+				})
+				if !ok {
+					return domain.Job{}, fmt.Errorf("album synchronization: %w", application.ErrUnavailable)
+				}
+				return albumApplication.SynchronizeAlbum(ctx, input.AccountID, input.AlbumID)
 			})
 		})
 	add("downloads.start", "Create a persistent article download job and return its job identifier.", downloadSchema(), jobOutputSchema(), false, false, false,
@@ -358,13 +490,13 @@ func addJobAlias(name, description string, adapter *Adapter, tools map[string]To
 		Mutating: true,
 		handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var request domain.DownloadRequest
+			if err := json.Unmarshal(raw, &request); err != nil {
+				return nil, err
+			}
 			if strings.HasPrefix(name, "metadata.") {
 				request.Kind = "metadata"
 			} else if strings.HasPrefix(name, "comments.") {
 				request.Kind = "comments"
-			}
-			if err := json.Unmarshal(raw, &request); err != nil {
-				return nil, err
 			}
 			return decodeJob(json.RawMessage(`{}`), &struct{}{}, func() (domain.Job, error) {
 				return adapter.application.StartDownload(ctx, request)
@@ -398,11 +530,10 @@ func toolResult(value any, err error) *CallToolResult {
 			StructuredContent: map[string]any{"error": redacted.Error()}}
 	}
 	redacted := safety.Redact(value, "")
-	encoded, marshalErr := json.Marshal(redacted)
-	if marshalErr != nil {
+	if _, marshalErr := json.Marshal(redacted); marshalErr != nil {
 		return toolResult(nil, marshalErr)
 	}
-	return &CallToolResult{Content: []TextContent{{Type: "text", Text: string(encoded)}}, StructuredContent: redacted}
+	return &CallToolResult{Content: []TextContent{{Type: "text", Text: toolSuccessMessage}}, StructuredContent: redacted}
 }
 
 func (adapter *Adapter) implementation() *Implementation {

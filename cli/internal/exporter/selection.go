@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -88,6 +89,95 @@ func BuildSelectionManifest(
 	return manifest, nil
 }
 
+// ValidateSelectionManifest verifies the full self-authenticating selection
+// envelope, including the canonical filter summary and identity digest.
+func ValidateSelectionManifest(manifest SelectionManifest) error {
+	if manifest.SchemaVersion != SelectionManifestVersion {
+		return fmt.Errorf("unsupported selection manifest version %d: %w", manifest.SchemaVersion, ErrInvalidSelection)
+	}
+	if strings.TrimSpace(manifest.Format) == "" || manifest.CreatedAt.IsZero() {
+		return fmt.Errorf("selection format and creation time are required: %w", ErrInvalidSelection)
+	}
+	if err := validateArticleIDs(manifest.ArticleIDs); err != nil {
+		return err
+	}
+	if manifest.Kind == "" || manifest.Selection.Kind != manifest.Kind {
+		return fmt.Errorf("selection kind does not match the resolved selection: %w", ErrInvalidSelection)
+	}
+	if err := validateSelectionShape(manifest.Selection); err != nil {
+		return err
+	}
+	resolvedIDs, resolvedSelection, err := resolveSelection(context.Background(), nil, manifest.Selection)
+	if err == nil {
+		if resolvedSelection.Kind != manifest.Kind || !slices.Equal(resolvedIDs, manifest.ArticleIDs) {
+			return fmt.Errorf("resolved selection does not match the frozen article set: %w", ErrInvalidSelection)
+		}
+	} else if !errors.Is(err, errSelectionSourceRequired) {
+		return err
+	}
+	summary, err := canonicalJSON(manifest.Selection)
+	if err != nil {
+		return err
+	}
+	if summary != manifest.FilterSummary {
+		return fmt.Errorf("selection filter summary does not match the selection: %w", ErrInvalidSelection)
+	}
+	digest, err := selectionManifestDigest(manifest)
+	if err != nil {
+		return err
+	}
+	if manifest.DigestSHA256 != digest || manifest.ID != "selection-"+digest {
+		return fmt.Errorf("selection identity digest does not match its contents: %w", ErrInvalidSelection)
+	}
+	return nil
+}
+
+func selectionShapeValid(selection domain.ExportSelection) bool {
+	return validateSelectionShape(selection) == nil
+}
+
+func validateSelectionShape(selection domain.ExportSelection) error {
+	switch selection.Kind {
+	case domain.ExportSelectionURLs:
+		if len(selection.URLs) == 0 || selectionHasUnexpectedFields(selection, "urls") {
+			return fmt.Errorf("URL selection requires only one or more URLs: %w", ErrInvalidSelection)
+		}
+		for index, rawURL := range selection.URLs {
+			if strings.TrimSpace(rawURL) == "" {
+				return fmt.Errorf("URL %d is empty: %w", index, ErrInvalidSelection)
+			}
+		}
+	case domain.ExportSelectionAccount:
+		if strings.TrimSpace(string(selection.AccountID)) == "" || selectionHasUnexpectedFields(selection, "account") {
+			return fmt.Errorf("account selection requires only accountId: %w", ErrInvalidSelection)
+		}
+	case domain.ExportSelectionAlbum:
+		if strings.TrimSpace(string(selection.AlbumID)) == "" || selectionHasUnexpectedFields(selection, "album") {
+			return fmt.Errorf("album selection requires only albumId: %w", ErrInvalidSelection)
+		}
+	case domain.ExportSelectionSavedQuery:
+		if strings.TrimSpace(selection.SavedQueryID) == "" || selectionHasUnexpectedFields(selection, "saved_query_resolved") {
+			return fmt.Errorf("saved query selection requires savedQueryId and may include its frozen query: %w", ErrInvalidSelection)
+		}
+	case domain.ExportSelectionExplicitIDs:
+		if selectionHasUnexpectedFields(selection, "explicit_ids") {
+			return fmt.Errorf("explicit ID selection requires only articleIds: %w", ErrInvalidSelection)
+		}
+		if err := validateArticleIDs(selection.ArticleIDs); err != nil {
+			return err
+		}
+	case domain.ExportSelectionAllMatching:
+		if selectionHasUnexpectedFields(selection, "all_matching") {
+			return fmt.Errorf("all-matching selection accepts only query filters: %w", ErrInvalidSelection)
+		}
+	default:
+		return fmt.Errorf("unsupported selection kind %q: %w", selection.Kind, ErrInvalidSelection)
+	}
+	return nil
+}
+
+var errSelectionSourceRequired = errors.New("selection source is required")
+
 func normalizeRequestedSelection(request domain.ExportRequest) (domain.ExportSelection, error) {
 	hasLegacyIDs := len(request.ArticleIDs) > 0
 	hasSelection := request.Selection.Kind != "" || selectionHasValues(request.Selection)
@@ -132,11 +222,11 @@ func resolveSelection(
 ) ([]domain.ArticleID, domain.ExportSelection, error) {
 	switch selection.Kind {
 	case domain.ExportSelectionURLs:
-		if len(selection.URLs) == 0 || selectionHasUnexpectedFields(selection, "urls") {
-			return nil, selection, fmt.Errorf("URL selection requires only one or more URLs: %w", ErrInvalidSelection)
+		if err := validateSelectionShape(selection); err != nil {
+			return nil, selection, err
 		}
 		if source == nil {
-			return nil, selection, errors.New("URL selection source is required")
+			return nil, selection, fmt.Errorf("URL selection source is required: %w", errSelectionSourceRequired)
 		}
 		ids := make([]domain.ArticleID, 0, len(selection.URLs))
 		for index, rawURL := range selection.URLs {
@@ -151,25 +241,34 @@ func resolveSelection(
 		}
 		return ids, selection, nil
 	case domain.ExportSelectionAccount:
-		if selection.AccountID == "" || selectionHasUnexpectedFields(selection, "account") {
-			return nil, selection, fmt.Errorf("account selection requires only accountId: %w", ErrInvalidSelection)
+		if err := validateSelectionShape(selection); err != nil {
+			return nil, selection, err
 		}
 		query := normalizeSelectionQuery(domain.ArticleQuery{AccountID: selection.AccountID})
 		ids, err := querySelectionIDs(ctx, source, query)
 		return ids, selection, err
 	case domain.ExportSelectionAlbum:
-		if selection.AlbumID == "" || selectionHasUnexpectedFields(selection, "album") {
-			return nil, selection, fmt.Errorf("album selection requires only albumId: %w", ErrInvalidSelection)
+		if err := validateSelectionShape(selection); err != nil {
+			return nil, selection, err
 		}
 		query := normalizeSelectionQuery(domain.ArticleQuery{AlbumID: selection.AlbumID})
 		ids, err := querySelectionIDs(ctx, source, query)
 		return ids, selection, err
 	case domain.ExportSelectionSavedQuery:
-		if strings.TrimSpace(selection.SavedQueryID) == "" || selectionHasUnexpectedFields(selection, "saved_query") {
-			return nil, selection, fmt.Errorf("saved query selection requires only savedQueryId: %w", ErrInvalidSelection)
-		}
 		if source == nil {
-			return nil, selection, errors.New("saved query selection source is required")
+			if err := validateSelectionShape(selection); err != nil {
+				return nil, selection, err
+			}
+			return nil, selection, fmt.Errorf("saved query selection source is required: %w", errSelectionSourceRequired)
+		}
+		if err := validateSelectionShape(selection); err != nil {
+			return nil, selection, err
+		}
+		if articleQueryHasValues(selection.Query) {
+			query := normalizeSelectionQuery(selection.Query)
+			selection.Query = query
+			ids, err := querySelectionIDs(ctx, source, query)
+			return ids, selection, err
 		}
 		query, err := source.LoadSavedArticleQuery(ctx, selection.SavedQueryID)
 		if err != nil {
@@ -180,13 +279,13 @@ func resolveSelection(
 		ids, err := querySelectionIDs(ctx, source, query)
 		return ids, selection, err
 	case domain.ExportSelectionExplicitIDs:
-		if len(selection.ArticleIDs) == 0 || selectionHasUnexpectedFields(selection, "explicit_ids") {
-			return nil, selection, fmt.Errorf("explicit ID selection requires only articleIds: %w", ErrInvalidSelection)
+		if err := validateSelectionShape(selection); err != nil {
+			return nil, selection, err
 		}
 		return append([]domain.ArticleID(nil), selection.ArticleIDs...), selection, nil
 	case domain.ExportSelectionAllMatching:
-		if selectionHasUnexpectedFields(selection, "all_matching") {
-			return nil, selection, fmt.Errorf("all-matching selection accepts only query filters: %w", ErrInvalidSelection)
+		if err := validateSelectionShape(selection); err != nil {
+			return nil, selection, err
 		}
 		selection.Query = normalizeSelectionQuery(selection.Query)
 		ids, err := querySelectionIDs(ctx, source, selection.Query)
@@ -206,13 +305,13 @@ func selectionHasUnexpectedFields(selection domain.ExportSelection, allowed stri
 	if allowed != "album" && selection.AlbumID != "" {
 		return true
 	}
-	if allowed != "saved_query" && selection.SavedQueryID != "" {
+	if allowed != "saved_query" && allowed != "saved_query_resolved" && selection.SavedQueryID != "" {
 		return true
 	}
 	if allowed != "explicit_ids" && len(selection.ArticleIDs) > 0 {
 		return true
 	}
-	if allowed != "all_matching" && articleQueryHasValues(selection.Query) {
+	if allowed != "all_matching" && allowed != "saved_query_resolved" && articleQueryHasValues(selection.Query) {
 		return true
 	}
 	return false
@@ -229,7 +328,7 @@ func normalizeSelectionQuery(query domain.ArticleQuery) domain.ArticleQuery {
 
 func querySelectionIDs(ctx context.Context, source SelectionSource, query domain.ArticleQuery) ([]domain.ArticleID, error) {
 	if source == nil {
-		return nil, errors.New("article query selection source is required")
+		return nil, fmt.Errorf("article query selection source is required: %w", errSelectionSourceRequired)
 	}
 	ids, err := source.QueryArticleIDs(ctx, query)
 	if err != nil {

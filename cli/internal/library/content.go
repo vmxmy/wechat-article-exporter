@@ -53,6 +53,166 @@ type ArticleResourceRecord struct {
 	OriginalURL string
 }
 
+type ExportSnapshotRecord struct {
+	Article   domain.Article
+	Content   ContentVersion
+	Comments  []CommentRecord
+	Resources []ExportSnapshotResource
+}
+
+type ExportSnapshotResource struct {
+	ArticleResourceRecord
+	ObjectDigest string
+	MediaType    string
+	Status       string
+}
+
+// ReadExportSnapshot captures all mutable SQLite input for one queued export
+// from a single read transaction. Object bytes remain immutable by digest and
+// are verified by the caller after this metadata snapshot commits.
+func (database *Database) ReadExportSnapshot(ctx context.Context, articleID domain.ArticleID) (ExportSnapshotRecord, error) {
+	transaction, err := database.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return ExportSnapshotRecord{}, fmt.Errorf("begin export snapshot: %w", err)
+	}
+	defer transaction.Rollback()
+	var snapshot ExportSnapshotRecord
+	var published, updated sql.NullInt64
+	err = transaction.QueryRowContext(ctx, `SELECT a.id, COALESCE(a.account_id, ''), a.aid,
+COALESCE(a.appmsg_id, 0), COALESCE(a.item_index, 0), a.title, a.author, a.digest,
+a.canonical_url, a.cover_url, a.published_at, a.updated_at_upstream, a.message_type, a.state,
+a.is_deleted, a.is_paid, a.is_original, a.is_single,
+CASE WHEN a.content_status='available' THEN 1 ELSE 0 END,
+CASE WHEN EXISTS (SELECT 1 FROM comments c WHERE c.article_id=a.id) THEN 1 ELSE 0 END,
+a.wecoin_count, a.media_duration_seconds,
+COALESCE(ms.read_count, 0), COALESCE(ms.old_like_count, 0), COALESCE(ms.share_count, 0),
+COALESCE(ms.like_count, 0), COALESCE(ms.comment_count, 0)
+FROM articles a LEFT JOIN metric_snapshots ms ON ms.id=(
+  SELECT id FROM metric_snapshots latest WHERE latest.article_id=a.id ORDER BY captured_at DESC, id DESC LIMIT 1
+) WHERE a.profile_id=? AND a.id=?`, database.profileID, articleID).Scan(
+		&snapshot.Article.ID, &snapshot.Article.AccountID, &snapshot.Article.Aid, &snapshot.Article.AppMsgID,
+		&snapshot.Article.ItemIndex, &snapshot.Article.Title, &snapshot.Article.Author, &snapshot.Article.Digest,
+		&snapshot.Article.CanonicalURL, &snapshot.Article.CoverURL, &published, &updated,
+		&snapshot.Article.MessageType, &snapshot.Article.State, &snapshot.Article.Deleted, &snapshot.Article.Paid,
+		&snapshot.Article.Original, &snapshot.Article.Single, &snapshot.Article.HasContent,
+		&snapshot.Article.HasComments, &snapshot.Article.WeCoinCount, &snapshot.Article.MediaDurationSeconds,
+		&snapshot.Article.ReadCount, &snapshot.Article.OldLikeCount, &snapshot.Article.ShareCount,
+		&snapshot.Article.LikeCount, &snapshot.Article.CommentCount)
+	if err != nil {
+		return ExportSnapshotRecord{}, err
+	}
+	snapshot.Article.PublishedAt = unixMillis(published)
+	snapshot.Article.UpdatedAt = unixMillis(updated)
+
+	albumRows, err := transaction.QueryContext(ctx, `SELECT al.id, COALESCE(al.account_id, ''), al.upstream_id,
+al.title, al.description, al.article_count, al.is_paid
+FROM article_albums aa JOIN albums al ON al.id=aa.album_id
+JOIN articles owner ON owner.id=aa.article_id
+WHERE owner.profile_id=? AND al.profile_id=? AND aa.article_id=? ORDER BY aa.ordinal, al.id`,
+		database.profileID, database.profileID, articleID)
+	if err != nil {
+		return ExportSnapshotRecord{}, err
+	}
+	for albumRows.Next() {
+		var album domain.Album
+		if err := albumRows.Scan(&album.ID, &album.AccountID, &album.UpstreamID, &album.Name, &album.Description,
+			&album.ArticleCount, &album.Paid); err != nil {
+			albumRows.Close()
+			return ExportSnapshotRecord{}, err
+		}
+		snapshot.Article.Albums = append(snapshot.Article.Albums, album)
+	}
+	if err := albumRows.Err(); err != nil {
+		albumRows.Close()
+		return ExportSnapshotRecord{}, err
+	}
+	if err := albumRows.Close(); err != nil {
+		return ExportSnapshotRecord{}, err
+	}
+
+	var captured int64
+	var current bool
+	err = transaction.QueryRowContext(ctx, `SELECT cv.id, cv.article_id, cv.object_digest, cv.kind, cv.media_type,
+cv.source_url, cv.classification, cv.comment_id, cv.captured_at, cv.is_current
+FROM content_versions cv JOIN articles owner ON owner.id=cv.article_id
+WHERE owner.profile_id=? AND cv.article_id=? AND cv.kind='html' AND cv.is_current=1
+ORDER BY cv.captured_at DESC, cv.id DESC LIMIT 1`, database.profileID, articleID).Scan(
+		&snapshot.Content.ID, &snapshot.Content.ArticleID, &snapshot.Content.ObjectDigest, &snapshot.Content.Kind,
+		&snapshot.Content.MediaType, &snapshot.Content.SourceURL, &snapshot.Content.Classification,
+		&snapshot.Content.CommentID, &captured, &current)
+	if err != nil {
+		return ExportSnapshotRecord{}, err
+	}
+	snapshot.Content.CapturedAt = time.UnixMilli(captured)
+	snapshot.Content.Current = current
+
+	commentRows, err := transaction.QueryContext(ctx, `SELECT c.id, c.article_id, c.upstream_id, c.author_name, c.content,
+c.like_count, c.created_at_upstream, c.raw_object_digest, c.fetched_at,
+COALESCE(rc.total_replies, 0), COALESCE(rc.max_reply_id, 0)
+FROM comments c LEFT JOIN reply_checkpoints rc ON rc.article_id=c.article_id AND rc.content_id=c.upstream_id
+JOIN articles owner ON owner.id=c.article_id
+WHERE owner.profile_id=? AND c.article_id=? ORDER BY c.created_at_upstream, c.upstream_id`, database.profileID, articleID)
+	if err != nil {
+		return ExportSnapshotRecord{}, err
+	}
+	for commentRows.Next() {
+		var comment CommentRecord
+		var created sql.NullInt64
+		var fetched int64
+		if err := commentRows.Scan(&comment.ID, &comment.ArticleID, &comment.UpstreamID, &comment.AuthorName,
+			&comment.Content, &comment.LikeCount, &created, &comment.RawObjectDigest, &fetched,
+			&comment.ReplyTotal, &comment.ReplyMaxID); err != nil {
+			commentRows.Close()
+			return ExportSnapshotRecord{}, err
+		}
+		comment.CreatedAt = unixMillis(created)
+		comment.FetchedAt = time.UnixMilli(fetched)
+		comment.EmbeddedReplies, err = repliesForCommentID(ctx, transaction, comment.ID)
+		if err != nil {
+			commentRows.Close()
+			return ExportSnapshotRecord{}, err
+		}
+		snapshot.Comments = append(snapshot.Comments, comment)
+	}
+	if err := commentRows.Err(); err != nil {
+		commentRows.Close()
+		return ExportSnapshotRecord{}, err
+	}
+	if err := commentRows.Close(); err != nil {
+		return ExportSnapshotRecord{}, err
+	}
+
+	resourceRows, err := transaction.QueryContext(ctx, `SELECT ar.article_id, ar.resource_id, ar.role, ar.ordinal,
+ar.original_url, COALESCE(r.object_digest, ''), r.media_type, r.status
+FROM article_resources ar JOIN resources r ON r.id=ar.resource_id
+JOIN articles owner ON owner.id=ar.article_id
+WHERE owner.profile_id=? AND r.profile_id=? AND ar.article_id=? ORDER BY ar.role, ar.ordinal, ar.resource_id`,
+		database.profileID, database.profileID, articleID)
+	if err != nil {
+		return ExportSnapshotRecord{}, err
+	}
+	for resourceRows.Next() {
+		var resource ExportSnapshotResource
+		if err := resourceRows.Scan(&resource.ArticleID, &resource.ResourceID, &resource.Role, &resource.Ordinal,
+			&resource.OriginalURL, &resource.ObjectDigest, &resource.MediaType, &resource.Status); err != nil {
+			resourceRows.Close()
+			return ExportSnapshotRecord{}, err
+		}
+		snapshot.Resources = append(snapshot.Resources, resource)
+	}
+	if err := resourceRows.Err(); err != nil {
+		resourceRows.Close()
+		return ExportSnapshotRecord{}, err
+	}
+	if err := resourceRows.Close(); err != nil {
+		return ExportSnapshotRecord{}, err
+	}
+	if err := transaction.Commit(); err != nil {
+		return ExportSnapshotRecord{}, fmt.Errorf("commit export snapshot read: %w", err)
+	}
+	return snapshot, nil
+}
+
 func (database *Database) CurrentContent(ctx context.Context, articleID domain.ArticleID, kind string) (ContentVersion, error) {
 	var record ContentVersion
 	var captured int64

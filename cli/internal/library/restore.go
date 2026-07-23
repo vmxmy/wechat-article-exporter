@@ -4,10 +4,12 @@ import (
 	"archive/zip"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
@@ -28,8 +30,11 @@ type RestoreOptions struct {
 	ObjectStore    *objects.FileStore
 	ConfigPath     string
 	ConflictPolicy RestoreConflictPolicy
+	TargetProfile  domain.ProfileID
+	TargetName     string
 	Now            time.Time
 	BeforeCommit   func() error
+	fileOperations *restoreFileOperations
 }
 
 type RestoreReport struct {
@@ -59,6 +64,18 @@ type stagedRestore struct {
 	byteCount int64
 }
 
+type restoreFileOperations struct {
+	rename    func(string, string) error
+	removeAll func(string) error
+}
+
+func defaultRestoreFileOperations() *restoreFileOperations {
+	return &restoreFileOperations{
+		rename:    os.Rename,
+		removeAll: os.RemoveAll,
+	}
+}
+
 func RestoreBackup(ctx context.Context, options RestoreOptions) (RestoreReport, error) {
 	if options.ArchivePath == "" || options.DatabasePath == "" {
 		return RestoreReport{}, errors.New("restore archive and database destination are required")
@@ -74,6 +91,13 @@ func RestoreBackup(ctx context.Context, options RestoreOptions) (RestoreReport, 
 	}
 	if options.ConflictPolicy != RestoreRefuseConflicts && options.ConflictPolicy != RestoreRenameConflicts {
 		return RestoreReport{}, fmt.Errorf("unsupported restore conflict policy %q", options.ConflictPolicy)
+	}
+	fileOperations := options.fileOperations
+	if fileOperations == nil {
+		fileOperations = defaultRestoreFileOperations()
+	}
+	if fileOperations.rename == nil || fileOperations.removeAll == nil {
+		return RestoreReport{}, errors.New("restore file operations are incomplete")
 	}
 	verification, err := VerifyBackup(ctx, options.ArchivePath)
 	if err != nil {
@@ -105,25 +129,43 @@ func RestoreBackup(ctx context.Context, options RestoreOptions) (RestoreReport, 
 	if err != nil {
 		return RestoreReport{}, fmt.Errorf("create restore rollback directory: %w", err)
 	}
-	defer os.RemoveAll(rollbackRoot)
+	removeRollback := true
+	defer func() {
+		if removeRollback {
+			_ = os.RemoveAll(rollbackRoot)
+		}
+	}()
 	report.RollbackBackup = rollbackRoot
 	committed := []restoreCommit{}
-	if err := commitRestorePath(staged.database, options.DatabasePath, filepath.Join(rollbackRoot, "database"), &committed); err != nil {
-		rollbackRestore(committed)
+	if err := commitRestorePath(staged.database, options.DatabasePath, filepath.Join(rollbackRoot, "database"), &committed, fileOperations); err != nil {
+		if rollbackErr := rollbackRestore(committed, fileOperations); rollbackErr != nil {
+			removeRollback = false
+			return report, errors.Join(err, fmt.Errorf("restore rollback failed; preserve %s: %w", rollbackRoot, rollbackErr))
+		}
 		return RestoreReport{}, err
 	}
-	if err := commitRestorePath(staged.objects, options.ObjectStore.Root(), filepath.Join(rollbackRoot, "objects"), &committed); err != nil {
-		rollbackRestore(committed)
+	if err := commitRestorePath(staged.objects, options.ObjectStore.Root(), filepath.Join(rollbackRoot, "objects"), &committed, fileOperations); err != nil {
+		if rollbackErr := rollbackRestore(committed, fileOperations); rollbackErr != nil {
+			removeRollback = false
+			return report, errors.Join(err, fmt.Errorf("restore rollback failed; preserve %s: %w", rollbackRoot, rollbackErr))
+		}
 		return RestoreReport{}, err
 	}
 	if staged.config != "" && options.ConfigPath != "" {
-		if err := commitRestorePath(staged.config, options.ConfigPath, filepath.Join(rollbackRoot, "config"), &committed); err != nil {
-			rollbackRestore(committed)
+		if err := commitRestorePath(staged.config, options.ConfigPath, filepath.Join(rollbackRoot, "config"), &committed, fileOperations); err != nil {
+			if rollbackErr := rollbackRestore(committed, fileOperations); rollbackErr != nil {
+				removeRollback = false
+				return report, errors.Join(err, fmt.Errorf("restore rollback failed; preserve %s: %w", rollbackRoot, rollbackErr))
+			}
 			return RestoreReport{}, err
 		}
 	}
 	if err := verifyCommittedRestore(ctx, options.DatabasePath, options.ObjectStore.Root(), staged.manifest); err != nil {
-		rollbackRestore(committed)
+		if rollbackErr := rollbackRestore(committed, fileOperations); rollbackErr != nil {
+			removeRollback = false
+			return report, errors.Join(fmt.Errorf("verify committed restore: %w", err),
+				fmt.Errorf("restore rollback failed; preserve %s: %w", rollbackRoot, rollbackErr))
+		}
 		return RestoreReport{}, fmt.Errorf("verify committed restore: %w", err)
 	}
 	for _, commit := range committed {
@@ -187,7 +229,8 @@ func stageRestore(ctx context.Context, options RestoreOptions, manifest BackupMa
 		staged.fileCount++
 		staged.byteCount += object.Size
 	}
-	if err := applyRestoreProfilePolicy(ctx, staged.database, options.DatabasePath, options.ConflictPolicy, &staged.profiles); err != nil {
+	if err := applyRestoreProfilePolicy(ctx, staged.database, options.DatabasePath, options.ConflictPolicy,
+		options.TargetProfile, options.TargetName, staged.config, options.Now, &staged.profiles); err != nil {
 		return stagedRestore{}, err
 	}
 	objectSet := make(map[string]struct{}, len(manifest.Objects))
@@ -206,8 +249,15 @@ func applyRestoreProfilePolicy(
 	stagedPath string,
 	livePath string,
 	policy RestoreConflictPolicy,
+	targetProfile domain.ProfileID,
+	targetName string,
+	configPath string,
+	now time.Time,
 	resolutions *[]RestoreProfileResolution,
 ) error {
+	if now.IsZero() {
+		now = time.Now()
+	}
 	liveProfiles, err := readProfiles(ctx, livePath)
 	if err != nil {
 		return err
@@ -233,6 +283,37 @@ func applyRestoreProfilePolicy(
 	}
 	if err := rows.Err(); err != nil {
 		return err
+	}
+	if targetProfile != "" {
+		if len(profiles) != 1 {
+			return errors.New("restore to an active profile requires an archive containing exactly one profile")
+		}
+		profile := profiles[0]
+		resolvedName := strings.TrimSpace(targetName)
+		if resolvedName == "" {
+			resolvedName = profile.name
+		}
+		if profile.id != string(targetProfile) {
+			if err := rewriteProfileID(ctx, staged, profile.id, string(targetProfile)); err != nil {
+				return err
+			}
+		}
+		if _, err := staged.ExecContext(ctx, "UPDATE profiles SET name=?, updated_at=? WHERE id=?",
+			resolvedName, now.UnixMilli(), targetProfile); err != nil {
+			return fmt.Errorf("rewrite restored profile name: %w", err)
+		}
+		if configPath != "" {
+			if err := rewriteRestoredConfigProfile(configPath, string(targetProfile)); err != nil {
+				return err
+			}
+		}
+		resolution := "unchanged"
+		if profile.id != string(targetProfile) || profile.name != resolvedName {
+			resolution = "remapped"
+		}
+		*resolutions = append(*resolutions, RestoreProfileResolution{SourceID: domain.ProfileID(profile.id), SourceName: profile.name,
+			TargetID: targetProfile, TargetName: resolvedName, Resolution: resolution})
+		return nil
 	}
 	usedIDs := map[string]struct{}{}
 	usedNames := map[string]struct{}{}
@@ -260,7 +341,7 @@ func applyRestoreProfilePolicy(
 			if err := rewriteProfileID(ctx, staged, profile.id, targetID); err != nil {
 				return err
 			}
-			if _, err := staged.ExecContext(ctx, "UPDATE profiles SET name=?, updated_at=? WHERE id=?", targetName, time.Now().UnixMilli(), targetID); err != nil {
+			if _, err := staged.ExecContext(ctx, "UPDATE profiles SET name=?, updated_at=? WHERE id=?", targetName, now.UnixMilli(), targetID); err != nil {
 				return fmt.Errorf("rename restored profile: %w", err)
 			}
 			resolution = "renamed"
@@ -276,6 +357,9 @@ func applyRestoreProfilePolicy(
 }
 
 func rewriteProfileID(ctx context.Context, database *sql.DB, sourceID, targetID string) error {
+	if sourceID == targetID {
+		return nil
+	}
 	return withSQLTx(ctx, database, func(transaction *sql.Tx) error {
 		if _, err := transaction.ExecContext(ctx, "PRAGMA defer_foreign_keys=ON"); err != nil {
 			return err
@@ -284,10 +368,12 @@ func rewriteProfileID(ctx context.Context, database *sql.DB, sourceID, targetID 
 SELECT ?, name || '-staging', created_at, updated_at FROM profiles WHERE id=?`, targetID, sourceID); err != nil {
 			return fmt.Errorf("create restored profile identity: %w", err)
 		}
-		for _, table := range []string{
-			"accounts", "articles", "albums", "resources", "credential_refs", "network_routes", "jobs", "exports", "debug_incidents",
-		} {
-			if _, err := transaction.ExecContext(ctx, "UPDATE "+table+" SET profile_id=? WHERE profile_id=?", targetID, sourceID); err != nil {
+		tables, err := profileOwnedTables(ctx, transaction)
+		if err != nil {
+			return err
+		}
+		for _, table := range tables {
+			if _, err := transaction.ExecContext(ctx, "UPDATE "+quoteSQLiteIdentifier(table)+" SET profile_id=? WHERE profile_id=?", targetID, sourceID); err != nil {
 				return fmt.Errorf("rewrite %s profile identity: %w", table, err)
 			}
 		}
@@ -296,6 +382,65 @@ SELECT ?, name || '-staging', created_at, updated_at FROM profiles WHERE id=?`, 
 		}
 		return nil
 	})
+}
+
+func profileOwnedTables(ctx context.Context, transaction *sql.Tx) ([]string, error) {
+	rows, err := transaction.QueryContext(ctx, `SELECT name FROM sqlite_schema
+WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("list restored profile-owned tables: %w", err)
+	}
+	var candidates []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		candidates = append(candidates, name)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	owned := make([]string, 0)
+	for _, table := range candidates {
+		foreignRows, err := transaction.QueryContext(ctx, "PRAGMA foreign_key_list("+quoteSQLiteIdentifier(table)+")")
+		if err != nil {
+			return nil, fmt.Errorf("inspect restored table %s foreign keys: %w", table, err)
+		}
+		profileOwned := false
+		for foreignRows.Next() {
+			var id, sequence int
+			var referencedTable, fromColumn, toColumn, onUpdate, onDelete, match string
+			if err := foreignRows.Scan(&id, &sequence, &referencedTable, &fromColumn, &toColumn, &onUpdate, &onDelete, &match); err != nil {
+				foreignRows.Close()
+				return nil, err
+			}
+			if referencedTable == "profiles" && fromColumn == "profile_id" && toColumn == "id" {
+				profileOwned = true
+			}
+		}
+		if err := foreignRows.Err(); err != nil {
+			foreignRows.Close()
+			return nil, err
+		}
+		if err := foreignRows.Close(); err != nil {
+			return nil, err
+		}
+		if profileOwned {
+			owned = append(owned, table)
+		}
+	}
+	return owned, nil
+}
+
+func quoteSQLiteIdentifier(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func readProfiles(ctx context.Context, path string) (map[string]string, error) {
@@ -354,7 +499,13 @@ type restoreCommit struct {
 	backup string
 }
 
-func commitRestorePath(staged, live, backup string, committed *[]restoreCommit) error {
+func commitRestorePath(
+	staged string,
+	live string,
+	backup string,
+	committed *[]restoreCommit,
+	fileOperations *restoreFileOperations,
+) error {
 	if staged == "" || live == "" {
 		return nil
 	}
@@ -365,7 +516,7 @@ func commitRestorePath(staged, live, backup string, committed *[]restoreCommit) 
 		if err := ensureParent(backup); err != nil {
 			return err
 		}
-		if err := os.Rename(live, backup); err != nil {
+		if err := fileOperations.rename(live, backup); err != nil {
 			return fmt.Errorf("stage live path for rollback %s: %w", live, err)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -373,9 +524,18 @@ func commitRestorePath(staged, live, backup string, committed *[]restoreCommit) 
 	} else {
 		backup = ""
 	}
-	if err := os.Rename(staged, live); err != nil {
+	if err := fileOperations.rename(staged, live); err != nil {
 		if backup != "" {
-			_ = os.Rename(backup, live)
+			if restoreErr := fileOperations.rename(backup, live); restoreErr != nil {
+				// The rollback copy is now the only known-good live data. Track it so
+				// the outer rollback can retry, and preserve the rollback root if that
+				// retry also fails.
+				*committed = append(*committed, restoreCommit{live: live, backup: backup})
+				return errors.Join(
+					fmt.Errorf("commit restored path %s: %w", live, err),
+					fmt.Errorf("immediate restore rollback path %s: %w", live, restoreErr),
+				)
+			}
 		}
 		return fmt.Errorf("commit restored path %s: %w", live, err)
 	}
@@ -383,14 +543,46 @@ func commitRestorePath(staged, live, backup string, committed *[]restoreCommit) 
 	return nil
 }
 
-func rollbackRestore(committed []restoreCommit) {
+func rollbackRestore(committed []restoreCommit, fileOperations *restoreFileOperations) error {
+	var result error
 	for index := len(committed) - 1; index >= 0; index-- {
 		commit := committed[index]
-		_ = os.RemoveAll(commit.live)
+		if err := fileOperations.removeAll(commit.live); err != nil {
+			result = errors.Join(result, fmt.Errorf("remove failed restored path %s: %w", commit.live, err))
+			continue
+		}
 		if commit.backup != "" {
-			_ = os.Rename(commit.backup, commit.live)
+			if err := fileOperations.rename(commit.backup, commit.live); err != nil {
+				result = errors.Join(result, fmt.Errorf("restore rollback path %s: %w", commit.live, err))
+			}
 		}
 	}
+	return result
+}
+
+func rewriteRestoredConfigProfile(path, profileID string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read staged restored configuration: %w", err)
+	}
+	var value map[string]json.RawMessage
+	if err := json.Unmarshal(data, &value); err != nil {
+		return fmt.Errorf("decode staged restored configuration: %w", err)
+	}
+	if value == nil {
+		return errors.New("decode staged restored configuration: expected a JSON object")
+	}
+	encodedProfileID, err := json.Marshal(profileID)
+	if err != nil {
+		return fmt.Errorf("encode restored profile identity: %w", err)
+	}
+	value["profileId"] = encodedProfileID
+	encoded, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	encoded = append(encoded, '\n')
+	return os.WriteFile(path, encoded, 0o600)
 }
 
 func verifyCommittedRestore(ctx context.Context, databasePath, objectRoot string, manifest BackupManifest) error {

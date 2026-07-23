@@ -125,6 +125,64 @@ func TestOutputManagerRejectsTraversalAbsoluteAndSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestOutputManagerRejectsInternalSymlinkForWriteHashAndCapabilityRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	manager, err := NewOutputManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	if _, err := manager.WriteFile(context.Background(), "linked/output.txt", CollisionFail, writeString("unsafe")); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("write through internal symlink error=%v", err)
+	}
+	outsideFile := filepath.Join(outside, "existing.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manager.HashFile(context.Background(), "linked/existing.txt"); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("hash through internal symlink error=%v", err)
+	}
+	rootHandle, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rootHandle.Close()
+	if _, err := NewOutputManagerFromRoot(rootHandle, "linked"); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("capability-derived symlink root error=%v", err)
+	}
+}
+
+func TestOutputManagerRejectsFinalComponentSymlinkForHashAndReplace(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "article.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	manager, err := NewOutputManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	if _, _, err := manager.HashFile(context.Background(), "article.txt"); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("hash final symlink error=%v", err)
+	}
+	if _, err := manager.WriteFile(context.Background(), "article.txt", CollisionReplace, writeString("replacement")); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("replace final symlink error=%v", err)
+	}
+	contents, err := os.ReadFile(outside)
+	if err != nil || string(contents) != "outside" {
+		t.Fatalf("outside=%q err=%v", contents, err)
+	}
+}
+
 func TestCleanupAbandonedOutputsRemovesOnlyOldRegularStagingPaths(t *testing.T) {
 	root := t.TempDir()
 	manager, err := NewOutputManager(root)
@@ -166,6 +224,59 @@ func TestCleanupAbandonedOutputsRemovesOnlyOldRegularStagingPaths(t *testing.T) 
 	}
 	if len(report.Warnings) != 1 || !strings.Contains(report.Warnings[0], "symlink") {
 		t.Fatalf("cleanup warnings = %#v", report.Warnings)
+	}
+}
+
+func TestCommitStagedRejectsTemporaryPathOutsideDestinationDirectoryBeforeCleanup(t *testing.T) {
+	root := t.TempDir()
+	manager, err := NewOutputManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	if err := os.MkdirAll(filepath.Join(root, "other"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	protected := filepath.Join(root, "other", temporaryOutputPrefix+"protected"+temporaryOutputSuffix)
+	if err := os.WriteFile(protected, []byte("must-survive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	committed, err := manager.WriteFile(context.Background(), "article.txt", CollisionFail, writeString("content"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	malformed := StagedOutput{
+		Output: committed, Policy: CollisionFail,
+		TemporaryPath: filepath.ToSlash(filepath.Join("other", filepath.Base(protected))),
+	}
+	if _, err := manager.CommitStaged(context.Background(), malformed); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("malformed checkpoint error=%v", err)
+	}
+	contents, err := os.ReadFile(protected)
+	if err != nil || string(contents) != "must-survive" {
+		t.Fatalf("protected staging path=%q err=%v", contents, err)
+	}
+}
+
+func TestCommitStagedRequiresTemporaryPathInDestinationDirectory(t *testing.T) {
+	root := t.TempDir()
+	manager, err := NewOutputManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	staged, err := manager.StageFile(context.Background(), "nested/article.txt", CollisionFail, writeString("content"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalTemporary := staged.TemporaryPath
+	defer manager.AbortStaged(StagedOutput{TemporaryPath: originalTemporary})
+	staged.TemporaryPath = filepath.Base(staged.TemporaryPath)
+	if _, err := manager.CommitStaged(context.Background(), staged); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("cross-directory staging error=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(originalTemporary))); err != nil {
+		t.Fatalf("valid staging file changed: %v", err)
 	}
 }
 

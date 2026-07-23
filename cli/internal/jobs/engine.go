@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/safety"
 )
@@ -41,14 +42,18 @@ type EngineStore interface {
 	ListItems(context.Context, domain.JobID) ([]Item, error)
 	StartJob(context.Context, domain.JobID, string, time.Duration) (domain.Job, error)
 	RenewLease(context.Context, domain.JobID, string, time.Duration) (bool, error)
-	Pause(context.Context, domain.JobID) (domain.Job, error)
+	PauseOwned(context.Context, domain.JobID, string) (domain.Job, error)
 	ClaimItem(context.Context, domain.JobID, string, string) (Item, error)
 	SaveCheckpoint(context.Context, domain.JobID, string, string, any) error
 	TransitionItem(context.Context, domain.JobID, string, string, domain.JobState, domain.JobState, any, FailureClass, string) (Item, error)
-	BeginAttempt(context.Context, Item, string, string) (Attempt, error)
-	FinishAttempt(context.Context, Attempt) error
+	BeginAttempt(context.Context, Item, string, string, string) (Attempt, error)
+	FinishAttempt(context.Context, Attempt, string) error
 	BlockAuthentication(context.Context, domain.JobID, string, string, string) (domain.Job, error)
 	FinalizeJob(context.Context, domain.JobID, string) (domain.Job, error)
+}
+
+type JobLogger interface {
+	AppendLog(context.Context, domain.JobID, string, string, string, any) error
 }
 
 type WorkMetadata struct {
@@ -67,6 +72,7 @@ type EngineOptions struct {
 	Owner         string
 	LeaseDuration time.Duration
 	PollInterval  time.Duration
+	LogTimeout    time.Duration
 	MaxAttempts   int
 	Backoff       Backoff
 	Scheduler     *Scheduler
@@ -100,6 +106,9 @@ func NewEngine(store EngineStore, options EngineOptions) (*Engine, error) {
 	if options.MaxAttempts <= 0 {
 		options.MaxAttempts = 3
 	}
+	if options.LogTimeout <= 0 {
+		options.LogTimeout = time.Second
+	}
 	if options.Scheduler == nil {
 		options.Scheduler = NewScheduler(Limits{})
 	}
@@ -113,10 +122,14 @@ func (engine *Engine) Run(ctx context.Context, id domain.JobID, execute ExecuteF
 	if execute == nil {
 		return domain.Job{}, errors.New("job execute function is required")
 	}
-	job, err := engine.store.StartJob(ctx, id, engine.options.Owner, engine.options.LeaseDuration)
+	executionOwner := engine.executionOwner()
+	job, err := engine.store.StartJob(ctx, id, executionOwner, engine.options.LeaseDuration)
 	if err != nil {
 		return domain.Job{}, err
 	}
+	engine.log(context.Background(), id, "", "info", "job worker started", map[string]any{
+		"owner": executionOwner, "ownerPrefix": engine.options.Owner, "leaseDuration": engine.options.LeaseDuration.String(),
+	})
 	items, err := engine.store.ListItems(ctx, id)
 	if err != nil {
 		return domain.Job{}, fmt.Errorf("list job items: %w", err)
@@ -125,7 +138,7 @@ func (engine *Engine) Run(ctx context.Context, id domain.JobID, execute ExecuteF
 	runContext, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 	monitorDone := make(chan struct{})
-	go engine.monitor(runContext, id, cancelRun, monitorDone)
+	go engine.monitor(runContext, id, executionOwner, cancelRun, monitorDone)
 
 	work := make([]Work, 0, len(items))
 	for _, item := range items {
@@ -146,7 +159,11 @@ func (engine *Engine) Run(ctx context.Context, id domain.JobID, execute ExecuteF
 			Host:      metadata.Host,
 			Sensitive: metadata.Sensitive,
 			Run: func(workContext context.Context) error {
-				return engine.runItem(workContext, id, item, execute, cancelRun)
+				err := engine.runItem(workContext, id, item, executionOwner, execute, cancelRun)
+				if errors.Is(err, ErrStateChanged) {
+					cancelRun()
+				}
+				return err
 			},
 		})
 	}
@@ -156,11 +173,12 @@ func (engine *Engine) Run(ctx context.Context, id domain.JobID, execute ExecuteF
 	<-monitorDone
 
 	if ctx.Err() != nil {
-		current, getErr := engine.store.Get(context.Background(), id)
-		if getErr == nil && current.State == domain.JobRunning {
-			if _, pauseErr := engine.store.Pause(context.Background(), id); pauseErr != nil && !errors.Is(pauseErr, ErrStateChanged) {
-				return domain.Job{}, fmt.Errorf("pause interrupted job: %w", pauseErr)
-			}
+		paused, pauseErr := engine.pauseIfOwner(context.Background(), id, executionOwner)
+		if pauseErr != nil && !errors.Is(pauseErr, ErrStateChanged) {
+			return domain.Job{}, fmt.Errorf("pause interrupted job: %w", pauseErr)
+		}
+		if pauseErr == nil && paused.State != "" && paused.State != domain.JobRunning {
+			return paused, nil
 		}
 	}
 
@@ -169,11 +187,17 @@ func (engine *Engine) Run(ctx context.Context, id domain.JobID, execute ExecuteF
 		return domain.Job{}, err
 	}
 	if current.State != domain.JobRunning {
+		engine.log(context.Background(), id, "", "info", "job worker stopped after external state change", map[string]any{"state": current.State})
 		return current, nil
 	}
 	for _, result := range results {
+		if errors.Is(result.Err, ErrStateChanged) {
+			return current, result.Err
+		}
+	}
+	for _, result := range results {
 		if result.Err != nil && errors.Is(result.Err, context.Canceled) {
-			if _, pauseErr := engine.store.Pause(context.Background(), id); pauseErr != nil && !errors.Is(pauseErr, ErrStateChanged) {
+			if _, pauseErr := engine.pauseIfOwner(context.Background(), id, executionOwner); pauseErr != nil && !errors.Is(pauseErr, ErrStateChanged) {
 				return domain.Job{}, fmt.Errorf("pause interrupted job: %w", pauseErr)
 			}
 			return engine.store.Get(context.Background(), id)
@@ -186,17 +210,26 @@ func (engine *Engine) Run(ctx context.Context, id domain.JobID, execute ExecuteF
 			continue
 		}
 	}
-	return engine.store.FinalizeJob(context.Background(), id, engine.options.Owner)
+	finalized, err := engine.store.FinalizeJob(context.Background(), id, executionOwner)
+	if err == nil {
+		engine.log(context.Background(), id, "", "info", "job finalized", map[string]any{"state": finalized.State})
+	}
+	return finalized, err
+}
+
+func (engine *Engine) pauseIfOwner(ctx context.Context, id domain.JobID, owner string) (domain.Job, error) {
+	return engine.store.PauseOwned(ctx, id, owner)
 }
 
 func (engine *Engine) runItem(
 	ctx context.Context,
 	jobID domain.JobID,
 	item Item,
+	executionOwner string,
 	execute ExecuteFunc,
 	cancelRun context.CancelFunc,
 ) error {
-	claimed, err := engine.store.ClaimItem(ctx, jobID, item.ID, engine.options.Owner)
+	claimed, err := engine.store.ClaimItem(ctx, jobID, item.ID, executionOwner)
 	if err != nil {
 		return err
 	}
@@ -205,7 +238,7 @@ func (engine *Engine) runItem(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := engine.store.SaveCheckpoint(ctx, jobID, item.ID, engine.options.Owner, value); err != nil {
+		if err := engine.store.SaveCheckpoint(ctx, jobID, item.ID, executionOwner, value); err != nil {
 			return fmt.Errorf("save checkpoint for %s: %w", item.Key, err)
 		}
 		encoded, err := encodeCheckpoint(value)
@@ -224,29 +257,60 @@ func (engine *Engine) runItem(
 		if engine.options.RequestID != nil {
 			requestID = engine.options.RequestID(item, runAttempt)
 		}
-		attempt, err := engine.store.BeginAttempt(ctx, item, routeID, requestID)
+		attempt, err := engine.store.BeginAttempt(ctx, item, executionOwner, routeID, requestID)
 		if err != nil {
 			return fmt.Errorf("begin attempt for %s: %w", item.Key, err)
 		}
 		item.AttemptCount = attempt.Number
+		startedAt := time.Now()
+		engine.log(context.Background(), jobID, item.ID, "info", "job item attempt started", map[string]any{
+			"attempt": attempt.Number, "routeId": routeID, "requestId": requestID,
+		})
 		runErr := execute(ctx, item, checkpoint)
 		class, retryable := Classify(runErr)
 		attempt.FailureClass = class
 		if runErr != nil {
 			attempt.ErrorMessage = safety.RedactError(runErr).Error()
 		}
-		if finishErr := engine.store.FinishAttempt(context.Background(), attempt); finishErr != nil {
+		if finishErr := engine.store.FinishAttempt(context.Background(), attempt, executionOwner); finishErr != nil {
 			return fmt.Errorf("finish attempt for %s: %w", item.Key, finishErr)
+		}
+		if errors.Is(runErr, ErrStateChanged) {
+			cancelRun()
+			return runErr
 		}
 
 		if runErr == nil {
-			_, err = engine.store.TransitionItem(context.Background(), jobID, item.ID, engine.options.Owner,
+			_, err = engine.store.TransitionItem(context.Background(), jobID, item.ID, executionOwner,
 				domain.JobRunning, domain.JobCompleted, nil, "", "")
+			if err == nil {
+				engine.log(context.Background(), jobID, item.ID, "info", "job item attempt completed", map[string]any{
+					"attempt": attempt.Number, "duration": time.Since(startedAt).String(),
+				})
+			}
+			return err
+		}
+		if partial, ok := AsPartial(runErr); ok {
+			if partial.Class != "" {
+				class = partial.Class
+			}
+			_, err = engine.store.TransitionItem(context.Background(), jobID, item.ID, executionOwner,
+				domain.JobRunning, domain.JobPartial, nil, class, safety.RedactError(runErr).Error())
+			if err == nil {
+				engine.log(context.Background(), jobID, item.ID, "warning", "job item completed partially", map[string]any{
+					"attempt": attempt.Number, "duration": time.Since(startedAt).String(), "failureClass": class,
+				})
+			}
 			return err
 		}
 		if class == FailureAuthentication {
-			_, blockErr := engine.store.BlockAuthentication(context.Background(), jobID, item.ID, engine.options.Owner,
+			_, blockErr := engine.store.BlockAuthentication(context.Background(), jobID, item.ID, executionOwner,
 				safety.RedactError(runErr).Error())
+			if blockErr == nil {
+				engine.log(context.Background(), jobID, item.ID, "error", "job blocked on authentication", map[string]any{
+					"attempt": attempt.Number, "duration": time.Since(startedAt).String(), "failureClass": class,
+				})
+			}
 			cancelRun()
 			return blockErr
 		}
@@ -255,27 +319,62 @@ func (engine *Engine) runItem(
 			if getErr == nil && current.State != domain.JobRunning {
 				return currentControlError(current.State)
 			}
-			_, transitionErr := engine.store.TransitionItem(context.Background(), jobID, item.ID, engine.options.Owner,
+			_, transitionErr := engine.store.TransitionItem(context.Background(), jobID, item.ID, executionOwner,
 				domain.JobRunning, domain.JobPaused, nil, FailureInterrupted, safety.RedactError(runErr).Error())
 			if transitionErr != nil && !errors.Is(transitionErr, ErrStateChanged) {
 				return transitionErr
 			}
+			if transitionErr == nil {
+				engine.log(context.Background(), jobID, item.ID, "warning", "job item interrupted", map[string]any{
+					"attempt": attempt.Number, "duration": time.Since(startedAt).String(), "failureClass": FailureInterrupted,
+				})
+			}
 			return runErr
 		}
 		if retryable && runAttempt < engine.options.MaxAttempts {
-			if waitErr := engine.options.Sleep(ctx, engine.options.Backoff.Delay(runAttempt)); waitErr != nil {
+			delay := engine.options.Backoff.Delay(runAttempt)
+			engine.log(context.Background(), jobID, item.ID, "warning", "job item retry scheduled", map[string]any{
+				"attempt": attempt.Number, "duration": time.Since(startedAt).String(), "failureClass": class,
+				"retryDelay": delay.String(),
+			})
+			if waitErr := engine.options.Sleep(ctx, delay); waitErr != nil {
 				return waitErr
 			}
 			continue
 		}
-		_, err = engine.store.TransitionItem(context.Background(), jobID, item.ID, engine.options.Owner,
+		_, err = engine.store.TransitionItem(context.Background(), jobID, item.ID, executionOwner,
 			domain.JobRunning, domain.JobFailed, nil, class, safety.RedactError(runErr).Error())
+		if err == nil {
+			engine.log(context.Background(), jobID, item.ID, "error", "job item attempt failed", map[string]any{
+				"attempt": attempt.Number, "duration": time.Since(startedAt).String(), "failureClass": class,
+			})
+		}
 		return err
 	}
 	return nil
 }
 
-func (engine *Engine) monitor(ctx context.Context, id domain.JobID, cancel context.CancelFunc, done chan<- struct{}) {
+func (engine *Engine) log(ctx context.Context, jobID domain.JobID, itemID, level, message string, fields any) {
+	logger, ok := engine.store.(JobLogger)
+	if !ok || logger == nil {
+		return
+	}
+	logCtx, cancel := context.WithTimeout(ctx, engine.options.LogTimeout)
+	defer cancel()
+	_ = logger.AppendLog(logCtx, jobID, itemID, level, message, fields)
+}
+
+func (engine *Engine) executionOwner() string {
+	return engine.options.Owner + "/" + uuid.NewString()
+}
+
+func (engine *Engine) monitor(
+	ctx context.Context,
+	id domain.JobID,
+	executionOwner string,
+	cancel context.CancelFunc,
+	done chan<- struct{},
+) {
 	defer close(done)
 	ticker := time.NewTicker(engine.options.PollInterval)
 	defer ticker.Stop()
@@ -289,7 +388,7 @@ func (engine *Engine) monitor(ctx context.Context, id domain.JobID, cancel conte
 				cancel()
 				return
 			}
-			renewed, err := engine.store.RenewLease(context.Background(), id, engine.options.Owner, engine.options.LeaseDuration)
+			renewed, err := engine.store.RenewLease(context.Background(), id, executionOwner, engine.options.LeaseDuration)
 			if err != nil || !renewed {
 				cancel()
 				return

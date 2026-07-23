@@ -289,13 +289,13 @@ Major suites:
 
 Rollback before Phase 7 redeploys the archived online services. Rollback never downgrades or mutates local databases. After final retirement, restoring online services is an operational emergency procedure, not a supported user workflow.
 
-## Open Questions
+## Finalized implementation choices
 
-- Which minimum Go version and CGO policy will be accepted? Pure-Go SQLite simplifies cross-builds; platform SQLite/CGO can offer different performance and operational trade-offs.
-- Which OS credential-store library and encrypted-vault format will be standardized and independently reviewed?
-- Should the first proxy implementation preserve only the current URL-wrapper contract, or include CONNECT/SOCKS5 in the first stable local release?
-- Which Chromium-family browsers and minimum versions are officially supported for PDF on each platform?
-- What exact normalized JSON export schema is the long-term compatibility contract?
-- What database compatibility window will releases guarantee?
-- Which Web capabilities are mandatory parity versus intentionally retired, especially public proxy monitoring, support/sponsor pages, embedded API documentation, and development-only pages?
-- Should local MCP expose export file paths by default, or require an explicit allowed output root per profile?
+- The module requires Go 1.25 or newer. Release archives use `modernc.org/sqlite` with `CGO_ENABLED=0` for every supported target.
+- OS secrets use `zalando/go-keyring`; the fallback is a versioned Argon2id plus XChaCha20-Poly1305 vault that must be explicitly initialized and unlocked.
+- The first stable proxy adapter preserves the URL-wrapper contract. CONNECT/SOCKS5 remain future additions and do not change the route interface.
+- PDF discovers local Google Chrome, Chromium, Microsoft Edge, or Brave. The release gate tests real Chromium rendering where the runner provides a supported browser; there is no remote fallback.
+- CLI JSON uses the `wechat-article-cli/v1` success/error envelope; normalized export JSON uses its separately versioned exporter schema and compatibility tests.
+- The first database compatibility window is schema 1 through current schema 8. The floor can advance only under the documented bridge-release policy.
+- Mandatory parity is the signed 24-entry matrix. Hosted proxy monitoring, support/sponsor pages, embedded Web API docs, and development-only Web pages were intentionally retired.
+- MCP exports resolve an explicit or configured default output root and enforce profile allowed roots, including traversal and symlink-escape checks.

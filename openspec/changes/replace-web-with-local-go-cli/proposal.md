@@ -35,6 +35,7 @@ The project will consolidate the user-facing product into one local-first Go bin
 - `terminal-workspace`: Bubble Tea navigation, tables, filters, selection, previews, job progress, settings, accessibility, and non-interactive fallback behavior.
 - `local-mcp`: Embedded stdio MCP discovery and tool calls backed by the same local application modules without OAuth or a remote service.
 - `web-retirement`: Parity gate, compatibility period, migration messaging, removal of Nuxt/Nitro/Cloudflare/MCP-Worker surfaces, and rollback/archive requirements.
+- `release-distribution`: Native artifact matrix, checksums, SBOM/provenance, upgrade compatibility, release gates, and clean-room installation receipts.
 
 ### Modified Capabilities
 

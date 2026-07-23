@@ -124,6 +124,57 @@ func TestContentEndpointMapsCredentialExpiryBeforeParsing(t *testing.T) {
 	}
 }
 
+func TestContentEndpointValidatesCredentialWithoutArticleHistory(t *testing.T) {
+	client := &contentNetwork{bodies: []string{`{"base_resp":{"ret":0,"err_msg":"ok"},"elected_comment":[]}`}}
+	base, _ := url.Parse("http://127.0.0.1")
+	provenance, err := (ContentEndpoint{Network: client, BaseURL: base}).ValidateCredential(
+		context.Background(), CredentialValidationRequest{BusinessID: "fixture-biz", Credential: contentCredential()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provenance.Route != "fixture-route" || len(client.requests) != 1 || client.requests[0].Class != network.Comments {
+		t.Fatalf("provenance=%#v requests=%#v", provenance, client.requests)
+	}
+	if client.requests[0].URL.Query().Get("__biz") != "fixture-biz" || client.requests[0].URL.Query().Get("appmsgid") != "0" {
+		t.Fatalf("validation request URL = %s", client.requests[0].URL)
+	}
+	for _, secret := range []string{"fixture-key", "fixture-ticket", "fixture-token", "fixture-sid", "90001"} {
+		if strings.Contains(client.requests[0].URL.String(), secret) {
+			t.Fatalf("credential validation URL leaked %q: %s", secret, client.requests[0].URL)
+		}
+	}
+}
+
+func TestContentEndpointRejectsCredentialValidationWithoutBaseResponse(t *testing.T) {
+	base, _ := url.Parse("http://127.0.0.1")
+	for _, body := range []string{`{}`, `{"base_resp":null}`, `null`} {
+		client := &contentNetwork{bodies: []string{body}}
+		_, err := (ContentEndpoint{Network: client, BaseURL: base}).ValidateCredential(
+			context.Background(), CredentialValidationRequest{BusinessID: "fixture-biz", Credential: contentCredential()})
+		if !errors.Is(err, ErrContentProtocol) || !strings.Contains(err.Error(), "missing base_resp") {
+			t.Fatalf("body=%s error=%v", body, err)
+		}
+	}
+}
+
+func TestContentEndpointRejectsCredentialValidationWithoutAuthenticatedResponseShape(t *testing.T) {
+	base, _ := url.Parse("http://127.0.0.1")
+	for _, body := range []string{
+		`{"base_resp":{"ret":0,"err_msg":"ok"}}`,
+		`{"base_resp":{"ret":0},"elected_comment":null}`,
+		`{"base_resp":{"ret":0},"elected_comment":{}}`,
+		`{"base_resp":{"ret":0},"continue_flag":{}}`,
+		`{"base_resp":{"ret":0},"buffer":false}`,
+	} {
+		client := &contentNetwork{bodies: []string{body}}
+		_, err := (ContentEndpoint{Network: client, BaseURL: base}).ValidateCredential(
+			context.Background(), CredentialValidationRequest{BusinessID: "fixture-biz", Credential: contentCredential()})
+		if !errors.Is(err, ErrContentProtocol) || !strings.Contains(err.Error(), "authenticated comment-data shape") {
+			t.Fatalf("body=%s credential validation error=%v", body, err)
+		}
+	}
+}
+
 func contentCredential() credentials.Record {
 	return credentials.Record{
 		Biz: "fixture-biz", UIN: "90001", Key: "fixture-key", PassTicket: "fixture-ticket",

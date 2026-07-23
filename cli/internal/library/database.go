@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 3
+	CurrentSchemaVersion = 8
 	MinimumSchemaVersion = 1
 )
 
@@ -355,6 +355,15 @@ FROM albums WHERE `+predicate+` ORDER BY title COLLATE NOCASE, id LIMIT ? OFFSET
 		items = append(items, item)
 	}
 	return domain.Page[domain.Album]{Items: items, Total: total, Offset: offset, Limit: limit}, rows.Err()
+}
+
+func (database *Database) GetAlbumForAccount(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Album, error) {
+	var item domain.Album
+	err := database.db.QueryRowContext(ctx, `SELECT id, COALESCE(account_id, ''), upstream_id, title,
+description, article_count, is_paid
+FROM albums WHERE profile_id=? AND account_id=? AND id=?`, database.profileID, accountID, albumID).Scan(
+		&item.ID, &item.AccountID, &item.UpstreamID, &item.Name, &item.Description, &item.ArticleCount, &item.Paid)
+	return item, err
 }
 
 func (database *Database) StorageStatus(ctx context.Context) (domain.StorageStatus, error) {

@@ -6,17 +6,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/safety"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/tui"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
+	"golang.org/x/term"
 )
 
 var Version = "2.0.0"
@@ -31,21 +34,43 @@ type App struct {
 	proxy    proxyManager
 	runtimes *runtimeManager
 	active   *ProfileRuntime
+	initErr  error
 
 	jsonOut bool
 	debug   bool
 
 	workspaceRunner func(context.Context, tui.WorkspaceOptions) error
 	forceWorkspace  bool
+	startupArgs     []string
 }
 
 func New(stdin io.Reader, stdout, stderr io.Writer) *App {
-	appInstance, err := NewWithDependencies(context.Background(), stdin, stdout, stderr, Dependencies{})
+	return newWithStartupArgs(stdin, stdout, stderr, nil)
+}
+
+// NewForArgs constructs the executable adapter with the exact argument vector
+// that will later be passed to Execute. Embedders should use New, which never
+// inspects or binds itself to the host process's os.Args.
+func NewForArgs(stdin io.Reader, stdout, stderr io.Writer, args []string) *App {
+	return newWithStartupArgs(stdin, stdout, stderr, args)
+}
+
+func newWithStartupArgs(stdin io.Reader, stdout, stderr io.Writer, args []string) *App {
+	dependencies := Dependencies{StartupArgs: append([]string(nil), args...)}
+	appInstance, err := NewWithDependencies(context.Background(), stdin, stdout, stderr, dependencies)
 	if err != nil {
 		// Preserve the historical constructor signature for embedders. Runtime
 		// initialization errors are surfaced by status and local operations.
 		fallback := application.New(application.Options{Version: Version})
-		return &App{stdin: stdin, stdout: stdout, stderr: stderr, core: fallback, secret: secrets.NewMemoryStore()}
+		result := &App{stdin: stdin, stdout: stdout, stderr: stderr, core: fallback, secret: secrets.NewMemoryStore(), initErr: err}
+		result.startupArgs = append([]string(nil), dependencies.StartupArgs...)
+		if dependencies.PathOptions == (profiles.PathOptions{}) {
+			dependencies.PathOptions = pathOptionsFromEnvironment()
+		}
+		if paths, pathErr := defaultPaths(dependencies.PathOptions); pathErr == nil {
+			result.runtimes = &runtimeManager{paths: paths}
+		}
+		return result
 	}
 	return appInstance
 }
@@ -59,13 +84,16 @@ func NewWithDependencies(
 	if dependencies.PathOptions == (profiles.PathOptions{}) {
 		dependencies.PathOptions = pathOptionsFromEnvironment()
 	}
+	if dependencies.Secrets == nil && startupRequestsVaultCommand(dependencies.StartupArgs) {
+		dependencies.Secrets = secrets.NewMemoryStore()
+	}
 	paths, err := defaultPaths(dependencies.PathOptions)
 	if err != nil {
 		return nil, fmt.Errorf("resolve runtime paths: %w", err)
 	}
 	secretStore := dependencies.Secrets
 	if secretStore == nil {
-		secretStore, err = defaultSecretStoreFromEnvironment()
+		secretStore, err = defaultSecretStoreFromEnvironment(paths, stdin, stderr)
 		if err != nil {
 			return nil, err
 		}
@@ -85,6 +113,7 @@ func NewWithDependencies(
 		stdin: stdin, stdout: stdout, stderr: stderr,
 		core:     active.Core,
 		profiles: registry, secret: secretStore, proxy: active.Network, runtimes: manager, active: active,
+		startupArgs: append([]string(nil), dependencies.StartupArgs...),
 	}, nil
 }
 
@@ -100,14 +129,62 @@ func pathOptionsFromEnvironment() profiles.PathOptions {
 	}
 }
 
-func defaultSecretStoreFromEnvironment() (secrets.Store, error) {
+func defaultSecretStoreFromEnvironment(paths profiles.Paths, stdin io.Reader, stderr io.Writer) (secrets.Store, error) {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("WECHAT_ARTICLE_SECRET_BACKEND"))) {
 	case "", "os-keyring":
 		return secrets.NewKeyringStore(""), nil
+	case "vault", "encrypted-vault":
+		store := secrets.NewVaultStore(paths.VaultFile(), secrets.DefaultVaultParameters)
+		if _, statErr := os.Stat(paths.VaultFile()); errors.Is(statErr, os.ErrNotExist) {
+			return nil, errors.New("encrypted vault is not initialized; run `wechat-article vault init`")
+		} else if statErr != nil {
+			return nil, fmt.Errorf("inspect encrypted vault: %w", statErr)
+		}
+		passphrase, err := vaultPassphraseFromEnvironmentOrTerminal(stdin, stderr)
+		if err != nil {
+			return nil, err
+		}
+		defer zeroSecret(passphrase)
+		if err := store.Unlock(passphrase); err != nil {
+			return nil, err
+		}
+		return store, nil
 	case "memory":
 		return secrets.NewMemoryStore(), nil
 	default:
-		return nil, errors.New("WECHAT_ARTICLE_SECRET_BACKEND must be os-keyring or memory")
+		return nil, errors.New("WECHAT_ARTICLE_SECRET_BACKEND must be os-keyring, vault, or memory")
+	}
+}
+
+func startupRequestsVaultCommand(args []string) bool {
+	for _, argument := range args {
+		if argument == "vault" {
+			return true
+		}
+		if !strings.HasPrefix(argument, "-") {
+			return false
+		}
+	}
+	return false
+}
+
+func vaultPassphraseFromEnvironmentOrTerminal(stdin io.Reader, stderr io.Writer) ([]byte, error) {
+	if path := strings.TrimSpace(os.Getenv("WECHAT_ARTICLE_VAULT_PASSPHRASE_FILE")); path != "" {
+		return readPassphraseFile(path)
+	}
+	if value := os.Getenv("WECHAT_ARTICLE_VAULT_PASSPHRASE"); value != "" {
+		return []byte(value), nil
+	}
+	file, ok := stdin.(interface{ Fd() uintptr })
+	if !ok || !term.IsTerminal(int(file.Fd())) {
+		return nil, errors.New("encrypted vault unlock requires WECHAT_ARTICLE_VAULT_PASSPHRASE_FILE, WECHAT_ARTICLE_VAULT_PASSPHRASE, or an interactive terminal")
+	}
+	return readTerminalPassphrase(stdin, stderr, "Encrypted vault passphrase: ")
+}
+
+func zeroSecret(value []byte) {
+	for index := range value {
+		value[index] = 0
 	}
 }
 
@@ -129,6 +206,9 @@ func selectedProfile(registry *profiles.Registry, selected string) (profiles.Pro
 }
 
 func (a *App) Close() error {
+	if vault, ok := a.secret.(*secrets.VaultStore); ok {
+		defer vault.Lock()
+	}
 	if a.runtimes == nil {
 		return nil
 	}
@@ -138,6 +218,12 @@ func (a *App) Close() error {
 func (a *App) Execute(ctx context.Context, args []string) error {
 	a.jsonOut = false
 	a.debug = false
+	if a.initErr == nil && len(a.startupArgs) > 0 && !slices.Equal(a.startupArgs, args) {
+		return usage("this application instance was initialized for a different argument set; create a new App for each command")
+	}
+	if a.initErr != nil && !bootstrapCommand(args) {
+		return safety.RedactError(a.initErr)
+	}
 	root := a.rootCommand()
 	root.SetArgs(args)
 	root.SetContext(ctx)
@@ -153,6 +239,32 @@ func (a *App) Execute(ctx context.Context, args []string) error {
 		return usage(safety.RedactText(err.Error()))
 	}
 	return safety.RedactError(err)
+}
+
+func bootstrapCommand(args []string) bool {
+	for _, argument := range args {
+		if argument == "--" {
+			break
+		}
+		if argument == "--help" || argument == "-h" || argument == "--version" {
+			return true
+		}
+	}
+	for _, argument := range args {
+		if argument == "--" {
+			return false
+		}
+		if argument == "help" || argument == "version" {
+			return true
+		}
+		if argument == "vault" {
+			return true
+		}
+		if !strings.HasPrefix(argument, "-") {
+			return false
+		}
+	}
+	return false
 }
 
 func (a *App) JSONOutputEnabled() bool { return a.jsonOut }
@@ -199,6 +311,7 @@ func (a *App) rootCommand() *cobra.Command {
 		a.localStatusCommand(),
 		a.localLoginCommand(),
 		a.localLogoutCommand(),
+		a.localSessionCommand(),
 		a.profileCommand(),
 		a.articleCommand(),
 		a.accountCommand(),
@@ -214,6 +327,7 @@ func (a *App) rootCommand() *cobra.Command {
 		a.databaseCommand(),
 		a.migrationCommand(),
 		a.diagnosticsCommand(),
+		a.vaultCommand(),
 		a.mcpCommand(),
 		a.completionCommand(root),
 	)
@@ -310,6 +424,9 @@ func (a *App) prepareProfile(ctx context.Context, profile profiles.Profile) (*Pr
 func (a *App) commitProfile(runtime *ProfileRuntime) error {
 	if err := a.runtimes.Activate(runtime); err != nil {
 		_ = runtime.Close()
+		a.active = nil
+		a.core = application.New(application.Options{Version: Version})
+		a.proxy = nil
 		return err
 	}
 	a.active = runtime
@@ -317,6 +434,93 @@ func (a *App) commitProfile(runtime *ProfileRuntime) error {
 	if runtime.Network != nil {
 		a.proxy = runtime.Network
 	}
+	return nil
+}
+
+func (a *App) restoreActiveProfile(
+	ctx context.Context,
+	archivePath string,
+	conflict library.RestoreConflictPolicy,
+) (library.RestoreReport, error) {
+	if a == nil || a.runtimes == nil || a.active == nil || a.active.Library == nil || a.active.Jobs == nil {
+		return library.RestoreReport{}, errors.New("active profile storage is unavailable")
+	}
+	a.runtimes.mu.Lock()
+	defer a.runtimes.mu.Unlock()
+	active := a.active
+	gate, err := profiles.AcquireMaintenanceGate(ctx, active.Profile.Paths)
+	if err != nil {
+		return library.RestoreReport{}, err
+	}
+	gateOpen := true
+	defer func() {
+		if gateOpen {
+			_ = gate.Close()
+		}
+	}()
+	blockers, err := active.Jobs.RestoreBlockers(ctx)
+	if err != nil {
+		return library.RestoreReport{}, fmt.Errorf("check restore blockers: %w", err)
+	}
+	if len(blockers) > 0 {
+		return library.RestoreReport{}, fmt.Errorf("restore blocked by %d running job or active lease; pause, cancel, or recover jobs first: %w", len(blockers), profiles.ErrProfileBusy)
+	}
+	if err := active.Close(); err != nil {
+		a.clearActiveRuntime()
+		reopenErr := a.reopenActiveProfile(active.Profile)
+		return library.RestoreReport{}, errors.Join(err, reopenErr)
+	}
+	a.clearActiveRuntime()
+	maintenanceRuntime, err := profiles.AcquireMaintenanceRuntimeLock(ctx, active.Profile.Paths)
+	if err != nil {
+		reopenErr := a.reopenActiveProfile(active.Profile)
+		return library.RestoreReport{}, errors.Join(err, reopenErr)
+	}
+	report, restoreErr := library.RestoreBackup(ctx, library.RestoreOptions{
+		ArchivePath: archivePath, DatabasePath: active.Profile.Paths.Database, ObjectStore: active.Objects,
+		ConfigPath: active.Profile.Paths.Config, ConflictPolicy: conflict,
+		TargetProfile: active.Profile.ID, TargetName: active.Profile.Name,
+	})
+	lockErr := maintenanceRuntime.Close()
+	reopenErr := a.reopenActiveProfile(active.Profile)
+	gateErr := gate.Close()
+	gateOpen = false
+	if restoreErr != nil {
+		return report, errors.Join(restoreErr, lockErr, reopenErr, gateErr)
+	}
+	if lockErr != nil || reopenErr != nil || gateErr != nil {
+		return report, errors.Join(fmt.Errorf("restore committed but active runtime could not be reopened safely"), lockErr, reopenErr, gateErr)
+	}
+	return report, nil
+}
+
+func (a *App) clearActiveRuntime() {
+	if a == nil {
+		return
+	}
+	if a.runtimes != nil {
+		a.runtimes.active = nil
+	}
+	a.active = nil
+	a.core = application.New(application.Options{Version: Version})
+	a.proxy = nil
+}
+
+func (a *App) reopenActiveProfile(profile profiles.Profile) error {
+	if a == nil || a.runtimes == nil {
+		return errors.New("profile runtime manager is unavailable")
+	}
+	reopenCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	prepared, err := a.runtimes.prepareProfileLocked(reopenCtx, profile, true)
+	if err != nil {
+		a.clearActiveRuntime()
+		return fmt.Errorf("reopen active profile runtime: %w", err)
+	}
+	a.runtimes.active = prepared
+	a.active = prepared
+	a.core = prepared.Core
+	a.proxy = prepared.Network
 	return nil
 }
 
@@ -444,6 +648,28 @@ func (a *App) localLogoutCommand() *cobra.Command {
 			return a.output(map[string]any{"success": true, "data": map[string]any{"authenticated": false, "localSessionRemoved": true}})
 		},
 	}
+}
+
+func (a *App) localSessionCommand() *cobra.Command {
+	command := &cobra.Command{Use: "session", Short: "Inspect and switch accounts available in the authenticated WeChat session"}
+	list := &cobra.Command{Use: "accounts", Short: "List switchable upstream accounts", Args: cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			items, err := a.core.ListSwitchableAccounts(command.Context())
+			if err != nil {
+				return err
+			}
+			return a.output(map[string]any{"accounts": items, "count": len(items)})
+		}}
+	switchCommand := &cobra.Command{Use: "switch <id>", Short: "Switch the active upstream account and persist the session", Args: exactArgs(1, "session switch requires <id>"),
+		RunE: func(command *cobra.Command, args []string) error {
+			session, err := a.core.SwitchAccount(command.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			return a.output(session)
+		}}
+	command.AddCommand(list, switchCommand)
+	return command
 }
 
 func (a *App) openBrowser(ctx context.Context, target string) error {

@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
-const CurrentConfigVersion = 2
+const CurrentConfigVersion = 3
 
 type ProfileConfig struct {
 	SchemaVersion int             `json:"schemaVersion"`
@@ -74,9 +75,10 @@ type ProxyPreferences struct {
 }
 
 type MCPPolicy struct {
-	ReadOnly bool     `json:"readOnly"`
-	Allow    []string `json:"allow,omitempty"`
-	Deny     []string `json:"deny,omitempty"`
+	ReadOnly           bool     `json:"readOnly"`
+	Allow              []string `json:"allow,omitempty"`
+	Deny               []string `json:"deny,omitempty"`
+	AllowedOutputRoots []string `json:"allowedOutputRoots,omitempty"`
 }
 
 type EffectiveConfig struct {
@@ -242,6 +244,14 @@ func decodeAndMigrateConfig(data []byte, version int) (ProfileConfig, error) {
 		configuration.MCP = legacy.MCP
 		configuration.Extensions = legacy.Extensions
 		return configuration, validateConfig(configuration)
+	case 2:
+		configuration := DefaultConfig("")
+		if err := json.Unmarshal(data, &configuration); err != nil {
+			return ProfileConfig{}, err
+		}
+		configuration.SchemaVersion = CurrentConfigVersion
+		normalizePreferences(&configuration.Preferences)
+		return configuration, validateConfig(configuration)
 	case CurrentConfigVersion:
 		configuration := DefaultConfig("")
 		if err := json.Unmarshal(data, &configuration); err != nil {
@@ -285,6 +295,11 @@ func validateConfig(configuration ProfileConfig) error {
 	}
 	if preferences.Sync.PageDelay < 3*time.Second && !preferences.Sync.UnsafePacingSaved {
 		return errors.New("sync page delay below 3s requires unsafePacingSaved confirmation")
+	}
+	for _, root := range configuration.MCP.AllowedOutputRoots {
+		if strings.TrimSpace(root) == "" || !filepath.IsAbs(root) {
+			return errors.New("MCP allowed output roots must be non-empty absolute paths")
+		}
 	}
 	return nil
 }

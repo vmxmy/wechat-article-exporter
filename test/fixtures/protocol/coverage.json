@@ -1,5 +1,14 @@
 {
   "schemaVersion": 1,
+  "verification": {
+    "command": "cd cli && go test -count=1 ./internal/corpus",
+    "requiredFiles": [
+      "case.json",
+      "request.sanitized.json",
+      "response.sanitized.json",
+      "expected.normalized.json"
+    ]
+  },
   "domains": {
     "searchbiz": { "status": "captured", "required": ["success-page", "empty", "auth-expired", "malformed"] },
     "appmsgpublish": {

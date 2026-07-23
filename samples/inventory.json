@@ -1,0 +1,247 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "path": "aboutbiz/biz-MjM5ODMxNzE2NQ==.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Account-resolution page fixture, not an article document; protocol account discovery is covered separately.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "aboutbiz/biz-MjM5OTM0OTE1Mg==.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Account-resolution page fixture, not an article document; protocol account discovery is covered separately.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "aboutbiz/biz-MzAxODU1ODg2Mg==.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Account-resolution page fixture, not an article document; protocol account discovery is covered separately.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "aboutbiz/biz-MzI0Nzg2MTExMA==.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Account-resolution page fixture, not an article document; protocol account discovery is covered separately.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "aboutbiz/biz-MzI4NjAxNjY4Nw==.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Account-resolution page fixture, not an article document; protocol account discovery is covered separately.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "aboutbiz/biz-MzIxMTgzNjE5MA==.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Account-resolution page fixture, not an article document; protocol account discovery is covered separately.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "aboutbiz/biz-Mzg3OTYzMDkzMg==.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Account-resolution page fixture, not an article document; protocol account discovery is covered separately.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "author/01.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Author-metadata exploration fixture retained for historical parser research; no stable article golden has been approved.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "作者已删除/01.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Representative terminal-state behavior is asserted by TestRepresentativeUnavailableSamples; semantic golden format applies only to valid articles.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "作者已删除/02.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed author-deleted variant; representative terminal-state behavior is asserted by TestRepresentativeUnavailableSamples.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "作者已删除/03.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed author-deleted variant; representative terminal-state behavior is asserted by TestRepresentativeUnavailableSamples.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "作者已删除/04.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed author-deleted variant; representative terminal-state behavior is asserted by TestRepresentativeUnavailableSamples.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "作者已删除/05.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed author-deleted variant; representative terminal-state behavior is asserted by TestRepresentativeUnavailableSamples.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "作者已删除/06.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed author-deleted variant; representative terminal-state behavior is asserted by TestRepresentativeUnavailableSamples.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "内容违规/01.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Representative policy-violation behavior is asserted by TestRepresentativeUnavailableSamples; semantic golden format applies only to valid articles.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "内容违规/02.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed policy-violation variant; representative terminal-state behavior is asserted by TestRepresentativeUnavailableSamples.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "图片分享/01.html",
+      "disposition": "golden",
+      "golden": "cli/internal/processor/testdata/golden/sample_semantics.json"
+    },
+    {
+      "path": "图片分享/02.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed image-share variant; 图片分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "图片分享/03.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed image-share variant; 图片分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "图片分享/04.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed image-share variant; 图片分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "图片分享/05.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed image-share variant; 图片分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "文本分享/01.html",
+      "disposition": "golden",
+      "golden": "cli/internal/processor/testdata/golden/sample_semantics.json"
+    },
+    {
+      "path": "文本分享/02.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed text-share variant; 文本分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "文本分享/03.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed text-share variant; 文本分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "文本分享/04.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed text-share variant; 文本分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "文本分享/c01.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed text-share response variant; 文本分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "文本分享/c02.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed text-share response variant; 文本分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "文本分享/c03.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed text-share response variant; 文本分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "文本分享/c04.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed text-share response variant; 文本分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "文本分享/c05.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed text-share response variant; 文本分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "文章分享/01.html",
+      "disposition": "golden",
+      "golden": "cli/internal/processor/testdata/golden/sample_semantics.json"
+    },
+    {
+      "path": "文章分享/02.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed article-share variant; 文章分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "文章分享/03.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed article-share variant; 文章分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "文章分享/04.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed article-share variant; 文章分享/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "普通图文/01.html",
+      "disposition": "golden",
+      "golden": "cli/internal/processor/testdata/golden/sample_semantics.json"
+    },
+    {
+      "path": "普通图文/02.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed graphic-article variant; 普通图文/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "普通图文/03.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed graphic-article variant; 普通图文/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "普通图文/04.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed graphic-article variant; 普通图文/01.html is the approved semantic and structural golden representative.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "普通图文/c01.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed audio-bearing graphic variant; audio metadata is asserted by TestSampleEngagementAndAudio.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "普通图文/c02.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Reviewed engagement-bearing graphic variant; engagement metadata is asserted by TestSampleEngagementAndAudio.",
+      "reviewedAt": "2026-07-23"
+    },
+    {
+      "path": "该内容暂时无法查看/01.html",
+      "disposition": "reviewed-exclusion",
+      "reason": "Representative temporarily-unavailable behavior is asserted by TestRepresentativeUnavailableSamples; semantic golden format applies only to valid articles.",
+      "reviewedAt": "2026-07-23"
+    }
+  ]
+}

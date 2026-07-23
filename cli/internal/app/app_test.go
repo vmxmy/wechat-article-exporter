@@ -1,22 +1,29 @@
 package app
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/jobs"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/network"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/objects"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/runtime"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/tui"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
 
@@ -28,8 +35,12 @@ func (injectedClock) After(time.Duration) <-chan time.Time {
 }
 
 func TestSecretBackendEnvironmentSupportsEphemeralSmokeRuntime(t *testing.T) {
+	paths, err := profiles.ResolvePaths(profiles.PathOptions{Portable: true, PortableRoot: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("WECHAT_ARTICLE_SECRET_BACKEND", "memory")
-	store, err := defaultSecretStoreFromEnvironment()
+	store, err := defaultSecretStoreFromEnvironment(paths, strings.NewReader(""), &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,8 +49,232 @@ func TestSecretBackendEnvironmentSupportsEphemeralSmokeRuntime(t *testing.T) {
 	}
 
 	t.Setenv("WECHAT_ARTICLE_SECRET_BACKEND", "plaintext")
-	if _, err := defaultSecretStoreFromEnvironment(); err == nil {
+	if _, err := defaultSecretStoreFromEnvironment(paths, strings.NewReader(""), &bytes.Buffer{}); err == nil {
 		t.Fatal("unsupported secret backend was accepted")
+	}
+}
+
+func TestHistoricalConstructorSurfacesInitializationFailureOnExecute(t *testing.T) {
+	t.Setenv("WECHAT_ARTICLE_SECRET_BACKEND", "unsupported")
+	applicationAdapter := New(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	err := applicationAdapter.Execute(context.Background(), []string{"status"})
+	if err == nil || !strings.Contains(err.Error(), "WECHAT_ARTICLE_SECRET_BACKEND") {
+		t.Fatalf("initialization error = %v", err)
+	}
+}
+
+func TestInitializationFailureStillAllowsHelpVersionAndVaultBootstrap(t *testing.T) {
+	root := t.TempDir()
+	passphrasePath := filepath.Join(root, "passphrase.txt")
+	if err := os.WriteFile(passphrasePath, []byte("bootstrap-passphrase\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WECHAT_ARTICLE_PORTABLE_ROOT", root)
+	t.Setenv("WECHAT_ARTICLE_SECRET_BACKEND", "vault")
+	t.Setenv("WECHAT_ARTICLE_VAULT_PASSPHRASE_FILE", "")
+	t.Setenv("WECHAT_ARTICLE_VAULT_PASSPHRASE", "")
+	stdout := &bytes.Buffer{}
+	applicationAdapter := New(strings.NewReader(""), stdout, &bytes.Buffer{})
+	if err := applicationAdapter.Execute(context.Background(), []string{"help"}); err != nil {
+		t.Fatalf("help after init failure: %v", err)
+	}
+	stdout.Reset()
+	if err := applicationAdapter.Execute(context.Background(), []string{"--version"}); err != nil {
+		t.Fatalf("version after init failure: %v", err)
+	}
+	stdout.Reset()
+	if err := applicationAdapter.Execute(context.Background(), []string{"status", "--help"}); err != nil {
+		t.Fatalf("subcommand help after init failure: %v", err)
+	}
+	stdout.Reset()
+	if err := applicationAdapter.Execute(context.Background(), []string{"vault", "init", "--passphrase-file", passphrasePath, "--json"}); err != nil {
+		t.Fatalf("vault init after init failure: %v", err)
+	}
+}
+
+func TestAppWithExplicitStartupArgsRejectsDifferentExecutionArguments(t *testing.T) {
+	applicationAdapter, err := NewWithDependencies(context.Background(), strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, Dependencies{
+		PathOptions: profiles.PathOptions{Portable: true, PortableRoot: t.TempDir()}, Secrets: secrets.NewMemoryStore(),
+		StartupArgs: []string{"status", "--json"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer applicationAdapter.Close()
+	if err := applicationAdapter.Execute(context.Background(), []string{"status", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := applicationAdapter.Execute(context.Background(), []string{"vault", "status", "--json"}); ExitCode(err) != 2 {
+		t.Fatalf("mismatched execution error=%v exit=%d", err, ExitCode(err))
+	}
+}
+
+func TestNewWithDependenciesUsesExplicitStartupArgsNotProcessArgs(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("WECHAT_ARTICLE_SECRET_BACKEND", "vault")
+	_, err := NewWithDependencies(context.Background(), strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, Dependencies{
+		PathOptions: profiles.PathOptions{Portable: true, PortableRoot: root}, StartupArgs: []string{"status"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not initialized") {
+		t.Fatalf("explicit status startup error=%v", err)
+	}
+	applicationAdapter, err := NewWithDependencies(context.Background(), strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, Dependencies{
+		PathOptions: profiles.PathOptions{Portable: true, PortableRoot: root}, StartupArgs: []string{"vault", "status"},
+	})
+	if err != nil {
+		t.Fatalf("explicit vault startup: %v", err)
+	}
+	applicationAdapter.Close()
+}
+
+func TestNewDoesNotBindHostProcessArguments(t *testing.T) {
+	original := os.Args
+	os.Args = []string{"host-process", "vault", "status"}
+	t.Cleanup(func() { os.Args = original })
+	applicationAdapter := New(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	defer applicationAdapter.Close()
+	if len(applicationAdapter.startupArgs) != 0 {
+		t.Fatalf("New startupArgs=%#v", applicationAdapter.startupArgs)
+	}
+}
+
+func TestVaultCommandsInitializeVerifyAndNeverEchoPassphrase(t *testing.T) {
+	root := t.TempDir()
+	passphrase := "correct horse battery staple"
+	passphrasePath := filepath.Join(root, "vault-passphrase.txt")
+	if err := os.WriteFile(passphrasePath, []byte(passphrase+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	applicationAdapter, err := NewWithDependencies(context.Background(), strings.NewReader(""), stdout, stderr, Dependencies{
+		PathOptions: profiles.PathOptions{Portable: true, PortableRoot: root},
+		Secrets:     secrets.NewMemoryStore(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = applicationAdapter.Close() })
+
+	if err := applicationAdapter.Execute(context.Background(), []string{
+		"vault", "init", "--passphrase-file", passphrasePath, "--json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, output := range []string{stdout.String(), stderr.String()} {
+		if strings.Contains(output, passphrase) {
+			t.Fatalf("vault init leaked passphrase: %s", output)
+		}
+	}
+	paths, err := profiles.ResolvePaths(profiles.PathOptions{Portable: true, PortableRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(paths.VaultFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("vault permissions = %o", info.Mode().Perm())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := applicationAdapter.Execute(context.Background(), []string{
+		"vault", "verify", "--passphrase-file", passphrasePath, "--json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"verified": true`) || strings.Contains(stdout.String(), passphrase) {
+		t.Fatalf("vault verify output = %s", stdout.String())
+	}
+
+	if err := os.WriteFile(passphrasePath, []byte("wrong-password\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if err := applicationAdapter.Execute(context.Background(), []string{
+		"vault", "verify", "--passphrase-file", passphrasePath, "--json",
+	}); err == nil || !strings.Contains(err.Error(), "invalid passphrase") {
+		t.Fatalf("vault verify wrong passphrase error = %v", err)
+	}
+}
+
+func TestVaultStatusReportsConfiguredBackendAndInvalidEnvelope(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("WECHAT_ARTICLE_SECRET_BACKEND", "vault")
+	stdout := &bytes.Buffer{}
+	applicationAdapter, err := NewWithDependencies(context.Background(), strings.NewReader(""), stdout, &bytes.Buffer{}, Dependencies{
+		PathOptions: profiles.PathOptions{Portable: true, PortableRoot: root},
+		Secrets:     secrets.NewMemoryStore(),
+		StartupArgs: []string{"vault", "status", "--json"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = applicationAdapter.Close() })
+	paths, err := profiles.ResolvePaths(profiles.PathOptions{Portable: true, PortableRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.VaultFile(), []byte(`{"version":999}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := applicationAdapter.Execute(context.Background(), []string{"vault", "status", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, `"backend": "vault"`) || !strings.Contains(output, `"active": true`) ||
+		!strings.Contains(output, `"initialized": false`) || !strings.Contains(output, `"invalid": true`) {
+		t.Fatalf("vault status=%s", output)
+	}
+}
+
+func TestVaultBackendUnlocksAcrossApplicationRestart(t *testing.T) {
+	root := t.TempDir()
+	paths, err := profiles.ResolvePaths(profiles.PathOptions{Portable: true, PortableRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	passphrase := []byte("restart-safe-passphrase")
+	store := secrets.NewVaultStore(paths.VaultFile(), secrets.VaultParameters{Memory: 8 * 1024, Iterations: 1, Parallelism: 1})
+	if err := store.Initialize(passphrase); err != nil {
+		t.Fatal(err)
+	}
+	store.Lock()
+	passphrasePath := filepath.Join(root, "passphrase.txt")
+	if err := os.WriteFile(passphrasePath, append(append([]byte(nil), passphrase...), '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WECHAT_ARTICLE_SECRET_BACKEND", "vault")
+	t.Setenv("WECHAT_ARTICLE_VAULT_PASSPHRASE_FILE", passphrasePath)
+
+	applicationAdapter, err := NewWithDependencies(context.Background(), strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, Dependencies{
+		PathOptions: profiles.PathOptions{Portable: true, PortableRoot: root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = applicationAdapter.Close() })
+	if applicationAdapter.secret.Backend() != "encrypted-vault" {
+		t.Fatalf("secret backend = %q", applicationAdapter.secret.Backend())
+	}
+}
+
+func TestVaultBackendFailsClosedWithoutInitializationOrSafeInput(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("WECHAT_ARTICLE_SECRET_BACKEND", "vault")
+	t.Setenv("WECHAT_ARTICLE_VAULT_PASSPHRASE", "")
+	t.Setenv("WECHAT_ARTICLE_VAULT_PASSPHRASE_FILE", "")
+	_, err := NewWithDependencies(context.Background(), strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, Dependencies{
+		PathOptions: profiles.PathOptions{Portable: true, PortableRoot: root},
+	})
+	if err == nil || (!strings.Contains(err.Error(), "requires") && !strings.Contains(err.Error(), "not initialized")) {
+		t.Fatalf("non-interactive vault startup error = %v", err)
 	}
 }
 
@@ -51,7 +286,7 @@ func TestHelpDocumentsStableCommandsAndStructuredInput(t *testing.T) {
 	output := stdout.String()
 	for _, expected := range []string{
 		"login", "logout", "profile", "article", "account", "album", "sync", "download", "metadata", "comments",
-		"credential", "proxy", "job", "export", "db", "diagnostics", "completion", "--json",
+		"credential", "proxy", "job", "export", "db", "diagnostics", "vault", "completion", "--json",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("help output missing %q:\n%s", expected, output)
@@ -61,6 +296,255 @@ func TestHelpDocumentsStableCommandsAndStructuredInput(t *testing.T) {
 		if command.Name() == "legacy" {
 			t.Fatalf("retired legacy command is still registered")
 		}
+	}
+}
+
+func TestSavedArticleQueryCommandRequiresVersionedValidatedDocument(t *testing.T) {
+	applicationAdapter, stdout, _ := newTestApp(t)
+	directory := t.TempDir()
+	valid := filepath.Join(directory, "valid.json")
+	if err := os.WriteFile(valid, []byte(`{"schemaVersion":1,"query":{"keyword":"release","limit":50,"sorts":[{"field":"published","direction":"desc"}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := applicationAdapter.Execute(context.Background(), []string{"article", "query", "save", "release", "--file", valid, "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"name": "release"`) {
+		t.Fatalf("saved query output=%s", stdout.String())
+	}
+
+	for name, contents := range map[string]string{
+		"raw":     `{"keyword":"release"}`,
+		"range":   `{"schemaVersion":1,"query":{"readMin":10,"readMax":1}}`,
+		"version": `{"schemaVersion":2,"query":{}}`,
+	} {
+		path := filepath.Join(directory, name+".json")
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := applicationAdapter.Execute(context.Background(), []string{"article", "query", "save", name, "--file", path, "--json"}); err == nil {
+			t.Fatalf("invalid %s query was accepted", name)
+		}
+	}
+}
+
+func TestLocalMCPContentReaderKeepsJSONContractAndRenderedDigests(t *testing.T) {
+	applicationAdapter, _, _ := newTestApp(t)
+	ctx := context.Background()
+	if err := applicationAdapter.active.Library.UpsertArticle(ctx, library.ArticleRecord{
+		ID: "article-mcp", Title: "MCP article", CanonicalURL: "https://mp.weixin.qq.com/s/mcp", ContentStatus: "available",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bodyBytes, err := os.ReadFile(filepath.Join("..", "processor", "testdata", "valid_cgidata.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(bodyBytes)
+	object, err := applicationAdapter.active.Objects.Put(ctx, strings.NewReader(body), "text/html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applicationAdapter.active.Library.CommitContent(ctx, "article-mcp", objects.Object{
+		Digest: object.Digest, Size: object.Size, MediaType: "text/html",
+	}, "html", "https://mp.weixin.qq.com/s/mcp", "available", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	reader := localMCPContentReader{runtime: applicationAdapter.active}
+	jsonValue, err := reader.ReadContent(ctx, "article-mcp", "json")
+	if err != nil || jsonValue == nil {
+		t.Fatalf("json content=%#v err=%v", jsonValue, err)
+	}
+	for _, kind := range []string{"text", "markdown"} {
+		value, err := reader.ReadContent(ctx, "article-mcp", kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := value.(map[string]any)
+		if result["sha256"] == object.Digest {
+			t.Fatalf("%s digest reused source HTML digest", kind)
+		}
+		if kind == "text" && result["mediaType"] != "text/plain" {
+			t.Fatalf("text media type=%v", result["mediaType"])
+		}
+	}
+}
+
+func TestLocalMCPContentReaderHashesTheSameHandleItReads(t *testing.T) {
+	applicationAdapter, _, _ := newTestApp(t)
+	ctx := context.Background()
+	if err := applicationAdapter.active.Library.UpsertArticle(ctx, library.ArticleRecord{
+		ID: "article-mcp-integrity", Title: "MCP integrity", CanonicalURL: "https://mp.weixin.qq.com/s/mcp-integrity", ContentStatus: "available",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := `<div id="js_article"></div><script>window.cgiData={"title":"MCP integrity","content":"<p>safe</p>"};</script>`
+	object, err := applicationAdapter.active.Objects.Put(ctx, strings.NewReader(body), "text/html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applicationAdapter.active.Library.CommitContent(ctx, "article-mcp-integrity", objects.Object{
+		Digest: object.Digest, Size: object.Size, MediaType: "text/html",
+	}, "html", "https://mp.weixin.qq.com/s/mcp-integrity", "available", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	opened := make(chan struct{})
+	resume := make(chan struct{})
+	reader := localMCPContentReader{runtime: applicationAdapter.active, afterOpen: func() {
+		close(opened)
+		<-resume
+	}}
+	result := make(chan error, 1)
+	go func() {
+		_, readErr := reader.ReadContent(ctx, "article-mcp-integrity", "html")
+		result <- readErr
+	}()
+	<-opened
+	path := filepath.Join(applicationAdapter.active.Objects.Root(), "sha256", object.Digest[:2], object.Digest[2:4], object.Digest)
+	replacement := path + ".replacement"
+	if err := os.WriteFile(replacement, []byte(strings.Repeat("x", len(body))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	close(resume)
+	if err := <-result; err != nil {
+		t.Fatalf("same-handle read rejected content changed only after open: %v", err)
+	}
+
+	if _, err := (localMCPContentReader{runtime: applicationAdapter.active}).ReadContent(ctx, "article-mcp-integrity", "html"); !errors.Is(err, objects.ErrIntegrity) {
+		t.Fatalf("corrupt current handle error=%v", err)
+	}
+}
+
+func TestDiagnosticsBundleWritesOnePrivateRedactedArchive(t *testing.T) {
+	applicationAdapter, stdout, _ := newTestApp(t)
+	job, err := applicationAdapter.active.Jobs.Create(context.Background(), jobs.Spec{
+		Kind: "diagnostic-fixture", Profile: applicationAdapter.active.Profile.ID,
+		Payload: map[string]any{"summary": "fixture"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applicationAdapter.active.Jobs.AppendLog(context.Background(), job.ID, "", "error",
+		"request failed Cookie: sid=bundle-cookie-secret; request-id=diagnostic-visible",
+		map[string]any{"access_token": "bundle-token-secret", "body": "innocent-key-article-body", "routeId": "direct", "requestId": "diagnostic-visible"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "diagnostics.zip")
+	if err := applicationAdapter.Execute(context.Background(), []string{"diagnostics", "bundle", "--output", path, "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"article bodies"`) || !strings.Contains(stdout.String(), `"sha256"`) {
+		t.Fatalf("diagnostics output = %s", stdout.String())
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("diagnostics permissions = %o", info.Mode().Perm())
+	}
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	if len(reader.File) != 1 || reader.File[0].Name != "diagnostics.json" {
+		t.Fatalf("diagnostics entries = %#v", reader.File)
+	}
+	entry, err := reader.File[0].Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := io.ReadAll(entry)
+	closeErr := entry.Close()
+	if err != nil || closeErr != nil {
+		t.Fatal(errors.Join(err, closeErr))
+	}
+	for _, forbidden := range []string{"articleBodies", `"secrets"`, "pass_ticket", "bundle-cookie-secret", "bundle-token-secret", "innocent-key-article-body"} {
+		if strings.Contains(string(contents), forbidden) {
+			t.Fatalf("diagnostics leaked %q: %s", forbidden, contents)
+		}
+	}
+	for _, required := range []string{"schemaVersion", "integrity", "configuration", "system", "diagnostic-fixture", "diagnostic-visible", `"routeId": "direct"`} {
+		if !strings.Contains(string(contents), required) {
+			t.Fatalf("diagnostics missing %q: %s", required, contents)
+		}
+	}
+
+	stdout.Reset()
+	if err := applicationAdapter.Execute(context.Background(), []string{"diagnostics", "bundle", "--output", path, "--json"}); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("overwrite error = %v", err)
+	}
+}
+
+func TestDiagnosticLogsRespectPerEntryAndTotalBudgets(t *testing.T) {
+	large := strings.Repeat("x", diagnosticLogEntryBudget*2)
+	logs := make([]library.JobLog, 200)
+	for index := range logs {
+		logs[index] = library.JobLog{Message: large, Fields: map[string]any{"value": large}}
+	}
+	remaining := diagnosticLogTotalBudget
+	bounded := boundedDiagnosticLogs(logs, &remaining)
+	encoded, err := json.Marshal(bounded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > diagnosticLogTotalBudget+len(bounded)+2 {
+		t.Fatalf("bounded logs bytes=%d", len(encoded))
+	}
+	if len(bounded) == 0 || !strings.Contains(bounded[0].Message, "[truncated]") || len(bounded[0].Fields) != 0 {
+		t.Fatalf("bounded log=%#v", bounded)
+	}
+}
+
+func TestDiagnosticsBundleKeepsSubsystemFailuresAsBoundedReceipts(t *testing.T) {
+	applicationAdapter, _, _ := newTestApp(t)
+	applicationAdapter.core = diagnosticFailureApplication{fixedApplication: fixedApplication{}, failure: strings.Repeat("diagnostic failure ", 10_000)}
+	path := filepath.Join(t.TempDir(), "diagnostics.zip")
+	if _, err := applicationAdapter.createDiagnosticBundle(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	entry, err := reader.File[0].Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, readErr := io.ReadAll(entry)
+	closeErr := entry.Close()
+	if readErr != nil || closeErr != nil {
+		t.Fatal(errors.Join(readErr, closeErr))
+	}
+	if !strings.Contains(string(contents), `"runtimeError"`) || !strings.Contains(string(contents), `"sessionError"`) ||
+		!strings.Contains(string(contents), `"jobsError"`) || !strings.Contains(string(contents), `"browserError"`) ||
+		!strings.Contains(string(contents), "[truncated]") {
+		t.Fatalf("diagnostic failure receipts=%s", contents)
+	}
+	if len(contents) > 512<<10 {
+		t.Fatalf("diagnostic failure receipts are unbounded: %d bytes", len(contents))
+	}
+}
+
+func TestWriteDiagnosticBundleDoesNotReplaceConcurrentDestination(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "diagnostics.zip")
+	if err := os.WriteFile(path, []byte("created-by-another-process"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := writeDiagnosticBundle(path, map[string]any{"system": map[string]any{"goos": "fixture"}})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("writeDiagnosticBundle overwrite error = %v", err)
+	}
+	contents, readErr := os.ReadFile(path)
+	if readErr != nil || string(contents) != "created-by-another-process" {
+		t.Fatalf("concurrent destination = %q, %v", contents, readErr)
 	}
 }
 
@@ -258,6 +742,31 @@ func TestProfileUseRebuildsProfileIsolatedRuntime(t *testing.T) {
 	}
 }
 
+func TestRestoreCoordinatorBlocksRunningJobsBeforeClosingRuntime(t *testing.T) {
+	root := t.TempDir()
+	applicationAdapter, err := NewWithDependencies(context.Background(), strings.NewReader(""), io.Discard, io.Discard, Dependencies{
+		PathOptions: profiles.PathOptions{Portable: true, PortableRoot: root}, Secrets: secrets.NewMemoryStore(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = applicationAdapter.Close() })
+	job, err := applicationAdapter.active.Jobs.Create(context.Background(), jobs.Spec{Kind: "export", Profile: applicationAdapter.active.Profile.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applicationAdapter.active.Jobs.StartJob(context.Background(), job.ID, "worker", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	_, err = applicationAdapter.restoreActiveProfile(context.Background(), filepath.Join(root, "missing.zip"), library.RestoreRefuseConflicts)
+	if !errors.Is(err, profiles.ErrProfileBusy) {
+		t.Fatalf("restore blocker error = %v", err)
+	}
+	if _, err := applicationAdapter.active.Jobs.Get(context.Background(), job.ID); err != nil {
+		t.Fatalf("active runtime was closed before restore blocker check: %v", err)
+	}
+}
+
 func TestNewWithDependenciesInjectsClockHTTPSecretsAndApplicationFactory(t *testing.T) {
 	now := time.Date(2026, 7, 22, 16, 30, 0, 0, time.UTC)
 	secretStore := secrets.NewMemoryStore()
@@ -288,6 +797,46 @@ func TestNewWithDependenciesInjectsClockHTTPSecretsAndApplicationFactory(t *test
 	}
 	if status.CheckedAt != now || status.SecretBackend != secretStore.Backend() {
 		t.Fatalf("injected status = %#v", status)
+	}
+}
+
+func TestWorkspaceExportUsesFormatSpecificCommentPreference(t *testing.T) {
+	root := t.TempDir()
+	captured := &capturingExportApplication{fixedApplication: fixedApplication{}}
+	applicationAdapter, err := NewWithDependencies(context.Background(), strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, Dependencies{
+		PathOptions: profiles.PathOptions{Portable: true, PortableRoot: root}, Secrets: secrets.NewMemoryStore(),
+		ApplicationFactory: func(*ProfileRuntime) application.Application { return captured },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = applicationAdapter.Close() })
+	store := profiles.NewConfigStore(applicationAdapter.active.Profile.Paths.Config)
+	if _, err := store.Update(func(configuration *profiles.ProfileConfig) error {
+		configuration.Preferences.Export.HTMLIncludeComments = false
+		configuration.Preferences.Export.JSONIncludeComments = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	extensions := newWorkspaceExtensions(applicationAdapter).(*workspaceExtensions)
+	for _, test := range []struct {
+		format string
+		want   bool
+	}{{format: "html", want: false}, {format: "json", want: true}, {format: "markdown", want: false}} {
+		t.Run(test.format, func(t *testing.T) {
+			_, err := extensions.startExport(context.Background(), tui.OperationRequest{
+				Area: tui.AreaArticles, IDs: []string{"article-a"},
+				Parameters: map[string]string{"format": test.format, "outputRoot": filepath.Join(root, "exports", test.format)},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual, ok := captured.request.Options.FormatOptions["comments"].(bool)
+			if !ok || actual != test.want {
+				t.Fatalf("%s comments option = %#v, want %t", test.format, captured.request.Options.FormatOptions["comments"], test.want)
+			}
+		})
 	}
 }
 
@@ -448,10 +997,41 @@ func (manager *fakeProxyManager) Test(_ context.Context, id string) (network.Pro
 
 type fixedApplication struct{ status domain.RuntimeStatus }
 
+type diagnosticFailureApplication struct {
+	fixedApplication
+	failure string
+}
+
+func (application diagnosticFailureApplication) RuntimeStatus(context.Context) (domain.RuntimeStatus, error) {
+	return domain.RuntimeStatus{}, errors.New(application.failure)
+}
+
+func (application diagnosticFailureApplication) SessionStatus(context.Context) (wechat.Session, error) {
+	return wechat.Session{}, errors.New(application.failure)
+}
+
+func (application diagnosticFailureApplication) QueryJobs(context.Context, domain.JobQuery) (domain.Page[domain.Job], error) {
+	return domain.Page[domain.Job]{}, errors.New(application.failure)
+}
+
+func (application diagnosticFailureApplication) DiscoverBrowser(context.Context) (runtimeenv.Browser, error) {
+	return runtimeenv.Browser{}, errors.New(application.failure)
+}
+
 type sessionApplication struct {
 	fixedApplication
 	status       wechat.Session
 	logoutCalled bool
+}
+
+type capturingExportApplication struct {
+	fixedApplication
+	request domain.ExportRequest
+}
+
+func (application *capturingExportApplication) StartExport(_ context.Context, request domain.ExportRequest) (domain.Job, error) {
+	application.request = request
+	return domain.Job{ID: "job-export", State: domain.JobQueued}, nil
 }
 
 func (application *sessionApplication) SessionStatus(context.Context) (wechat.Session, error) {
@@ -528,10 +1108,22 @@ func (fixedApplication) QueryAccounts(context.Context, domain.AccountQuery) (dom
 func (fixedApplication) QueryArticles(context.Context, domain.ArticleQuery) (domain.Page[domain.Article], error) {
 	return domain.Page[domain.Article]{}, nil
 }
+func (fixedApplication) SaveArticleQuery(context.Context, string, domain.ArticleQuery) (domain.SavedArticleQuery, error) {
+	return domain.SavedArticleQuery{}, nil
+}
+func (fixedApplication) ListSavedArticleQueries(context.Context) ([]domain.SavedArticleQuery, error) {
+	return nil, nil
+}
+func (fixedApplication) DeleteSavedArticleQuery(context.Context, string) (bool, error) {
+	return false, nil
+}
 func (fixedApplication) QueryAlbums(context.Context, domain.AlbumQuery) (domain.Page[domain.Album], error) {
 	return domain.Page[domain.Album]{}, nil
 }
 func (fixedApplication) SynchronizeAccount(context.Context, domain.SynchronizeAccountRequest) (domain.Job, error) {
+	return domain.Job{}, nil
+}
+func (fixedApplication) SynchronizeAlbum(context.Context, domain.AccountID, domain.AlbumID) (domain.Job, error) {
 	return domain.Job{}, nil
 }
 func (fixedApplication) StartDownload(context.Context, domain.DownloadRequest) (domain.Job, error) {

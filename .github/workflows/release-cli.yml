@@ -5,9 +5,16 @@ on:
     branches: [main, master]
     paths:
       - 'cli/**'
+      - 'openspec/**'
+      - 'test/fixtures/**'
+      - 'test/parity/**'
       - 'RELEASE_NOTES.md'
       - 'docs/architecture/database-compatibility.md'
       - 'docs/architecture/sqlite-policy.md'
+      - 'docs/archive/**'
+      - 'docs/migration/**'
+      - 'docs/operations/**'
+      - 'docs/release/**'
       - 'samples/**'
       - '.github/workflows/release-cli.yml'
   workflow_dispatch:
@@ -54,6 +61,81 @@ jobs:
             version="dev-${GITHUB_SHA::7}"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  parity-and-retirement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Parity validator tests
+        run: GO111MODULE=off go test -count=1 ./test/parity
+
+      - name: Mandatory parity gate
+        run: go run ./test/parity/validate.go --gate
+
+      - name: Install pinned actionlint
+        env:
+          ACTIONLINT_VERSION: v1.7.12
+          ACTIONLINT_COMMIT: '914e7df21a07ef503a81201c76d2b11c789d3fca'
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote https://github.com/rhysd/actionlint.git "refs/tags/${ACTIONLINT_VERSION}" | cut -f1)" = "$ACTIONLINT_COMMIT"
+          GOBIN="$RUNNER_TEMP/validation-tools" go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_COMMIT}"
+
+      - name: Workflow syntax
+        run: $RUNNER_TEMP/validation-tools/actionlint .github/workflows/release-cli.yml
+
+      - name: Verify retired production sources remain absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          retired_paths=(
+            package.json yarn.lock nuxt.config.ts wrangler.toml Dockerfile
+            pages components composables server store mcp-server/src
+          )
+          for retired_path in "${retired_paths[@]}"; do
+            if test -n "$(git ls-files "$retired_path" "$retired_path/**")"; then
+              echo "retired production source remains tracked: $retired_path" >&2
+              exit 1
+            fi
+          done
+          test -s docs/archive/final-web-capable-release.md
+          test -s docs/operations/cloud-retirement-report.md
+          test "$(git rev-parse 'wechat-article-v2.0.0^{}')" = c43efc90f6cbfbeb15c0b2a4a6f9c2495f652474
+          test "$(git rev-parse 'wechat-article-web-final-2026-07-22^{}')" = bda9f3bc3605c8c47e5b4f4cad20bf35c35844e4
+          grep -Fq 'Worker lookup returned not found' docs/operations/cloud-retirement-report.md
+          grep -Fq 'Pages project lookup returned not found' docs/operations/cloud-retirement-report.md
+          grep -Fq 'no user article or Credential bytes were found' docs/operations/cloud-retirement-report.md
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install integrity-pinned OpenSpec validator
+        env:
+          OPENSPEC_VERSION: 1.3.1
+          OPENSPEC_INTEGRITY: sha512-QnbJfq/lUNCRY+TTXo87fuIpGCCaOYt280tmbuI112B/1vF0feIneK0/qhoTZNslRDhwwg1YcYDX0suxq2h6tw==
+        run: |
+          set -euo pipefail
+          package='@fission-ai/openspec'
+          tarball="$(npm pack "${package}@${OPENSPEC_VERSION}" --pack-destination "$RUNNER_TEMP" | tail -n 1)"
+          test -n "$tarball"
+          actual_integrity="$(openssl dgst -sha512 -binary "$RUNNER_TEMP/$tarball" | openssl base64 -A)"
+          test "sha512-${actual_integrity}" = "$OPENSPEC_INTEGRITY"
+          npm install --global --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/$tarball"
+
+      - name: Strict OpenSpec validation
+        env:
+          OPENSPEC_TELEMETRY: '0'
+        run: openspec validate replace-web-with-local-go-cli --strict
 
   static:
     runs-on: ubuntu-latest
@@ -104,6 +186,27 @@ jobs:
       - name: Unit and integration tests
         run: go test ./...
 
+      - name: Native keyring integration receipt
+        shell: bash
+        env:
+          WECHAT_ARTICLE_KEYRING_INTEGRATION: '1'
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/keyring-smoke-receipt.txt"
+          go test -tags=integration -count=1 -v -run '^TestPlatformKeyringIntegration$' ./internal/secrets | tee "$receipt"
+          grep -Eq 'KEYRING_SMOKE_(PASS|SKIP)' "$receipt"
+          if grep -q 'KEYRING_SMOKE_SKIP' "$receipt"; then
+            case "${{ runner.os }}" in
+              Linux)
+                grep -Fq 'reason=credential-service-unavailable' "$receipt"
+                ;;
+              *)
+                echo 'Native credential service smoke skipped on a release-supported desktop runner.' >&2
+                exit 1
+                ;;
+            esac
+          fi
+
       - name: Race tests
         if: runner.os != 'Windows'
         env:
@@ -152,8 +255,11 @@ jobs:
       - name: Parser and renderer corpus
         run: >-
           go test -count=1
-          -run 'TestRepresentativeSamples|TestSampleEngagementAndAudio|TestRepresentativeUnavailableSamples|TestSampleSemanticAndStructuralGoldenSuite'
+          -run 'TestRepresentativeSamples|TestSampleEngagementAndAudio|TestRepresentativeUnavailableSamples|TestSampleSemanticAndStructuralGoldenSuite|TestTrackedSamplesHaveGoldenOrReviewedExclusion'
           ./internal/processor
+
+      - name: Sanitized protocol corpus
+        run: go test -count=1 ./internal/corpus
 
       - name: Export fixture corpus
         run: >-
@@ -188,7 +294,7 @@ jobs:
           ./internal/library
 
   build:
-    needs: [release-metadata, static, test, fixture-corpus, database-compatibility]
+    needs: [release-metadata, parity-and-retirement, static, test, fixture-corpus, database-compatibility]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:

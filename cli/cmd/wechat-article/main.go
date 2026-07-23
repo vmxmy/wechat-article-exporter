@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	application := app.New(os.Stdin, os.Stdout, os.Stderr)
+	application := app.NewForArgs(os.Stdin, os.Stdout, os.Stderr, os.Args[1:])
 	defer application.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

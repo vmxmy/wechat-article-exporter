@@ -34,9 +34,32 @@ go build -trimpath -o ./bin/wechat-article ./cmd/wechat-article
 ./bin/wechat-article sync account ACCOUNT_ID --follow
 ./bin/wechat-article download article --url 'https://mp.weixin.qq.com/s/ARTICLE' --follow
 ./bin/wechat-article export start --url 'https://mp.weixin.qq.com/s/ARTICLE' --format markdown --output ./exports --follow
+./bin/wechat-article export start --account ACCOUNT_ID --format html --html-resource-policy strict --html-batch-archive articles.zip --output ./exports --follow
+./bin/wechat-article export verify --root ./exports --manifest export-EXPORT_ID-manifest.json --json
 ```
 
 `--json` 保证 stdout 为一个版本化 JSON 文档。成功、运行错误、用法错误退出码分别为 `0`、`1`、`2`。
+导出校验不通过时退出码为 `1`，唯一的 JSON error envelope 在 `data` 中携带完整校验报告。HTML 支持 strict/best-effort 本地资源策略和 portable batch ZIP。
+
+Bubble Tea 的文章页支持 compound filter、saved query、多选和 resolved-count 确认；任务和导出页自动刷新。导出 manifest/verify/open 必须选择稳定 export ID，不会回退到最新记录，并展示完整 provenance generation/state/error。detached worker 通过 SQLite leased permits 跨进程共享并发上限；评论回复部分失败会持久化为 `partial`，retry 只继续未完成 thread。
+
+无可用系统凭据库时，显式初始化并验证加密 vault；passphrase file 必须仅当前用户可读：
+
+```bash
+chmod 600 ./vault-passphrase
+./bin/wechat-article vault init --passphrase-file ./vault-passphrase
+WECHAT_ARTICLE_SECRET_BACKEND=vault \
+WECHAT_ARTICLE_VAULT_PASSPHRASE_FILE=./vault-passphrase \
+  ./bin/wechat-article status --json
+```
+
+Credential 支持 JSON、环境变量和隐藏终端输入：
+
+```bash
+./bin/wechat-article credential import --interactive
+./bin/wechat-article credential validate CREDENTIAL_ID --json
+./bin/wechat-article diagnostics bundle --output ./diagnostics.zip
+```
 
 ## stdio MCP
 
@@ -58,6 +81,8 @@ server 不监听网络，不使用 OAuth。stdout 只包含换行分隔的 JSON-
 
 破坏性工具需要 `confirm:<tool-name>` 精确确认值；敏感 Credential 操作还需要独立启用与确认。
 
+`exports.start` 的输出目录必须位于 active profile 数据目录、`preferences.export.root` 或 profile 配置的 `mcp.allowedOutputRoots` 绝对路径内；路径穿越与 symlink 逃逸会被拒绝。
+
 ## 测试与发布
 
 ```bash
@@ -66,6 +91,18 @@ go test ./...
 go test -race ./...
 go vet ./...
 go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 -checks='SA*,S1*,QF*' ./...
+go test -count=1 ./internal/corpus
+go test -count=1 -run '^TestTrackedSamplesHaveGoldenOrReviewedExclusion$' ./internal/processor
 ```
+
+原生系统凭据库 smoke 使用 `integration` build tag 且必须显式 opt-in；默认测试不会访问真实凭据服务，也不会输出测试 secret：
+
+```bash
+WECHAT_ARTICLE_KEYRING_INTEGRATION=1 \
+  go test -tags=integration -count=1 -v \
+  -run '^TestPlatformKeyringIntegration$' ./internal/secrets
+```
+
+测试日志提供 `KEYRING_SMOKE_PASS` 或 `KEYRING_SMOKE_SKIP` receipt。发布工作流在 macOS、Linux 和 Windows 原生 runner 上执行该命令；macOS/Windows 必须完成 Set/Get/Delete round trip，Linux runner 没有 Secret Service 时允许带 `reason=credential-service-unavailable` 的明确 skip。
 
 `Release Go CLI` 工作流构建 macOS arm64/amd64、Linux arm64/amd64、Windows amd64 的 `CGO_ENABLED=0` 压缩包、CycloneDX SBOM 和 `checksums.txt`。

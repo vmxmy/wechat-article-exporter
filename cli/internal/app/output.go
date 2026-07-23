@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/safety"
@@ -18,6 +19,7 @@ type successEnvelope struct {
 type errorEnvelope struct {
 	SchemaVersion string      `json:"schemaVersion"`
 	Success       bool        `json:"success"`
+	Data          any         `json:"data,omitempty"`
 	Error         errorDetail `json:"error"`
 }
 
@@ -64,9 +66,18 @@ func WriteErrorJSON(output io.Writer, err error) error {
 	} else if IsInterrupted(err) {
 		kind = "interrupted"
 	}
+	var data any
+	var resultError *ResultError
+	if errors.As(err, &resultError) && resultError != nil {
+		if resultError.Kind != "" {
+			kind = resultError.Kind
+		}
+		data = safety.Redact(resultError.Data, "")
+	}
 	envelope := errorEnvelope{
 		SchemaVersion: JSONSchemaVersion,
 		Success:       false,
+		Data:          data,
 		Error: errorDetail{
 			Kind: kind, Message: safety.RedactText(err.Error()), ExitCode: exitCode,
 		},

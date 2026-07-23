@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "task": "16.7",
   "auditDate": "2026-07-22",
   "change": "replace-web-with-local-go-cli",
@@ -9,24 +9,24 @@
   },
   "executions": [
     {
-      "command": "cd cli && go test ./...",
+      "command": "cd cli \u0026\u0026 go test ./...",
       "result": "passed"
     },
     {
-      "command": "cd cli && go test -race ./...",
+      "command": "cd cli \u0026\u0026 go test -race ./...",
       "result": "passed"
     },
     {
-      "command": "cd cli && go test ./internal/exporter -run 'TestRealChromiumRendersCuratedSelfContainedPDF|TestGeneratedDOCXOpensInLibreOfficeHeadless' -count=1 -v",
+      "command": "cd cli \u0026\u0026 go test ./internal/exporter -run 'TestRealChromiumRendersCuratedSelfContainedPDF|TestGeneratedDOCXOpensInLibreOfficeHeadless' -count=1 -v",
       "result": "passed",
       "note": "Real Google Chrome PDF rendering and LibreOffice DOCX open/conversion both passed on macOS."
     },
     {
-      "command": "cd cli && go test ./internal/app -run 'TestCLIWorkspaceRealPTYNavigationResizeAndCleanExit' -count=1 -v",
+      "command": "cd cli \u0026\u0026 go test ./internal/app -run 'TestCLIWorkspaceRealPTYNavigationResizeAndCleanExit' -count=1 -v",
       "result": "passed"
     },
     {
-      "command": "controlled-account local QR smoke: login -> restart/status -> logout",
+      "command": "controlled-account local QR smoke: login -\u003e restart/status -\u003e logout",
       "result": "passed",
       "note": "On 2026-07-22 an isolated portable profile exercised the live WeChat flow through waiting, scanned, and confirmed states; a new CLI process revalidated the persisted OS-keyring session as authenticated/valid; public JSON contained no token or cookies; logout removed the session manifest, chunks, and profile index. No live credential, QR image, account identifier, or article data is committed as evidence."
     },
@@ -36,7 +36,7 @@
       "note": "The real pseudo-terminal navigation, resize, and clean-exit smoke passed on all three native runners: https://github.com/vmxmy/wechat-article-exporter/actions/runs/29914112307"
     },
     {
-      "command": "cd cli && go vet ./... && go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 -checks='SA*,S1*,QF*' ./...",
+      "command": "cd cli \u0026\u0026 go vet ./... \u0026\u0026 go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 -checks='SA*,S1*,QF*' ./...",
       "result": "passed"
     },
     {
@@ -44,7 +44,7 @@
       "result": "passed"
     },
     {
-      "command": "yarn test:baseline && yarn test:api-core && ./node_modules/.bin/vite-node -c test/vite.config.ts test/legacy-export/archive.test.ts",
+      "command": "yarn test:baseline \u0026\u0026 yarn test:api-core \u0026\u0026 ./node_modules/.bin/vite-node -c test/vite.config.ts test/legacy-export/archive.test.ts",
       "result": "passed"
     },
     {
@@ -56,7 +56,7 @@
       "result": "passed"
     },
     {
-      "command": "openspec validate replace-web-with-local-go-cli --strict && git diff --check",
+      "command": "openspec validate replace-web-with-local-go-cli --strict \u0026\u0026 git diff --check",
       "result": "passed"
     },
     {
@@ -71,20 +71,21 @@
   ],
   "releaseGate": {
     "name": "local-cli-full-parity",
-    "rule": "Every mandatory entry must be passed before tasks 17.3-17.8 may start.",
-    "result": "passed",
-    "execution": "executed",
+    "rule": "Every mandatory entry must be passed and its configured current-run Go evidence must execute successfully before tasks 17.3-17.8 may start.",
+    "result": "not-run",
+    "execution": "not-invoked",
     "mandatoryPassed": 24,
     "mandatoryTotal": 24,
-    "blocking": []
+    "blocking": [],
+    "currentRun": []
   },
   "summary": {
     "entries": 31,
     "classifications": {
-      "mandatory-parity": 24,
+      "dev-only": 1,
       "intentional-retirement": 4,
-      "migration-only": 2,
-      "dev-only": 1
+      "mandatory-parity": 24,
+      "migration-only": 2
     },
     "statuses": {
       "not-implemented": 0,
@@ -102,8 +103,8 @@
       "acceptance": "Go protocol fixtures and a controlled-account smoke test cover waiting, scanned, confirmed, expired, cancelled, and headless QR flows.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/wechat ./internal/secrets ./internal/app",
-          "controlled-account local QR smoke: login -> restart/status -> logout"
+          "cd cli \u0026\u0026 go test ./internal/wechat ./internal/secrets ./internal/app",
+          "controlled-account local QR smoke: login -\u003e restart/status -\u003e logout"
         ],
         "tests": [
           {
@@ -156,7 +157,7 @@
       "acceptance": "A persisted local profile survives restart, reports identity without secrets, switches account where available, and clears local secrets on logout.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/wechat ./internal/secrets ./internal/app"
+          "cd cli \u0026\u0026 go test ./internal/wechat ./internal/secrets ./internal/app"
         ],
         "tests": [
           {
@@ -193,7 +194,7 @@
       "acceptance": "Fixture-backed application tests return normalized paginated accounts and reject non-WeChat or unsafe URLs before networking.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/wechat ./internal/application"
+          "cd cli \u0026\u0026 go test ./internal/wechat ./internal/application"
         ],
         "tests": [
           {
@@ -231,7 +232,7 @@
       "acceptance": "Application-level tests cover add/upsert, query, manifest round-trip, merge, transactional delete, and shared-object retention.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/library ./internal/application"
+          "cd cli \u0026\u0026 go test ./internal/library ./internal/application"
         ],
         "tests": [
           {
@@ -268,7 +269,7 @@
       "acceptance": "Fake-upstream tests cover pagination, page commits, resume, deduplication, auth expiry, totals, and last-sync updates.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/wechat ./internal/sync ./internal/library"
+          "cd cli \u0026\u0026 go test ./internal/wechat ./internal/sync ./internal/library"
         ],
         "tests": [
           {
@@ -313,7 +314,7 @@
       "acceptance": "Deterministic clock tests cover every current range choice, explicit date boundary, all-history mode, pacing, jitter, and unsafe-delay confirmation.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/sync ./internal/app"
+          "cd cli \u0026\u0026 go test ./internal/sync ./internal/app"
         ],
         "tests": [
           {
@@ -342,7 +343,7 @@
       "acceptance": "SQLite contract tests cover account, keyword, author, date, deletion, content/comment state, originality, payment, message type, album, and engagement filters.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/library"
+          "cd cli \u0026\u0026 go test ./internal/library"
         ],
         "tests": [
           {
@@ -371,7 +372,7 @@
       "acceptance": "Application tests normalize URL variants, deduplicate canonical URLs, persist provisional records, and repair account identity from parsed content.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/library ./internal/tui"
+          "cd cli \u0026\u0026 go test ./internal/library ./internal/tui"
         ],
         "tests": [
           {
@@ -410,7 +411,7 @@
       "acceptance": "Fixture-backed tests cover metadata, order, continuation identifiers, all-page traversal, deduplication, resume, and batch selection.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/wechat ./internal/sync ./internal/library ./internal/exporter"
+          "cd cli \u0026\u0026 go test ./internal/wechat ./internal/sync ./internal/library ./internal/exporter"
         ],
         "tests": [
           {
@@ -451,7 +452,7 @@
       "acceptance": "Fake-route tests cover cache hit, valid, deleted, unavailable, risk-control, parse error, retry, force refresh, and debug capture.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/download ./internal/processor ./internal/app"
+          "cd cli \u0026\u0026 go test ./internal/download ./internal/processor ./internal/app"
         ],
         "tests": [
           {
@@ -497,7 +498,7 @@
       "acceptance": "Processor and object-store tests discover all supported resource classes, normalize URLs, deduplicate bytes, reuse cache, and report missing objects.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/processor ./internal/download ./internal/library ./internal/objects"
+          "cd cli \u0026\u0026 go test ./internal/processor ./internal/download ./internal/library ./internal/objects"
         ],
         "tests": [
           {
@@ -536,7 +537,7 @@
       "acceptance": "Credential-aware fake-upstream tests persist normalized metrics with capture time and reject missing/invalid credentials before requests.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/wechat ./internal/download ./internal/library"
+          "cd cli \u0026\u0026 go test ./internal/wechat ./internal/download ./internal/library"
         ],
         "tests": [
           {
@@ -576,7 +577,7 @@
       "acceptance": "Synthetic fixtures cover multi-page comments, continuation buffers, deduplication, incomplete replies, partial failure, and resume.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/wechat ./internal/download ./internal/library"
+          "cd cli \u0026\u0026 go test ./internal/wechat ./internal/download ./internal/library"
         ],
         "tests": [
           {
@@ -617,7 +618,7 @@
       "acceptance": "The Go semantic golden corpus passes every supported committed sample category with reviewed structural assertions.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/processor"
+          "cd cli \u0026\u0026 go test ./internal/processor"
         ],
         "tests": [
           {
@@ -665,7 +666,7 @@
       "acceptance": "Golden exports load offline, contain no executable remote scripts, resolve local resources, and honor strict/best-effort and comment options.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/exporter ./internal/processor"
+          "cd cli \u0026\u0026 go test ./internal/exporter ./internal/processor"
         ],
         "tests": [
           {
@@ -705,7 +706,7 @@
       "acceptance": "Golden outputs verify stable semantic order, UTF-8, metadata options, versioned JSON, optional content/metrics/comments/replies, and deterministic names.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/exporter"
+          "cd cli \u0026\u0026 go test ./internal/exporter"
         ],
         "tests": [
           {
@@ -749,7 +750,7 @@
       "acceptance": "Workbook structural tests verify stable sheets/columns/types and a large fixture verifies bounded memory behavior.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/exporter"
+          "cd cli \u0026\u0026 go test ./internal/exporter"
         ],
         "tests": [
           {
@@ -784,8 +785,8 @@
       "acceptance": "OpenXML package validation and supported-office smoke tests cover headings, lists, links, tables, images, metadata, and comments.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/exporter",
-          "cd cli && go test ./internal/exporter -run TestGeneratedDOCXOpensInLibreOfficeHeadless -count=1 -v"
+          "cd cli \u0026\u0026 go test ./internal/exporter",
+          "cd cli \u0026\u0026 go test ./internal/exporter -run TestGeneratedDOCXOpensInLibreOfficeHeadless -count=1 -v"
         ],
         "tests": [
           {
@@ -820,8 +821,8 @@
       "acceptance": "Local Chromium renders curated fixtures without upload; discovery, cancellation, timeout, missing-browser, and visual regression cases pass.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/exporter ./internal/app",
-          "cd cli && go test ./internal/exporter -run TestRealChromiumRendersCuratedSelfContainedPDF -count=1 -v"
+          "cd cli \u0026\u0026 go test ./internal/exporter ./internal/app",
+          "cd cli \u0026\u0026 go test ./internal/exporter -run TestRealChromiumRendersCuratedSelfContainedPDF -count=1 -v"
         ],
         "tests": [
           {
@@ -865,7 +866,7 @@
       "acceptance": "SQLite/object-store tests cover transactions, concurrent readers, migrations, backups, failed restore, integrity repair guidance, and GC dry run.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/library ./internal/objects"
+          "cd cli \u0026\u0026 go test ./internal/library ./internal/objects"
         ],
         "tests": [
           {
@@ -910,7 +911,7 @@
       "acceptance": "Profile configuration round-trips all retained preferences, validates risky values, migrates versions atomically, and exposes effective values.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/profiles ./internal/network ./internal/sync"
+          "cd cli \u0026\u0026 go test ./internal/profiles ./internal/network ./internal/sync"
         ],
         "tests": [
           {
@@ -959,7 +960,7 @@
       "acceptance": "CLI integration tests verify all command groups, JSON purity, stderr progress, exact confirmations, exit 0/1/2, redaction, completion, and interruption.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/app ./internal/safety"
+          "cd cli \u0026\u0026 go test ./internal/app"
         ],
         "tests": [
           {
@@ -1012,8 +1013,8 @@
       "acceptance": "Model tests and manual smoke cover onboarding, all navigation areas, tables, filters, selection, previews, jobs, settings, narrow terminals, no-color, and keyboard-only use.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/tui ./internal/app",
-          "cd cli && go test ./internal/app -run TestCLIWorkspaceRealPTYNavigationResizeAndCleanExit -count=1 -v",
+          "cd cli \u0026\u0026 go test ./internal/tui ./internal/app",
+          "cd cli \u0026\u0026 go test ./internal/app -run TestCLIWorkspaceRealPTYNavigationResizeAndCleanExit -count=1 -v",
           "GitHub Actions native-terminal-verification run 29914112307 (ubuntu-latest, macos-15-intel, windows-latest)"
         ],
         "tests": [
@@ -1073,7 +1074,7 @@
       "acceptance": "MCP conformance tests cover framing, tool schemas, shared results, async job IDs, policy restrictions, malformed messages, EOF, and zero remote service dependency.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/mcp ./internal/app"
+          "cd cli \u0026\u0026 go test ./internal/mcp ./internal/app"
         ],
         "tests": [
           {
@@ -1098,7 +1099,7 @@
           },
           {
             "path": "cli/internal/mcp/adapter_test.go",
-            "symbol": "TestGoSDKClientConformsToLocalJSONRPCServer"
+            "symbol": "TestLocalStdioClientConformsToInitializeListCallAndShutdown"
           },
           {
             "path": "cli/internal/app/local_commands_test.go",
@@ -1122,14 +1123,9 @@
       "acceptance": "Versioned archives round-trip all supported records and objects with checksums, conflicts, missing-resource reporting, and no upload.",
       "evidence": {
         "commands": [
-          "./node_modules/.bin/vite-node -c test/vite.config.ts test/legacy-export/archive.test.ts",
-          "cd cli && go test ./internal/migration ./internal/app"
+          "cd cli \u0026\u0026 go test ./internal/migration ./internal/app"
         ],
         "tests": [
-          {
-            "path": "test/legacy-export/archive.test.ts",
-            "symbol": "run"
-          },
           {
             "path": "cli/internal/migration/migration_test.go",
             "symbol": "TestPlanSupportsRepresentativeDexieVersions"
@@ -1173,23 +1169,19 @@
       "workflow": "旧 remote-only CLI 配置检测和迁移提示",
       "classification": "migration-only",
       "status": "passed",
-      "acceptance": "Migration tests preserve legacy config for rollback, ignore OAuth tokens for local auth, and guide profile creation/login.",
+      "acceptance": "The immutable Web-capable archive preserves rollback material, while the current CLI rejects retired remote commands, ignores OAuth for local auth, and guides profile creation/login.",
       "evidence": {
         "commands": [
-          "cd cli && go test ./internal/app ./internal/config"
+          "cd cli \u0026\u0026 go test ./internal/app"
         ],
         "tests": [
           {
             "path": "cli/internal/app/local_commands_test.go",
-            "symbol": "TestLocalFirstSessionCommandsAndLegacyMigrationMessaging"
+            "symbol": "TestLocalFirstSessionCommandsAndRetirementMessaging"
           },
           {
             "path": "cli/internal/app/app_test.go",
-            "symbol": "TestLegacyCommandPreservesRemoteStatusBehavior"
-          },
-          {
-            "path": "cli/internal/config/config_test.go",
-            "symbol": "TestStoreWritesMode0600AndKeepsExistingConfigShape"
+            "symbol": "TestRetiredLegacyCommandIsAUsageError"
           }
         ],
         "fixtures": []

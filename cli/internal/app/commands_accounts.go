@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -324,8 +325,120 @@ func (a *App) articleCommand() *cobra.Command {
 	addPageFlags(discover, &offset, &limit, 20)
 	discover.Flags().BoolVar(&all, "all", false, "continue until upstream pagination completes")
 
-	command.AddCommand(list, discover)
+	command.AddCommand(list, discover, a.savedArticleQueryCommand())
 	return command
+}
+
+func (a *App) savedArticleQueryCommand() *cobra.Command {
+	command := &cobra.Command{Use: "query", Short: "Save and manage reusable local article queries"}
+	var input string
+	save := &cobra.Command{Use: "save <name>", Short: "Save a versioned article-query JSON document", Args: exactArgs(1, "article query save requires <name>"),
+		RunE: func(command *cobra.Command, args []string) error {
+			var document struct {
+				SchemaVersion int                  `json:"schemaVersion"`
+				Query         *domain.ArticleQuery `json:"query"`
+			}
+			if err := decodeJSONInput(input, a.stdin, &document); err != nil {
+				return usage("decode article query: " + err.Error())
+			}
+			if document.SchemaVersion != 1 {
+				return usage("article query schemaVersion must be 1")
+			}
+			if err := validateSavedArticleQuery(document.Query); err != nil {
+				return usage("invalid article query: " + err.Error())
+			}
+			saved, err := a.core.SaveArticleQuery(command.Context(), args[0], *document.Query)
+			if err != nil {
+				return err
+			}
+			return a.output(saved)
+		}}
+	save.Flags().StringVarP(&input, "file", "f", "-", "article-query JSON file or - for stdin")
+	list := &cobra.Command{Use: "list", Short: "List saved article queries", Args: cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			items, err := a.core.ListSavedArticleQueries(command.Context())
+			if err != nil {
+				return err
+			}
+			return a.output(map[string]any{"queries": items, "count": len(items)})
+		}}
+	var confirmation string
+	remove := &cobra.Command{Use: "remove <name>", Short: "Remove a saved article query", Args: exactArgs(1, "article query remove requires <name>"),
+		RunE: func(command *cobra.Command, args []string) error {
+			required := "remove-saved-query:" + args[0]
+			if confirmation != required {
+				return usage("saved query removal requires --confirm " + required)
+			}
+			removed, err := a.core.DeleteSavedArticleQuery(command.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			return a.output(map[string]any{"name": args[0], "removed": removed})
+		}}
+	remove.Flags().StringVar(&confirmation, "confirm", "", "exact confirmation value")
+	command.AddCommand(save, list, remove)
+	return command
+}
+
+func validateSavedArticleQuery(query *domain.ArticleQuery) error {
+	if query == nil {
+		return errors.New("query is required")
+	}
+	if query.Offset < 0 {
+		return errors.New("offset must be non-negative")
+	}
+	if query.Limit < 0 || query.Limit > 500 {
+		return errors.New("limit must be between 0 and 500")
+	}
+	if !query.PublishedFrom.IsZero() && !query.PublishedTo.IsZero() && query.PublishedFrom.After(query.PublishedTo) {
+		return errors.New("publishedFrom must not be after publishedTo")
+	}
+	for _, item := range []struct {
+		name             string
+		minimum, maximum *int
+	}{
+		{"read", query.ReadMin, query.ReadMax}, {"oldLike", query.OldLikeMin, query.OldLikeMax},
+		{"share", query.ShareMin, query.ShareMax}, {"like", query.LikeMin, query.LikeMax},
+		{"comment", query.CommentMin, query.CommentMax}, {"weCoin", query.WeCoinMin, query.WeCoinMax},
+		{"mediaSeconds", query.MediaSecondsMin, query.MediaSecondsMax},
+	} {
+		if item.minimum != nil && *item.minimum < 0 || item.maximum != nil && *item.maximum < 0 {
+			return fmt.Errorf("%s bounds must be non-negative", item.name)
+		}
+		if item.minimum != nil && item.maximum != nil && *item.minimum > *item.maximum {
+			return fmt.Errorf("%s minimum must not exceed maximum", item.name)
+		}
+	}
+	for _, messageType := range query.MessageTypes {
+		if messageType < 0 {
+			return errors.New("message types must be non-negative")
+		}
+	}
+	if query.Sort != "" && len(query.Sorts) > 0 {
+		return errors.New("use either sort or sorts, not both")
+	}
+	if query.Sort != "" {
+		switch query.Sort {
+		case "published_desc", "published_asc", "title":
+		default:
+			return fmt.Errorf("unsupported legacy sort %q", query.Sort)
+		}
+	}
+	allowedSorts := map[string]struct{}{
+		"aid": {}, "url": {}, "title": {}, "digest": {}, "published": {}, "created": {}, "updated": {},
+		"deleted": {}, "state": {}, "content": {}, "comments_downloaded": {}, "read": {}, "old_like": {},
+		"share": {}, "like": {}, "comment": {}, "author": {}, "original": {}, "paid": {}, "wecoin": {},
+		"message_type": {}, "media_duration": {}, "single": {},
+	}
+	for _, sort := range query.Sorts {
+		if _, ok := allowedSorts[strings.TrimSpace(sort.Field)]; !ok {
+			return fmt.Errorf("unsupported sort field %q", sort.Field)
+		}
+		if sort.Direction != domain.SortAscending && sort.Direction != domain.SortDescending {
+			return fmt.Errorf("unsupported sort direction %q", sort.Direction)
+		}
+	}
+	return nil
 }
 
 func (a *App) albumCommand() *cobra.Command {
@@ -445,7 +558,7 @@ func decodeJSONInput(path string, stdin io.Reader, target any) error {
 		}
 		decoder := json.NewDecoder(stdin)
 		decoder.DisallowUnknownFields()
-		return decoder.Decode(target)
+		return decodeSingleJSONValue(decoder, target)
 	}
 	file, err = os.Open(path)
 	if err != nil {
@@ -454,21 +567,62 @@ func decodeJSONInput(path string, stdin io.Reader, target any) error {
 	defer file.Close()
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
+	return decodeSingleJSONValue(decoder, target)
+}
+
+func decodeSingleJSONValue(decoder *json.Decoder, target any) error {
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values are not allowed")
+		}
+		return fmt.Errorf("trailing JSON data: %w", err)
+	}
+	return nil
 }
 
 func writePrivateJSONFile(path string, value any) error {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	temporary, err := createPrivateTemp(filepath.Dir(path), ".private-json-*.tmp")
 	if err != nil {
 		return err
 	}
-	encoder := json.NewEncoder(file)
+	temporaryPath := temporary.Name()
+	committed := false
+	defer func() {
+		_ = temporary.Close()
+		if !committed {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	encoder := json.NewEncoder(temporary)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(value); err != nil {
-		file.Close()
 		return err
 	}
-	return file.Close()
+	if err := temporary.Sync(); err != nil {
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := commitFileNoReplace(temporaryPath, path); err != nil {
+		var committedErr *fileCommitError
+		if errors.As(err, &committedErr) && committedErr.Published {
+			committed = true
+		}
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("refusing to overwrite existing file %s", path)
+		}
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func parseOptionalTime(value string) (time.Time, error) {

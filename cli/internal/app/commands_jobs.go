@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/exporter"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
 	syncrunner "github.com/wechat-article/wechat-article-exporter/cli/internal/sync"
 )
@@ -102,7 +103,7 @@ func (a *App) syncCommand() *cobra.Command {
 		},
 	}
 	account.Flags().BoolVar(&incremental, "incremental", true, "refresh new and changed article-list records")
-	account.Flags().StringVar(&rangeValue, "range", string(domain.SyncRangeAll), "24h, 1d, 3d, 7d, 1m, 3m, 6m, 1y, all, or point")
+	account.Flags().StringVar(&rangeValue, "range", "", "optional boundary: 24h, 1d, 3d, 7d, 1m, 3m, 6m, 1y, all, or point; default uses incremental history")
 	account.Flags().StringVar(&notBefore, "not-before", "", "RFC3339 timestamp or YYYY-MM-DD boundary; implies point range")
 	account.Flags().IntVar(&pageSize, "page-size", 20, "upstream page size between 1 and 50")
 	account.Flags().DurationVar(&pageDelay, "page-delay", 5*time.Second, "delay between upstream pages")
@@ -116,6 +117,12 @@ func (a *App) syncCommand() *cobra.Command {
 
 func parseSyncBoundary(rangeValue, notBefore string) (domain.SyncRange, time.Time, error) {
 	rangeOption := domain.SyncRange(strings.TrimSpace(rangeValue))
+	if rangeOption == "" {
+		if strings.TrimSpace(notBefore) == "" {
+			return "", time.Time{}, nil
+		}
+		rangeOption = domain.SyncRangePoint
+	}
 	allowed := map[domain.SyncRange]struct{}{
 		domain.SyncRange24Hours: {}, domain.SyncRange1Day: {}, domain.SyncRange3Days: {}, domain.SyncRange7Days: {},
 		domain.SyncRange1Month: {}, domain.SyncRange3Months: {}, domain.SyncRange6Months: {}, domain.SyncRange1Year: {},
@@ -196,7 +203,7 @@ func (a *App) downloadStartCommand(name, short, kind string) *cobra.Command {
 
 func (a *App) exportCommand() *cobra.Command {
 	command := &cobra.Command{Use: "export", Short: "Start and inspect local export jobs"}
-	var format, outputRoot, accountID, albumID, savedQuery, naming, collision string
+	var format, outputRoot, accountID, albumID, savedQuery, naming, collision, htmlResourcePolicy, htmlBatchArchive string
 	var urls, articleIDs []string
 	var allMatching, includeContent, includeComments, includeMetadata bool
 	var maxNameBytes int
@@ -224,10 +231,19 @@ func (a *App) exportCommand() *cobra.Command {
 			if maxNameBytes < 32 || maxNameBytes > 255 {
 				return usage("--max-name-bytes must be between 32 and 255")
 			}
+			if htmlResourcePolicy != "best-effort" && htmlResourcePolicy != "strict" {
+				return usage("--html-resource-policy must be best-effort or strict")
+			}
+			if htmlBatchArchive != "" && format != "html" {
+				return usage("--html-batch-archive requires --format html")
+			}
 			job, err := a.core.StartExport(command.Context(), domain.ExportRequest{
 				Selection: selection, Format: format, OutputRoot: outputRoot,
 				Options: domain.ExportOptions{NamingTemplate: naming, MaximumNameBytes: maxNameBytes, CollisionPolicy: collision,
-					FormatOptions: map[string]any{"content": includeContent, "comments": includeComments, "metadata": includeMetadata}},
+					FormatOptions: map[string]any{
+						"content": includeContent, "comments": includeComments, "metadata": includeMetadata,
+						"htmlResourcePolicy": htmlResourcePolicy, "htmlBatchArchive": htmlBatchArchive,
+					}},
 			})
 			if err != nil {
 				return err
@@ -249,8 +265,31 @@ func (a *App) exportCommand() *cobra.Command {
 	start.Flags().BoolVar(&includeContent, "include-content", true, "include rendered article content where supported")
 	start.Flags().BoolVar(&includeComments, "include-comments", false, "include locally stored comments")
 	start.Flags().BoolVar(&includeMetadata, "include-metadata", true, "include normalized article metadata")
+	start.Flags().StringVar(&htmlResourcePolicy, "html-resource-policy", "best-effort", "HTML resource handling: best-effort or strict")
+	start.Flags().StringVar(&htmlBatchArchive, "html-batch-archive", "", "package all selected HTML articles into this .zip file")
 	async.addFlags(start)
-	command.AddCommand(start)
+	var verifyRoot, verifyManifest string
+	verify := &cobra.Command{
+		Use: "verify", Short: "Verify an export provenance manifest and every recorded output checksum", Args: cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			root := strings.TrimSpace(verifyRoot)
+			manifest := strings.TrimSpace(verifyManifest)
+			if root == "" || manifest == "" {
+				return usage("export verify requires --root and --manifest")
+			}
+			report, err := exporter.VerifyProvenanceManifest(command.Context(), root, manifest)
+			if err != nil {
+				return err
+			}
+			if !report.Valid {
+				return &ResultError{Kind: "verification", Message: "export verification failed", ExitCode: 1, Data: report}
+			}
+			return a.output(report)
+		},
+	}
+	verify.Flags().StringVar(&verifyRoot, "root", "", "export root containing the manifest and outputs")
+	verify.Flags().StringVar(&verifyManifest, "manifest", "", "root-relative provenance manifest path")
+	command.AddCommand(start, verify)
 	return command
 }
 
@@ -374,7 +413,7 @@ func (a *App) jobCommand() *cobra.Command {
 	if a.active != nil && a.active.Jobs != nil {
 		command.AddCommand(a.directJobOperation("pause <id>", "Pause a supported job", "pause-job:", a.active.Jobs.Pause))
 		command.AddCommand(a.restartJobOperation("resume <id>", "Resume a paused or authentication-blocked job", "", a.active.Jobs.Resume))
-		command.AddCommand(a.restartJobOperation("retry <id>", "Retry a failed, partial, or cancelled job", "retry-job:", a.active.Jobs.Retry))
+		command.AddCommand(a.restartJobOperation("retry <id>", "Retry a failed, partial, or cancelled job", "retry-job:", nil))
 	}
 	return command
 }
@@ -393,7 +432,21 @@ func (a *App) restartJobOperation(
 					return usage(strings.Split(use, " ")[0] + " requires --confirm " + required)
 				}
 			}
-			job, err := operation(command.Context(), domain.JobID(args[0]))
+			var job domain.Job
+			var err error
+			if operation == nil {
+				current, getErr := a.active.Jobs.Get(command.Context(), domain.JobID(args[0]))
+				if getErr != nil {
+					return getErr
+				}
+				if current.Kind == "export" {
+					job, err = a.active.Jobs.RetryExport(command.Context(), current.ID)
+				} else {
+					job, err = a.active.Jobs.Retry(command.Context(), current.ID)
+				}
+			} else {
+				job, err = operation(command.Context(), domain.JobID(args[0]))
+			}
 			if err != nil {
 				return err
 			}

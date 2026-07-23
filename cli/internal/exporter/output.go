@@ -13,8 +13,10 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 )
 
@@ -48,11 +50,22 @@ const (
 )
 
 type OutputFile struct {
-	ArticleID domain.ArticleID `json:"articleId,omitempty"`
-	Path      string           `json:"path"`
-	Size      int64            `json:"size"`
-	SHA256    string           `json:"sha256"`
-	Status    OutputStatus     `json:"status"`
+	ArticleID  domain.ArticleID   `json:"articleId,omitempty"`
+	ArticleIDs []domain.ArticleID `json:"articleIds,omitempty"`
+	Path       string             `json:"path"`
+	Size       int64              `json:"size"`
+	SHA256     string             `json:"sha256"`
+	Status     OutputStatus       `json:"status"`
+}
+
+// StagedOutput describes a fully written and synced private output that has
+// not necessarily been published at its destination yet. TemporaryPath is
+// relative to the same OutputManager root, so callers may persist this value
+// in a durable job checkpoint and resume publication after a process crash.
+type StagedOutput struct {
+	Output        OutputFile      `json:"output"`
+	TemporaryPath string          `json:"temporaryPath,omitempty"`
+	Policy        CollisionPolicy `json:"policy"`
 }
 
 type CleanupReport struct {
@@ -62,8 +75,9 @@ type CleanupReport struct {
 
 type OutputManager struct {
 	root       string
-	rootDevice uint64
-	rootInode  uint64
+	handle     *os.Root
+	lifecycle  sync.RWMutex
+	capability bool
 }
 
 func NewOutputManager(root string) (*OutputManager, error) {
@@ -84,11 +98,64 @@ func NewOutputManager(root string) (*OutputManager, error) {
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return nil, errors.New("export output root is not a directory")
 	}
-	device, inode, err := fileIdentity(info)
+	handle, err := os.OpenRoot(absolute)
 	if err != nil {
-		return nil, fmt.Errorf("identify export output root: %w", err)
+		return nil, fmt.Errorf("open export output root: %w", err)
 	}
-	return &OutputManager{root: filepath.Clean(absolute), rootDevice: device, rootInode: inode}, nil
+	openedInfo, err := handle.Stat(".")
+	if err != nil {
+		handle.Close()
+		return nil, fmt.Errorf("inspect opened export output root: %w", err)
+	}
+	if !os.SameFile(info, openedInfo) {
+		handle.Close()
+		return nil, errors.New("export output root was replaced while opening")
+	}
+	return &OutputManager{root: filepath.Clean(absolute), handle: handle}, nil
+}
+
+// NewOutputManagerFromRoot derives an output capability from an already-open
+// trusted root. The returned manager owns only its child handle; the caller
+// retains ownership of authorizedRoot.
+func NewOutputManagerFromRoot(authorizedRoot *os.Root, relative string) (*OutputManager, error) {
+	if authorizedRoot == nil {
+		return nil, errors.New("authorized export output root is required")
+	}
+	relative = filepath.ToSlash(filepath.Clean(filepath.FromSlash(relative)))
+	if relative == "." {
+		relative = ""
+	}
+	if relative != "" {
+		if _, err := normalizeRelativeOutputPath(relative); err != nil {
+			return nil, err
+		}
+		if err := ensureOutputDirectories(authorizedRoot, relative, nil); err != nil {
+			return nil, fmt.Errorf("create authorized export output directory %q: %w", relative, err)
+		}
+	}
+	childName := relative
+	if childName == "" {
+		childName = "."
+	}
+	if relative != "" {
+		if err := rejectSymlinkComponents(authorizedRoot, relative, true); err != nil {
+			return nil, err
+		}
+	}
+	handle, err := authorizedRoot.OpenRoot(childName)
+	if err != nil {
+		return nil, fmt.Errorf("open authorized export output directory %q: %w", childName, err)
+	}
+	info, err := handle.Stat(".")
+	if err != nil {
+		handle.Close()
+		return nil, err
+	}
+	if !info.IsDir() {
+		handle.Close()
+		return nil, errors.New("authorized export output is not a directory")
+	}
+	return &OutputManager{root: filepath.Clean(handle.Name()), handle: handle, capability: true}, nil
 }
 
 func (manager *OutputManager) Root() string {
@@ -98,104 +165,284 @@ func (manager *OutputManager) Root() string {
 	return manager.root
 }
 
+func (manager *OutputManager) Close() error {
+	if manager == nil {
+		return nil
+	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
+	if manager.handle == nil {
+		return nil
+	}
+	err := manager.handle.Close()
+	manager.handle = nil
+	return err
+}
+
 func (manager *OutputManager) WriteFile(
 	ctx context.Context,
 	relativePath string,
 	policy CollisionPolicy,
 	write func(io.Writer) error,
 ) (OutputFile, error) {
-	if manager == nil || manager.root == "" {
-		return OutputFile{}, errors.New("export output manager is not initialized")
-	}
-	if write == nil {
-		return OutputFile{}, errors.New("export output writer is required")
-	}
-	if err := validateCollisionPolicy(policy); err != nil {
-		return OutputFile{}, err
-	}
-	if err := manager.validateRoot(); err != nil {
-		return OutputFile{}, err
-	}
-	canonicalPath, destination, err := manager.resolveSafeOutputPath(relativePath, true)
+	staged, err := manager.StageFile(ctx, relativePath, policy, write)
 	if err != nil {
 		return OutputFile{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = manager.AbortStaged(staged)
+		}
+	}()
+	output, err := manager.CommitStaged(ctx, staged)
+	if err != nil {
+		return OutputFile{}, err
+	}
+	committed = true
+	return output, nil
+}
+
+// StageFile writes and syncs an output into a private file without publishing
+// it. CollisionSkip returns an already committed output with no temporary
+// path. The returned descriptor is safe to serialize into a job checkpoint.
+func (manager *OutputManager) StageFile(
+	ctx context.Context,
+	relativePath string,
+	policy CollisionPolicy,
+	write func(io.Writer) error,
+) (StagedOutput, error) {
+	if manager == nil {
+		return StagedOutput{}, errors.New("export output manager is not initialized")
+	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
+	if manager.root == "" || manager.handle == nil {
+		return StagedOutput{}, errors.New("export output manager is not initialized")
+	}
+	if write == nil {
+		return StagedOutput{}, errors.New("export output writer is required")
+	}
+	if err := validateCollisionPolicy(policy); err != nil {
+		return StagedOutput{}, err
+	}
+	if err := manager.validateRoot(); err != nil {
+		return StagedOutput{}, err
+	}
+	canonicalPath, err := normalizeRelativeOutputPath(relativePath)
+	if err != nil {
+		return StagedOutput{}, err
+	}
+	parent := filepath.ToSlash(filepath.Dir(filepath.FromSlash(canonicalPath)))
+	if parent == "." {
+		parent = ""
+	}
+	if parent != "" {
+		if err := ensureOutputDirectories(manager.handle, parent, manager.syncDirectory); err != nil {
+			return StagedOutput{}, fmt.Errorf("create output directory %q: %w", parent, err)
+		}
 	}
 	select {
 	case <-ctx.Done():
-		return OutputFile{}, ctx.Err()
+		return StagedOutput{}, ctx.Err()
 	default:
 	}
 
-	existing, statErr := os.Lstat(destination)
+	existing, statErr := manager.handle.Lstat(canonicalPath)
 	switch {
 	case statErr == nil:
 		if !existing.Mode().IsRegular() {
-			return OutputFile{}, fmt.Errorf("destination %q is not a regular file: %w", canonicalPath, ErrUnsafePath)
+			return StagedOutput{}, fmt.Errorf("destination %q is not a regular file: %w", canonicalPath, ErrUnsafePath)
 		}
 		switch policy {
 		case CollisionFail:
-			return OutputFile{}, fmt.Errorf("destination %q: %w", canonicalPath, ErrDestinationExists)
+			return StagedOutput{}, fmt.Errorf("destination %q: %w", canonicalPath, ErrDestinationExists)
 		case CollisionSkip:
-			digest, size, err := hashRegularFile(ctx, destination)
+			digest, size, err := manager.hashRegularFile(ctx, canonicalPath)
 			if err != nil {
-				return OutputFile{}, fmt.Errorf("checksum skipped destination %q: %w", canonicalPath, err)
+				return StagedOutput{}, fmt.Errorf("checksum skipped destination %q: %w", canonicalPath, err)
 			}
-			return OutputFile{Path: canonicalPath, Size: size, SHA256: digest, Status: OutputSkipped}, nil
+			return StagedOutput{Output: OutputFile{
+				Path: canonicalPath, Size: size, SHA256: digest, Status: OutputSkipped,
+			}, Policy: policy}, nil
 		}
 	case errors.Is(statErr, os.ErrNotExist):
 	case statErr != nil:
-		return OutputFile{}, fmt.Errorf("inspect destination %q: %w", canonicalPath, statErr)
+		return StagedOutput{}, fmt.Errorf("inspect destination %q: %w", canonicalPath, statErr)
 	}
 
-	temporary, err := os.CreateTemp(filepath.Dir(destination), temporaryOutputPrefix+"*"+temporaryOutputSuffix)
+	temporaryName := filepath.ToSlash(filepath.Join(filepath.FromSlash(parent), temporaryOutputPrefix+uuid.NewString()+temporaryOutputSuffix))
+	temporary, err := manager.handle.OpenFile(temporaryName, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 	if err != nil {
-		return OutputFile{}, fmt.Errorf("create staging file for %q: %w", canonicalPath, err)
+		return StagedOutput{}, fmt.Errorf("create staging file for %q: %w", canonicalPath, err)
 	}
-	temporaryPath := temporary.Name()
-	committed := false
+	staged := false
 	defer func() {
 		_ = temporary.Close()
-		if !committed {
-			_ = os.Remove(temporaryPath)
+		if !staged {
+			_ = manager.handle.Remove(temporaryName)
 		}
 	}()
-	if err := temporary.Chmod(0o600); err != nil {
-		return OutputFile{}, fmt.Errorf("secure staging file for %q: %w", canonicalPath, err)
-	}
 	hash := sha256.New()
 	counting := &countingWriter{writer: io.MultiWriter(temporary, hash)}
 	if err := writeContextWriter(ctx, counting, write); err != nil {
-		return OutputFile{}, err
+		return StagedOutput{}, err
 	}
 	if err := temporary.Sync(); err != nil {
-		return OutputFile{}, fmt.Errorf("sync staging file for %q: %w", canonicalPath, err)
+		return StagedOutput{}, fmt.Errorf("sync staging file for %q: %w", canonicalPath, err)
 	}
 	if err := temporary.Close(); err != nil {
-		return OutputFile{}, fmt.Errorf("close staging file for %q: %w", canonicalPath, err)
+		return StagedOutput{}, fmt.Errorf("close staging file for %q: %w", canonicalPath, err)
 	}
-	if err := manager.validateResolvedDestination(canonicalPath, destination); err != nil {
-		return OutputFile{}, err
+	if err := manager.syncDirectory(parent); err != nil {
+		return StagedOutput{}, fmt.Errorf("sync staging directory for %q: %w", canonicalPath, err)
+	}
+	if err := manager.validateRoot(); err != nil {
+		return StagedOutput{}, err
 	}
 
 	status := OutputWritten
 	if statErr == nil {
 		status = OutputReplaced
 	}
-	if err := commitStagedFile(temporaryPath, destination, policy); err != nil {
-		return OutputFile{}, fmt.Errorf("commit output %q: %w", canonicalPath, err)
-	}
-	committed = true
-	if err := syncDirectory(filepath.Dir(destination)); err != nil {
-		return OutputFile{}, fmt.Errorf("sync output directory for %q: %w", canonicalPath, err)
-	}
-	return OutputFile{
-		Path: canonicalPath, Size: counting.count, SHA256: hex.EncodeToString(hash.Sum(nil)), Status: status,
+	staged = true
+	return StagedOutput{
+		Output: OutputFile{
+			Path: canonicalPath, Size: counting.count, SHA256: hex.EncodeToString(hash.Sum(nil)), Status: status,
+		},
+		TemporaryPath: temporaryName,
+		Policy:        policy,
 	}, nil
+}
+
+// CommitStaged idempotently publishes a staged output. If the destination
+// already contains the expected bytes, it is treated as committed and any
+// surviving private alias is cleaned up. This is the recovery primitive used
+// after a process exits between publication and database finalization.
+func (manager *OutputManager) CommitStaged(ctx context.Context, staged StagedOutput) (OutputFile, error) {
+	if manager == nil {
+		return OutputFile{}, errors.New("export output manager is not initialized")
+	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
+	if manager.root == "" || manager.handle == nil {
+		return OutputFile{}, errors.New("export output manager is not initialized")
+	}
+	if err := validateCollisionPolicy(staged.Policy); err != nil {
+		return OutputFile{}, err
+	}
+	if err := manager.validateRoot(); err != nil {
+		return OutputFile{}, err
+	}
+	destination, err := normalizeRelativeOutputPath(staged.Output.Path)
+	if err != nil {
+		return OutputFile{}, err
+	}
+	if staged.Output.SHA256 == "" || staged.Output.Size < 0 {
+		return OutputFile{}, errors.New("staged output digest and size are required")
+	}
+	parent := filepath.ToSlash(filepath.Dir(filepath.FromSlash(destination)))
+	if parent == "." {
+		parent = ""
+	}
+	temporary, err := manager.validateStagedTemporaryPath(staged.TemporaryPath, parent)
+	if err != nil {
+		return OutputFile{}, fmt.Errorf("staged output %q has an unsafe private path: %w", destination, err)
+	}
+	if digest, size, hashErr := manager.hashRegularFile(ctx, destination); hashErr == nil {
+		if digest == staged.Output.SHA256 && size == staged.Output.Size {
+			if err := manager.syncDirectory(parent); err != nil {
+				return OutputFile{}, fmt.Errorf("sync recovered output directory for %q: %w", destination, err)
+			}
+			if temporary != "" {
+				if err := manager.handle.Remove(temporary); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return OutputFile{}, fmt.Errorf("remove recovered staging file for %q: %w", destination, err)
+				}
+				if err := manager.syncDirectory(parent); err != nil {
+					return OutputFile{}, fmt.Errorf("sync recovered staging cleanup for %q: %w", destination, err)
+				}
+			}
+			return staged.Output, nil
+		}
+		if staged.Policy != CollisionReplace {
+			return OutputFile{}, fmt.Errorf("destination %q: %w", destination, ErrDestinationExists)
+		}
+	} else if !errors.Is(hashErr, os.ErrNotExist) {
+		return OutputFile{}, fmt.Errorf("inspect staged destination %q: %w", destination, hashErr)
+	}
+	if temporary == "" {
+		return OutputFile{}, fmt.Errorf("staged output %q is missing its private file", destination)
+	}
+	digest, size, err := manager.hashRegularFile(ctx, temporary)
+	if err != nil {
+		return OutputFile{}, fmt.Errorf("verify staged output %q: %w", destination, err)
+	}
+	if digest != staged.Output.SHA256 || size != staged.Output.Size {
+		return OutputFile{}, fmt.Errorf("staged output %q does not match its checkpoint", destination)
+	}
+	if err := manager.commitStagedFile(temporary, destination, staged.Policy); err != nil {
+		return OutputFile{}, fmt.Errorf("commit output %q: %w", destination, err)
+	}
+	if err := manager.syncDirectory(parent); err != nil {
+		return OutputFile{}, fmt.Errorf("sync output directory for %q: %w", destination, err)
+	}
+	return staged.Output, nil
+}
+
+// AbortStaged removes a still-private staged file. It never removes a visible
+// destination and is therefore safe to call from deferred cleanup paths.
+func (manager *OutputManager) AbortStaged(staged StagedOutput) error {
+	if manager == nil || staged.TemporaryPath == "" {
+		return nil
+	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
+	if manager.handle == nil {
+		return errors.New("export output manager is closed")
+	}
+	temporary, err := normalizeRelativeOutputPath(staged.TemporaryPath)
+	if err != nil || !isTemporaryOutputName(filepath.Base(filepath.FromSlash(temporary))) {
+		return ErrUnsafePath
+	}
+	if err := manager.handle.Remove(temporary); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// HashFile verifies an already committed relative output through the manager's
+// directory capability. Export workers use it to recover a file that reached
+// durable storage before its SQLite export_files row could be committed.
+func (manager *OutputManager) HashFile(ctx context.Context, relativePath string) (string, int64, error) {
+	if manager == nil {
+		return "", 0, errors.New("export output manager is not initialized")
+	}
+	manager.lifecycle.RLock()
+	defer manager.lifecycle.RUnlock()
+	if manager.root == "" || manager.handle == nil {
+		return "", 0, errors.New("export output manager is not initialized")
+	}
+	if err := manager.validateRoot(); err != nil {
+		return "", 0, err
+	}
+	canonicalPath, err := normalizeRelativeOutputPath(relativePath)
+	if err != nil {
+		return "", 0, err
+	}
+	return manager.hashRegularFile(ctx, canonicalPath)
 }
 
 func (manager *OutputManager) CleanupAbandoned(ctx context.Context, removeBefore time.Time) (CleanupReport, error) {
 	report := CleanupReport{Removed: []string{}, Warnings: []string{}}
-	if manager == nil || manager.root == "" {
+	if manager == nil {
+		return report, errors.New("export output manager is not initialized")
+	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
+	if manager.capability {
+		return CleanupReport{}, errors.New("cleanup of capability-derived export roots is not supported")
+	}
+	if manager.root == "" || manager.handle == nil {
 		return report, errors.New("export output manager is not initialized")
 	}
 	if removeBefore.IsZero() {
@@ -250,6 +497,37 @@ func (manager *OutputManager) CleanupAbandoned(ctx context.Context, removeBefore
 	return report, nil
 }
 
+func (manager *OutputManager) validateRoot() error {
+	if manager == nil || manager.handle == nil {
+		return errors.New("export output manager is closed")
+	}
+	if manager.capability {
+		info, err := manager.handle.Stat(".")
+		if err != nil {
+			return fmt.Errorf("inspect authorized export output handle: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("authorized export output changed type: %w", ErrUnsafePath)
+		}
+		return nil
+	}
+	info, err := os.Lstat(manager.root)
+	if err != nil {
+		return fmt.Errorf("inspect export output root: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("export output root changed type: %w", ErrUnsafePath)
+	}
+	openedInfo, err := manager.handle.Stat(".")
+	if err != nil {
+		return fmt.Errorf("inspect opened export output root: %w", err)
+	}
+	if !os.SameFile(info, openedInfo) {
+		return fmt.Errorf("export output root was replaced: %w", ErrUnsafePath)
+	}
+	return nil
+}
+
 func (manager *OutputManager) resolveSafeOutputPath(relativePath string, createParents bool) (string, string, error) {
 	if err := manager.validateRoot(); err != nil {
 		return "", "", err
@@ -258,81 +536,21 @@ func (manager *OutputManager) resolveSafeOutputPath(relativePath string, createP
 	if err != nil {
 		return "", "", err
 	}
-	parts := strings.Split(canonical, "/")
-	current := manager.root
-	for index, part := range parts[:len(parts)-1] {
-		current = filepath.Join(current, part)
-		info, statErr := os.Lstat(current)
-		switch {
-		case statErr == nil:
-			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-				return "", "", fmt.Errorf("path component %q escapes or is not a directory: %w",
-					strings.Join(parts[:index+1], "/"), ErrUnsafePath)
-			}
-		case errors.Is(statErr, os.ErrNotExist):
-			if !createParents {
-				return canonical, filepath.Join(manager.root, filepath.FromSlash(canonical)), nil
-			}
-			if err := os.Mkdir(current, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
-				return "", "", fmt.Errorf("create output directory %q: %w", strings.Join(parts[:index+1], "/"), err)
-			}
-			createdInfo, err := os.Lstat(current)
-			if err != nil || createdInfo.Mode()&os.ModeSymlink != 0 || !createdInfo.IsDir() {
-				return "", "", fmt.Errorf("created output directory %q is unsafe: %w", strings.Join(parts[:index+1], "/"), ErrUnsafePath)
-			}
-		default:
-			return "", "", fmt.Errorf("inspect output directory %q: %w", strings.Join(parts[:index+1], "/"), statErr)
+	parent := filepath.ToSlash(filepath.Dir(filepath.FromSlash(canonical)))
+	if parent == "." {
+		parent = ""
+	}
+	if createParents && parent != "" {
+		if err := manager.handle.MkdirAll(parent, 0o700); err != nil {
+			return "", "", err
 		}
 	}
-	destination := filepath.Join(current, parts[len(parts)-1])
-	if info, err := os.Lstat(destination); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return "", "", fmt.Errorf("destination %q is a symlink: %w", canonical, ErrUnsafePath)
+	if info, err := manager.handle.Lstat(canonical); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return "", "", ErrUnsafePath
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", "", fmt.Errorf("inspect destination %q: %w", canonical, err)
+		return "", "", err
 	}
-	return canonical, destination, nil
-}
-
-func (manager *OutputManager) validateRoot() error {
-	info, err := os.Lstat(manager.root)
-	if err != nil {
-		return fmt.Errorf("inspect export output root: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("export output root changed type: %w", ErrUnsafePath)
-	}
-	device, inode, err := fileIdentity(info)
-	if err != nil {
-		return fmt.Errorf("identify export output root: %w", err)
-	}
-	if device != manager.rootDevice || inode != manager.rootInode {
-		return fmt.Errorf("export output root was replaced: %w", ErrUnsafePath)
-	}
-	return nil
-}
-
-func (manager *OutputManager) validateResolvedDestination(canonicalPath, destination string) error {
-	if err := manager.validateRoot(); err != nil {
-		return err
-	}
-	parts := strings.Split(canonicalPath, "/")
-	current := manager.root
-	for index, part := range parts[:len(parts)-1] {
-		current = filepath.Join(current, part)
-		info, err := os.Lstat(current)
-		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return fmt.Errorf("path component %q changed during write: %w", strings.Join(parts[:index+1], "/"), ErrUnsafePath)
-		}
-	}
-	if filepath.Clean(destination) != filepath.Join(current, parts[len(parts)-1]) {
-		return fmt.Errorf("destination %q changed during write: %w", canonicalPath, ErrUnsafePath)
-	}
-	if info, err := os.Lstat(destination); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("destination %q became a symlink: %w", canonicalPath, ErrUnsafePath)
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect destination %q before commit: %w", canonicalPath, err)
-	}
-	return nil
+	return canonical, filepath.Join(manager.root, filepath.FromSlash(canonical)), nil
 }
 
 func normalizeRelativeOutputPath(relativePath string) (string, error) {
@@ -370,22 +588,39 @@ func validateCollisionPolicy(policy CollisionPolicy) error {
 	}
 }
 
-func commitStagedFile(source, destination string, policy CollisionPolicy) error {
+func (manager *OutputManager) commitStagedFile(source, destination string, policy CollisionPolicy) error {
+	parent := filepath.ToSlash(filepath.Dir(filepath.FromSlash(destination)))
+	if parent == "." {
+		parent = ""
+	}
 	switch policy {
 	case CollisionFail:
-		if _, err := os.Lstat(destination); err == nil {
-			return ErrDestinationExists
-		} else if !errors.Is(err, os.ErrNotExist) {
+		if err := manager.handle.Link(source, destination); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return ErrDestinationExists
+			}
 			return err
 		}
-		return os.Rename(source, destination)
+		// Persist the destination link before removing the private recovery
+		// alias. Otherwise a crash between unlink and directory sync can lose
+		// both names for the staged inode.
+		if err := manager.syncDirectory(parent); err != nil {
+			return err
+		}
+		if err := manager.handle.Remove(source); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := manager.syncDirectory(parent); err != nil {
+			return err
+		}
+		return nil
 	case CollisionReplace:
-		if info, err := os.Lstat(destination); err == nil && !info.Mode().IsRegular() {
+		if info, err := manager.handle.Lstat(destination); err == nil && !info.Mode().IsRegular() {
 			return ErrUnsafePath
 		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		return os.Rename(source, destination)
+		return manager.handle.Rename(source, destination)
 	default:
 		return fmt.Errorf("cannot commit with collision policy %q: %w", policy, ErrInvalidCollision)
 	}
@@ -433,8 +668,18 @@ func (writer *countingWriter) Write(data []byte) (int, error) {
 	return count, err
 }
 
-func hashRegularFile(ctx context.Context, path string) (string, int64, error) {
-	file, err := os.Open(path)
+func (manager *OutputManager) hashRegularFile(ctx context.Context, path string) (string, int64, error) {
+	if err := rejectSymlinkComponents(manager.handle, path, false); err != nil {
+		return "", 0, err
+	}
+	before, err := manager.handle.Lstat(path)
+	if err != nil {
+		return "", 0, err
+	}
+	if before.Mode()&os.ModeSymlink != 0 || !before.Mode().IsRegular() {
+		return "", 0, ErrUnsafePath
+	}
+	file, err := manager.handle.Open(path)
 	if err != nil {
 		return "", 0, err
 	}
@@ -446,12 +691,102 @@ func hashRegularFile(ctx context.Context, path string) (string, int64, error) {
 	if !info.Mode().IsRegular() {
 		return "", 0, ErrUnsafePath
 	}
+	if !os.SameFile(before, info) {
+		return "", 0, ErrUnsafePath
+	}
 	hash := sha256.New()
 	written, err := copyWithContext(ctx, hash, file)
 	if err != nil {
 		return "", 0, err
 	}
+	after, err := manager.handle.Lstat(path)
+	if err != nil || after.Mode()&os.ModeSymlink != 0 || !after.Mode().IsRegular() || !os.SameFile(info, after) {
+		return "", 0, ErrUnsafePath
+	}
 	return hex.EncodeToString(hash.Sum(nil)), written, nil
+}
+
+func rejectSymlinkComponents(root *os.Root, relative string, requireFinalDirectory bool) error {
+	if root == nil {
+		return errors.New("filesystem root is unavailable")
+	}
+	canonical, err := normalizeRelativeOutputPath(relative)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(canonical, "/")
+	for index := range parts {
+		current := strings.Join(parts[:index+1], "/")
+		info, err := root.Lstat(current)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("output path component %q is a symlink: %w", current, ErrUnsafePath)
+		}
+		if index < len(parts)-1 && !info.IsDir() {
+			return fmt.Errorf("output path component %q is not a directory: %w", current, ErrUnsafePath)
+		}
+		if requireFinalDirectory && index == len(parts)-1 && !info.IsDir() {
+			return fmt.Errorf("output path %q is not a directory: %w", current, ErrUnsafePath)
+		}
+	}
+	return nil
+}
+
+// ensureOutputDirectories creates one component at a time and rejects every
+// existing symlink. When syncDirectory is provided, each newly created entry
+// is made durable before a later checkpoint can reference a file beneath it.
+func ensureOutputDirectories(root *os.Root, relative string, syncDirectory func(string) error) error {
+	if root == nil {
+		return errors.New("filesystem root is unavailable")
+	}
+	canonical, err := normalizeRelativeOutputPath(relative)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(canonical, "/")
+	for index := range parts {
+		current := strings.Join(parts[:index+1], "/")
+		info, statErr := root.Lstat(current)
+		switch {
+		case statErr == nil:
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				return fmt.Errorf("output directory %q is not a real directory: %w", current, ErrUnsafePath)
+			}
+			continue
+		case !errors.Is(statErr, os.ErrNotExist):
+			return statErr
+		}
+		if err := root.Mkdir(current, 0o700); err != nil {
+			return err
+		}
+		if syncDirectory != nil {
+			parent := strings.Join(parts[:index], "/")
+			if err := syncDirectory(parent); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (manager *OutputManager) validateStagedTemporaryPath(temporaryPath, destinationParent string) (string, error) {
+	if temporaryPath == "" {
+		return "", nil
+	}
+	temporary, err := normalizeRelativeOutputPath(temporaryPath)
+	if err != nil || !isTemporaryOutputName(filepath.Base(filepath.FromSlash(temporary))) {
+		return "", ErrUnsafePath
+	}
+	temporaryParent := filepath.ToSlash(filepath.Dir(filepath.FromSlash(temporary)))
+	if temporaryParent == "." {
+		temporaryParent = ""
+	}
+	if temporaryParent != destinationParent {
+		return "", ErrUnsafePath
+	}
+	return temporary, nil
 }
 
 func copyWithContext(ctx context.Context, destination io.Writer, source io.Reader) (int64, error) {
@@ -483,7 +818,7 @@ func copyWithContext(ctx context.Context, destination io.Writer, source io.Reade
 	}
 }
 
-func syncDirectory(path string) error {
+func (manager *OutputManager) syncDirectory(path string) error {
 	if runtime.GOOS == "windows" {
 		// Windows does not provide durable directory fsync semantics through
 		// os.File.Sync; opening a directory handle and flushing it commonly
@@ -491,7 +826,10 @@ func syncDirectory(path string) error {
 		// the atomic commit.
 		return nil
 	}
-	directory, err := os.Open(path)
+	if path == "" {
+		path = "."
+	}
+	directory, err := manager.handle.Open(path)
 	if err != nil {
 		return err
 	}

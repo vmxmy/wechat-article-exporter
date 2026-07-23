@@ -29,6 +29,25 @@ func NewDirect(httpClient *http.Client, policy DestinationPolicy) *Direct {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
 	clone := *httpClient
+	switch transport := clone.Transport.(type) {
+	case nil:
+		defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+		if !ok || defaultTransport == nil {
+			defaultTransport = &http.Transport{}
+		}
+		defaultTransport = defaultTransport.Clone()
+		defaultTransport.Proxy = nil
+		clone.Transport = defaultTransport
+	case *http.Transport:
+		directTransport := transport.Clone()
+		directTransport.Proxy = nil
+		clone.Transport = directTransport
+	default:
+		// A custom RoundTripper may consult proxy environment variables or hide
+		// redirect/dial behavior that cannot be audited here. Direct mode must
+		// use a transport whose proxy behavior we can explicitly disable.
+		clone.Transport = (&http.Transport{}).Clone()
+	}
 	if clone.Timeout <= 0 {
 		clone.Timeout = 30 * time.Second
 	}
@@ -89,7 +108,7 @@ func (client *Direct) Do(ctx context.Context, request Request) (Result, error) {
 	started := now()
 	transport := client.HTTP
 	if transport == nil {
-		transport = &http.Client{Timeout: 30 * time.Second}
+		transport = NewDirect(nil, client.Policy).HTTP
 	}
 	response, err := transport.Do(httpRequest)
 	if err != nil {

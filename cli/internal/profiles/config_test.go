@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -150,13 +151,32 @@ func TestConfigStoreDecodesOmittedVersionTwoFieldsWithSafeDefaults(t *testing.T)
 	if err := os.WriteFile(path, []byte(`{"schemaVersion":2,"profileId":"minimal","preferences":{},"mcp":{}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	configuration, _, err := NewConfigStore(path).Read()
+	configuration, backup, err := NewConfigStore(path).Read()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defaults := DefaultConfig("minimal")
+	if backup != path+".v2.bak" || configuration.SchemaVersion != CurrentConfigVersion {
+		t.Fatalf("version-two migration backup=%q config=%#v", backup, configuration)
+	}
 	if !reflect.DeepEqual(configuration.Preferences, defaults.Preferences) {
 		t.Fatalf("minimal preferences = %#v, want defaults %#v", configuration.Preferences, defaults.Preferences)
+	}
+}
+
+func TestConfigStoreMigratesVersionTwoAllowedOutputRoots(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	legacy := []byte(`{"schemaVersion":2,"profileId":"profile-a","preferences":{},"mcp":{"allowedOutputRoots":["/safe/export"]}}`)
+	if err := os.WriteFile(path, legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configuration, backup, err := NewConfigStore(path).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backup != path+".v2.bak" || configuration.SchemaVersion != CurrentConfigVersion ||
+		!reflect.DeepEqual(configuration.MCP.AllowedOutputRoots, []string{"/safe/export"}) {
+		t.Fatalf("migrated v2 config=%#v backup=%q", configuration, backup)
 	}
 }
 
@@ -218,5 +238,18 @@ func TestConfigStoreRefusesNewerSchema(t *testing.T) {
 	}
 	if _, _, err := NewConfigStore(path).Read(); err == nil {
 		t.Fatal("Read(newer config) error = nil")
+	}
+}
+
+func TestConfigStoreValidatesMCPAllowedOutputRoots(t *testing.T) {
+	configuration := DefaultConfig("profile-a")
+	configuration.MCP.AllowedOutputRoots = []string{"relative/path"}
+	if err := NewConfigStore(filepath.Join(t.TempDir(), "config.json")).Write(configuration); err == nil ||
+		!strings.Contains(err.Error(), "absolute paths") {
+		t.Fatalf("relative MCP root error = %v", err)
+	}
+	configuration.MCP.AllowedOutputRoots = []string{filepath.Join(t.TempDir(), "exports")}
+	if err := NewConfigStore(filepath.Join(t.TempDir(), "config.json")).Write(configuration); err != nil {
+		t.Fatal(err)
 	}
 }

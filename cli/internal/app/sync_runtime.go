@@ -24,6 +24,7 @@ type localSyncRuntime struct {
 	starter   application.JobStarter
 	runner    *syncrunner.Runner
 	album     *syncrunner.AlbumRunner
+	scheduler *jobs.Scheduler
 }
 
 type syncJobItem struct {
@@ -37,7 +38,7 @@ type albumSyncJobItem struct {
 	Download bool                        `json:"download,omitempty"`
 }
 
-func newLocalSyncRuntime(runtime *ProfileRuntime, clock runtimeenv.Clock) *localSyncRuntime {
+func newLocalSyncRuntime(runtime *ProfileRuntime, clock runtimeenv.Clock, schedulers ...*jobs.Scheduler) *localSyncRuntime {
 	if runtime == nil || runtime.Library == nil || runtime.Jobs == nil || runtime.WeChat == nil {
 		return nil
 	}
@@ -53,8 +54,12 @@ func newLocalSyncRuntime(runtime *ProfileRuntime, clock runtimeenv.Clock) *local
 	if err != nil {
 		return nil
 	}
+	var scheduler *jobs.Scheduler
+	if len(schedulers) > 0 {
+		scheduler = schedulers[0]
+	}
 	return &localSyncRuntime{profile: runtime.Profile.ID, store: runtime.Jobs, library: runtime.Library,
-		downloads: runtime.Downloads, runner: runner, album: albumRunner}
+		downloads: runtime.Downloads, runner: runner, album: albumRunner, scheduler: scheduler}
 }
 
 func (runtime *localSyncRuntime) Start(ctx context.Context, request domain.SynchronizeAccountRequest) (domain.Job, error) {
@@ -119,6 +124,23 @@ func (runtime *localSyncRuntime) StartAlbum(ctx context.Context, request syncrun
 	}, []string{string(encoded)})
 }
 
+func (runtime *localSyncRuntime) StartAlbumByID(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
+	if runtime == nil || runtime.library == nil {
+		return domain.Job{}, fmt.Errorf("album sync runtime: %w", application.ErrUnavailable)
+	}
+	account, err := runtime.library.GetAccount(ctx, accountID)
+	if err != nil {
+		return domain.Job{}, err
+	}
+	album, err := runtime.library.GetAlbumForAccount(ctx, accountID, albumID)
+	if err != nil {
+		return domain.Job{}, fmt.Errorf("album %s does not belong to account %s: %w", albumID, accountID, err)
+	}
+	return runtime.StartAlbum(ctx, syncrunner.AlbumSyncRequest{
+		FakeID: account.FakeID, AlbumID: album.UpstreamID, Order: "forward", PageSize: 20, PageDelay: 5 * time.Second,
+	}, false)
+}
+
 func normalizedSyncAccountIDs(request domain.SynchronizeAccountRequest) []domain.AccountID {
 	values := make([]domain.AccountID, 0, len(request.AccountIDs)+1)
 	if request.AccountID != "" {
@@ -159,7 +181,7 @@ func (runtime *localSyncRuntime) Run(ctx context.Context, id domain.JobID) (doma
 		operation = "album_sync"
 	}
 	engine, err := jobs.NewEngine(runtime.store, jobs.EngineOptions{
-		Owner: "local-sync-worker",
+		Owner: "local-sync-worker", Scheduler: runtime.scheduler,
 		Metadata: func(jobs.Item) jobs.WorkMetadata {
 			return jobs.WorkMetadata{Operation: operation, Host: "mp.weixin.qq.com", Sensitive: true}
 		},

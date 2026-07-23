@@ -21,8 +21,12 @@ Run `gofmt` on every changed Go file. Cobra, Bubble Tea, and MCP are presentatio
 ## Testing Guidelines
 Add focused tests beside the package. Processor/exporter changes require sanitized fixture or golden coverage. Database changes require ordered migrations and upgrade tests from every supported baseline. Job/network changes require deterministic clock, retry, lease, cancellation, and redaction coverage. MCP tests must verify stdout protocol purity, bounded messages, EOF/cancellation, policies, and exact confirmations.
 
-## Commit & Pull Request Guidelines
-Recent history uses short version bumps plus concise `feat:` and `fix:` subjects. Prefer descriptive commit messages such as `fix: handle empty CGI payload in exporter` and keep each commit narrowly scoped. PRs should explain the user-visible change, link the relevant issue when available, note any config or deployment impact, and include screenshots for UI changes. Call out test coverage and known gaps explicitly.
+## Security and Retirement Boundaries
+Do not commit WeChat sessions, credentials, article bodies from real users, local databases, exported archives, or agent state. Secrets stay in OS keyrings or the explicit encrypted vault and must be redacted before persistence or output. Sensitive traffic uses direct transport or an explicitly credential-trusted proxy. The Nuxt/Nitro/Web Worker/remote OAuth product is retired; do not reintroduce project-operated runtime dependencies or network-listening MCP as a shortcut. Historical domain and infrastructure references belong only in explicitly historical documentation.
 
-## Security & Configuration Tips
-Do not commit live WeChat credentials, exported article data, or local OMX state. Runtime configuration is environment-driven; common variables include `NUXT_AGGRID_LICENSE`, `NUXT_SENTRY_*`, `NUXT_UMAMI_*`, and Nitro KV settings.
+## Image Generation
+- For third-party or fixed-path image generation, prefer the official Codex CLI at `$IMAGE_GEN` instead of the built-in one-off image tool.
+- The CLI reads `OPENAI_BASE_URL` and `OPENAI_API_KEY`; the key is loaded from macOS Keychain and must never be committed or printed.
+- Before production use, verify `POST /v1/images/generations` with a low-quality 1024×1024 smoke test. A model appearing in `/v1/models` is not sufficient evidence that the Images API works.
+- Save temporary inputs under `tmp/imagegen/` and final assets under `output/imagegen/`.
+- Use `generate-batch --concurrency 5` for multiple distinct prompts; use `--n` only for variants of one prompt.

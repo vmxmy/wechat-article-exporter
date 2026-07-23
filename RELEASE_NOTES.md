@@ -10,6 +10,7 @@ This is the first post-retirement release of `wechat-article`. The repository an
 - HTML, Markdown, text, JSON, Excel, DOCX, and local-Chromium PDF exports with stable manifests, checksums, atomic output, and resume support.
 - Cobra automation, Bubble Tea TUI, and local `wechat-article mcp serve --transport stdio` adapters that do not require project-operated Web, KV, D1, or remote MCP services.
 - Backup, independent verification, transactional restore, integrity checks, garbage collection, diagnostics, trusted-proxy policy, and legacy Web archive import/verification.
+- Production-wired encrypted-vault initialization/unlock commands, secure interactive Credential import and validation, redacted diagnostic ZIP creation, MCP protocol negotiation, and allowed-output-root enforcement.
 - The retired Nuxt, Nitro, Cloudflare Pages, Worker MCP/OAuth, Docker Web, remote client, and JavaScript production surfaces have been removed.
 
 ## Network, data, and secret changes

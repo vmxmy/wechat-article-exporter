@@ -32,6 +32,11 @@ type CredentialArticleRequest struct {
 	Class      network.RequestClass
 }
 
+type CredentialValidationRequest struct {
+	BusinessID string
+	Credential credentials.Record
+}
+
 type ContentResponse struct {
 	Body      []byte
 	MediaType string
@@ -131,6 +136,64 @@ func (endpoint ContentEndpoint) FetchArticle(ctx context.Context, request Creden
 		return ContentResponse{}, credentials.ErrCredentialExpired
 	}
 	return ContentResponse{Body: body, MediaType: mediaType, Route: result.Route, RequestID: result.RequestID}, nil
+}
+
+func (endpoint ContentEndpoint) ValidateCredential(ctx context.Context, request CredentialValidationRequest) (RequestProvenance, error) {
+	query := url.Values{
+		"action": {"getcomment"}, "__biz": {strings.TrimSpace(request.BusinessID)},
+		"appmsgid": {"0"}, "idx": {"1"}, "comment_id": {"0"}, "scene": {"0"},
+		"offset": {"0"}, "limit": {"1"}, "buffer": {""}, "f": {"json"},
+	}
+	body, provenance, err := endpoint.fetchJSON(ctx, query, request.Credential)
+	if err != nil {
+		return provenance, err
+	}
+	var payload struct {
+		BaseResp        *rawBaseResponse `json:"base_resp"`
+		Comments        json.RawMessage  `json:"elected_comment"`
+		ContinueFlag    json.RawMessage  `json:"continue_flag"`
+		Buffer          json.RawMessage  `json:"buffer"`
+		CommentIdentity json.RawMessage  `json:"comment_id"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return provenance, fmt.Errorf("%w: decode credential validation response: %v", ErrContentProtocol, err)
+	}
+	if payload.BaseResp == nil {
+		return provenance, fmt.Errorf("%w: credential validation response is missing base_resp", ErrContentProtocol)
+	}
+	if err := contentBaseError(*payload.BaseResp); err != nil {
+		return provenance, err
+	}
+	if !validCredentialValidationShape(payload.Comments, payload.ContinueFlag, payload.Buffer, payload.CommentIdentity) {
+		return provenance, fmt.Errorf("%w: credential validation response did not contain an authenticated comment-data shape",
+			ErrContentProtocol)
+	}
+	return provenance, nil
+}
+
+func validCredentialValidationShape(comments, continueFlag, buffer, commentIdentity json.RawMessage) bool {
+	if len(comments) > 0 {
+		var value []json.RawMessage
+		if json.Unmarshal(comments, &value) == nil && value != nil {
+			return true
+		}
+	}
+	if len(continueFlag) > 0 {
+		var value int
+		if json.Unmarshal(continueFlag, &value) == nil {
+			return true
+		}
+	}
+	for _, raw := range []json.RawMessage{buffer, commentIdentity} {
+		if len(raw) == 0 {
+			continue
+		}
+		var value string
+		if json.Unmarshal(raw, &value) == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (endpoint ContentEndpoint) FetchComments(ctx context.Context, request CommentPageRequest) (CommentPage, RequestProvenance, error) {

@@ -5,13 +5,17 @@ package exporter
 import (
 	"errors"
 	"os"
-	"syscall"
+
+	"golang.org/x/sys/windows"
 )
 
-func fileIdentity(info os.FileInfo) (uint64, uint64, error) {
-	data, ok := info.Sys().(*syscall.Win32FileAttributeData)
-	if !ok {
-		return 0, 0, errors.New("filesystem identity is unavailable")
+func fileIdentityFromFile(file *os.File) (uint64, uint64, error) {
+	if file == nil {
+		return 0, 0, errors.New("filesystem handle is unavailable")
 	}
-	return uint64(data.CreationTime.HighDateTime), uint64(data.CreationTime.LowDateTime), nil
+	var data windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(windows.Handle(file.Fd()), &data); err != nil {
+		return 0, 0, err
+	}
+	return uint64(data.VolumeSerialNumber), uint64(data.FileIndexHigh)<<32 | uint64(data.FileIndexLow), nil
 }

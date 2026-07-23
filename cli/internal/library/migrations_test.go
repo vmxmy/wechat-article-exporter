@@ -68,6 +68,156 @@ func TestMigrationReplyCheckpointsIsOrderedAndIdempotent(t *testing.T) {
 	assertNamedSchemaObject(t, database.db, "index", "reply_checkpoints_pending_idx")
 }
 
+func TestMigration004BackfillsOnlyUnambiguousLegacyExportFileArticleIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-export-files.sqlite3")
+	createMigrationBaseline(t, path, 3)
+	database := openMigrationFixture(t, path)
+	now := time.Unix(1_700_000_000, 0).UnixMilli()
+	if _, err := database.Exec(`INSERT INTO profiles(id, name, created_at, updated_at) VALUES('profile-a', 'Profile A', ?, ?);
+INSERT INTO profiles(id, name, created_at, updated_at) VALUES('profile-b', 'Profile B', ?, ?);
+INSERT INTO articles(id, profile_id, title, canonical_url, created_at, updated_at) VALUES
+  ('article-a', 'profile-a', 'Article A', 'https://mp.weixin.qq.com/s/a', ?, ?),
+  ('article-b', 'profile-a', 'Article B', 'https://mp.weixin.qq.com/s/b', ?, ?),
+  ('article-foreign', 'profile-b', 'Foreign Article', 'https://mp.weixin.qq.com/s/foreign', ?, ?);
+INSERT INTO exports(id, profile_id, format, manifest_json, state, created_at) VALUES
+  ('export-provenance', 'profile-a', 'text', '{"selection":{"articleIds":["article-a","article-b"]},"outputs":[{"path":"b.txt","articleId":"article-b"},{"path":"a.txt","articleId":"article-a"}]}', 'completed', ?),
+  ('export-duplicate-path', 'profile-a', 'text', '{"outputs":[{"path":"same.txt","articleId":"article-a"},{"path":"same.txt","articleId":"article-b"}]}', 'completed', ?),
+  ('export-foreign-path', 'profile-a', 'text', '{"outputs":[{"path":"foreign.txt","articleId":"article-foreign"}]}', 'completed', ?),
+  ('export-output-multi', 'profile-a', 'html', '{"outputs":[{"path":"batch.zip","articleIds":["article-a","article-b"]}]}', 'completed', ?),
+  ('export-selection', 'profile-a', 'text', '{"articleIds":["article-a","article-b"]}', 'completed', ?),
+  ('export-single', 'profile-a', 'html', '{"selection":{"articleIds":["article-a"]}}', 'completed', ?),
+  ('export-nonobject-output', 'profile-a', 'text', '{"outputs":[null,42,"bad",{"path":"safe.txt","articleId":"article-a"}]}', 'completed', ?),
+  ('export-malformed', 'profile-a', 'text', '{malformed', 'completed', ?);
+INSERT INTO export_files(id, export_id, relative_path) VALUES
+  ('file-provenance-a', 'export-provenance', 'a.txt'),
+  ('file-provenance-b', 'export-provenance', 'b.txt'),
+  ('file-duplicate-path', 'export-duplicate-path', 'same.txt'),
+  ('file-foreign-path', 'export-foreign-path', 'foreign.txt'),
+  ('file-output-multi', 'export-output-multi', 'batch.zip'),
+  ('file-selection-a', 'export-selection', '01.txt'),
+  ('file-selection-b', 'export-selection', '02.txt'),
+  ('file-single-a', 'export-single', 'index.html'),
+  ('file-single-b', 'export-single', 'assets/image.png'),
+  ('file-nonobject-output', 'export-nonobject-output', 'safe.txt'),
+  ('file-malformed', 'export-malformed', 'unknown.txt')`,
+		now, now, now, now, now, now, now, now, now, now, now, now, now, now, now, now, now, now); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(context.Background(), OpenOptions{Path: path, ProfileID: "profile-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close()
+
+	assertExportFileArticleID(t, upgraded.db, "file-provenance-a", "article-a")
+	assertExportFileArticleID(t, upgraded.db, "file-provenance-b", "article-b")
+	assertExportFileArticleID(t, upgraded.db, "file-duplicate-path", "")
+	assertExportFileArticleID(t, upgraded.db, "file-foreign-path", "")
+	assertExportFileArticleID(t, upgraded.db, "file-output-multi", "")
+	assertExportFileArticleID(t, upgraded.db, "file-selection-a", "")
+	assertExportFileArticleID(t, upgraded.db, "file-selection-b", "")
+	assertExportFileArticleID(t, upgraded.db, "file-single-a", "article-a")
+	assertExportFileArticleID(t, upgraded.db, "file-single-b", "article-a")
+	assertExportFileArticleID(t, upgraded.db, "file-nonobject-output", "article-a")
+	assertExportFileArticleID(t, upgraded.db, "file-malformed", "")
+
+	rows, err := upgraded.db.Query(`SELECT DISTINCT article_id FROM export_files
+WHERE export_id='export-provenance' ORDER BY article_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var affected []string
+	for rows.Next() {
+		var articleID string
+		if err := rows.Scan(&articleID); err != nil {
+			t.Fatal(err)
+		}
+		affected = append(affected, articleID)
+	}
+	if strings.Join(affected, ",") != "article-a,article-b" {
+		t.Fatalf("legacy multi-file affected article IDs = %v", affected)
+	}
+}
+
+func TestMigration005DeterministicallyClearsDuplicateProfileJobAssociations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "duplicate-export-jobs.sqlite3")
+	createMigrationBaseline(t, path, 4)
+	database := openMigrationFixture(t, path)
+	if _, err := database.Exec(`INSERT INTO profiles(id, name, created_at, updated_at) VALUES('profile-a', 'Profile A', 1, 1);
+INSERT INTO jobs(id, profile_id, kind, state, created_at, updated_at) VALUES('job-a', 'profile-a', 'export', 'completed', 1, 1);
+INSERT INTO exports(id, profile_id, job_id, format, state, created_at) VALUES
+  ('export-z', 'profile-a', 'job-a', 'text', 'completed', 10),
+  ('export-a', 'profile-a', 'job-a', 'text', 'completed', 10),
+  ('export-oldest', 'profile-a', 'job-a', 'text', 'completed', 5)`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(context.Background(), OpenOptions{Path: path, ProfileID: "profile-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close()
+
+	rows, err := upgraded.db.Query(`SELECT id, COALESCE(job_id, '') FROM exports ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	associations := map[string]string{}
+	for rows.Next() {
+		var id, jobID string
+		if err := rows.Scan(&id, &jobID); err != nil {
+			t.Fatal(err)
+		}
+		associations[id] = jobID
+	}
+	if associations["export-oldest"] != "job-a" || associations["export-a"] != "" || associations["export-z"] != "" {
+		t.Fatalf("deduplicated job associations = %#v", associations)
+	}
+	assertNamedSchemaObject(t, upgraded.db, "index", "exports_profile_job_idx")
+}
+
+func TestMigration006MakesLegacyWritingProvenanceImmediatelyReclaimable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writing-provenance.sqlite3")
+	createMigrationBaseline(t, path, 5)
+	database := openMigrationFixture(t, path)
+	if _, err := database.Exec(`INSERT INTO profiles(id, name, created_at, updated_at) VALUES('profile-a', 'Profile A', 1, 1);
+INSERT INTO exports(id, profile_id, format, state, created_at, provenance_state)
+VALUES('export-writing', 'profile-a', 'text', 'completed', 1, 'writing')`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(context.Background(), OpenOptions{Path: path, ProfileID: "profile-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close()
+	var claimedAt sql.NullInt64
+	if err := upgraded.db.QueryRow(`SELECT provenance_claimed_at FROM exports WHERE id='export-writing'`).Scan(&claimedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !claimedAt.Valid || claimedAt.Int64 != 0 {
+		t.Fatalf("legacy writing provenance_claimed_at = %#v, want 0", claimedAt)
+	}
+	if _, claimed, err := upgraded.ClaimExportProvenance(context.Background(), "export-writing", 1, time.Now()); err != nil || !claimed {
+		t.Fatalf("ClaimExportProvenance() claimed=%v error=%v", claimed, err)
+	}
+}
+
 func TestMigrationFailureRollsBackVersionAndSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "broken.sqlite")
 	database, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)")
@@ -155,6 +305,29 @@ applied_at INTEGER NOT NULL
 	}
 }
 
+func openMigrationFixture(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	database, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return database
+}
+
+func assertExportFileArticleID(t *testing.T, database *sql.DB, fileID, expected string) {
+	t.Helper()
+	var articleID sql.NullString
+	if err := database.QueryRow(`SELECT article_id FROM export_files WHERE id=?`, fileID).Scan(&articleID); err != nil {
+		t.Fatal(err)
+	}
+	if expected == "" && !articleID.Valid {
+		return
+	}
+	if !articleID.Valid || articleID.String != expected {
+		t.Fatalf("export file %s article_id = %#v, want %q", fileID, articleID, expected)
+	}
+}
+
 type migrationSource struct {
 	version int
 	name    string
@@ -229,13 +402,22 @@ func assertCurrentMigrationState(t *testing.T, database *sql.DB) {
 	for _, table := range []string{
 		"profiles", "accounts", "articles", "albums", "content_versions", "metric_snapshots", "comments", "replies",
 		"comment_checkpoints", "reply_checkpoints", "resources", "network_routes", "jobs", "exports", "debug_incidents",
+		"scheduler_permits",
 	} {
 		assertNamedSchemaObject(t, database, "table", table)
 	}
 	for _, column := range []string{"is_original", "wecoin_count", "media_duration_seconds"} {
 		assertTableColumn(t, database, "articles", column)
 	}
+	for _, column := range []string{"output_authorization_json", "provenance_json", "provenance_path", "provenance_sha256", "provenance_state", "provenance_error", "provenance_generation", "provenance_claimed_at"} {
+		assertTableColumn(t, database, "exports", column)
+	}
+	for _, column := range []string{"article_id", "status"} {
+		assertTableColumn(t, database, "export_files", column)
+	}
 	assertNamedSchemaObject(t, database, "index", "reply_checkpoints_pending_idx")
+	assertNamedSchemaObject(t, database, "index", "exports_profile_job_idx")
+	assertNamedSchemaObject(t, database, "index", "scheduler_permits_profile_expiry_idx")
 }
 
 func assertMigrationSentinel(t *testing.T, database *sql.DB, sourceVersion int) {

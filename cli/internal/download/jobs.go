@@ -276,10 +276,30 @@ func (service JobService) execute(ctx context.Context, item jobs.Item, checkpoin
 		if err == nil {
 			return checkpointErr
 		}
-		if checkpointErr != nil {
-			return errors.Join(classifyDownloadError(err, ""), checkpointErr)
+		classifiedErr := classifyDownloadError(err, "")
+		if errors.Is(classifiedErr, context.Canceled) || errors.Is(classifiedErr, context.DeadlineExceeded) {
+			if checkpointErr != nil {
+				return errors.Join(classifiedErr, checkpointErr)
+			}
+			return classifiedErr
 		}
-		return classifyDownloadError(err, "")
+		if result.Partial {
+			class, _ := jobs.Classify(classifiedErr)
+			if class == jobs.FailureAuthentication {
+				if checkpointErr != nil {
+					return errors.Join(classifiedErr, checkpointErr)
+				}
+				return classifiedErr
+			}
+			if checkpointErr != nil {
+				return errors.Join(classifiedErr, checkpointErr)
+			}
+			return &jobs.PartialError{Class: class, Err: err}
+		}
+		if checkpointErr != nil {
+			return errors.Join(classifiedErr, checkpointErr)
+		}
+		return classifiedErr
 	case JobPaid:
 		var request PaidContentJobRequest
 		if err := json.Unmarshal(envelope.Payload, &request); err != nil {

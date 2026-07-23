@@ -36,6 +36,36 @@ type ClassifiedError struct {
 	Err       error
 }
 
+// PartialError records that an item committed useful work but could not finish
+// every sub-operation. The engine persists the item as partial so the parent
+// job can distinguish resumable partial success from a complete failure.
+type PartialError struct {
+	Class FailureClass
+	Err   error
+}
+
+func (err *PartialError) Error() string {
+	if err == nil || err.Err == nil {
+		return "partial job item"
+	}
+	return err.Err.Error()
+}
+
+func (err *PartialError) Unwrap() error {
+	if err == nil {
+		return nil
+	}
+	return err.Err
+}
+
+func AsPartial(err error) (*PartialError, bool) {
+	var partial *PartialError
+	if !errors.As(err, &partial) || partial == nil {
+		return nil, false
+	}
+	return partial, true
+}
+
 func (err *ClassifiedError) Error() string {
 	if err.Err == nil {
 		return string(err.Class)
@@ -48,6 +78,12 @@ func (err *ClassifiedError) Unwrap() error { return err.Err }
 func Classify(err error) (FailureClass, bool) {
 	if err == nil {
 		return "", false
+	}
+	if partial, ok := AsPartial(err); ok {
+		if partial.Class == "" {
+			return FailureStorage, false
+		}
+		return partial.Class, false
 	}
 	var classified *ClassifiedError
 	if errors.As(err, &classified) {

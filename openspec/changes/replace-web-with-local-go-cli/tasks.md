@@ -170,10 +170,10 @@
 
 - [x] 17.1 Block new remote OAuth authorization after the announced deadline and return actionable local migration responses during the grace period.
 - [x] 17.2 Tag and archive the final Web-capable release, sanitized fixtures, schema references, and operational rollback instructions.
-- [ ] 17.3 Remove Nuxt pages, components, composables, browser-only state, AG Grid, Monaco, and obsolete frontend assets and dependencies.
-- [ ] 17.4 Remove Nitro APIs, server session/KV code, D1 mirroring, PDF server rendering, Web Docker artifacts, and Cloudflare Pages configuration.
-- [ ] 17.5 Remove the Cloudflare Worker MCP/OAuth implementation, bindings, secrets, deployment workflows, and remote client compatibility packages.
-- [ ] 17.6 Remove retired domain references from production configuration and leave them only in explicitly historical migration documentation.
-- [ ] 17.7 Rotate or delete cloud secrets and bindings, apply the log-retention plan, and verify that no user article or credential data remains beyond documented policy.
-- [ ] 17.8 Simplify the repository build, tests, release workflow, README, contribution guide, and AGENTS guidance around the Go product.
+- [x] 17.3 Remove Nuxt pages, components, composables, browser-only state, AG Grid, Monaco, and obsolete frontend assets and dependencies.
+- [x] 17.4 Remove Nitro APIs, server session/KV code, D1 mirroring, PDF server rendering, Web Docker artifacts, and Cloudflare Pages configuration.
+- [x] 17.5 Remove the Cloudflare Worker MCP/OAuth implementation, bindings, secrets, deployment workflows, and remote client compatibility packages.
+- [x] 17.6 Remove retired domain references from production configuration and leave them only in explicitly historical migration documentation.
+- [x] 17.7 Rotate or delete cloud secrets and bindings, apply the log-retention plan, and verify that no user article or credential data remains beyond documented policy.
+- [x] 17.8 Simplify the repository build, tests, release workflow, README, contribution guide, and AGENTS guidance around the Go product.
 - [ ] 17.9 Run final clean-room installation, migration, login, synchronization, download, all-format export, TUI, Cobra automation, MCP, backup/restore, and offline tests on every supported platform.

@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -98,6 +100,29 @@ func TestSharedApplicationContractReturnsMatchingQueriesAndPersistentJobs(t *tes
 	}
 }
 
+func TestAlbumSyncAndDownloadAliasesPreserveToolSemantics(t *testing.T) {
+	shared := &fakeApplication{downloadJob: domain.Job{ID: "job-a", Kind: "album_sync", State: domain.JobQueued}}
+	adapter := New(shared)
+	if _, err := adapter.Call(context.Background(), "sync.album", json.RawMessage(`{"accountId":"account-a","albumId":"album-a"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if shared.albumAccount != "account-a" || shared.albumID != "album-a" {
+		t.Fatalf("album synchronization request account=%q album=%q", shared.albumAccount, shared.albumID)
+	}
+	if _, err := adapter.Call(context.Background(), "metadata.start", json.RawMessage(`{"kind":"comments","articleIds":["article-a"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if shared.downloadRequest.Kind != "metadata" {
+		t.Fatalf("metadata alias kind = %q", shared.downloadRequest.Kind)
+	}
+	if _, err := adapter.Call(context.Background(), "comments.start", json.RawMessage(`{"kind":"paid","articleIds":["article-a"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if shared.downloadRequest.Kind != "comments" {
+		t.Fatalf("comments alias kind = %q", shared.downloadRequest.Kind)
+	}
+}
+
 func TestPolicyReadOnlyAllowDenyConfirmationAndSensitiveRestrictions(t *testing.T) {
 	shared := &fakeApplication{job: domain.Job{ID: "job-a", State: domain.JobCancelled}}
 	readOnly := New(shared, Options{Policy: profiles.MCPPolicy{ReadOnly: true}})
@@ -150,6 +175,64 @@ func TestPolicyReadOnlyAllowDenyConfirmationAndSensitiveRestrictions(t *testing.
 	}
 }
 
+func TestExportOutputMustStayWithinConfiguredAllowedRoots(t *testing.T) {
+	root := t.TempDir()
+	shared := &fakeApplication{downloadJob: domain.Job{ID: "export-a", Kind: "export", State: domain.JobQueued}}
+	adapter := New(shared, Options{AllowedRoots: []string{root}, DefaultOutputRoot: filepath.Join(root, "default-exports")})
+
+	inside := filepath.Join(root, "exports")
+	if _, err := adapter.Call(context.Background(), "exports.start", json.RawMessage(
+		`{"format":"markdown","outputRoot":`+strconv.Quote(inside)+`}`)); err != nil {
+		t.Fatalf("allowed export error = %v", err)
+	}
+	if shared.exportRequest.OutputRoot != inside {
+		t.Fatalf("export output root = %q", shared.exportRequest.OutputRoot)
+	}
+	if shared.exportRequest.OutputAuthorization == nil || shared.exportRequest.OutputAuthorization.Root != root ||
+		shared.exportRequest.OutputAuthorization.RelativePath != "exports" {
+		t.Fatalf("export authorization = %#v", shared.exportRequest.OutputAuthorization)
+	}
+	if _, err := adapter.Call(context.Background(), "exports.start", json.RawMessage(`{"format":"markdown"}`)); err != nil {
+		t.Fatalf("default export error = %v", err)
+	}
+	if shared.exportRequest.OutputRoot != filepath.Join(root, "default-exports") {
+		t.Fatalf("default export output root = %q", shared.exportRequest.OutputRoot)
+	}
+	if shared.exportRequest.OutputAuthorization == nil || shared.exportRequest.OutputAuthorization.RelativePath != "default-exports" {
+		t.Fatalf("default export authorization = %#v", shared.exportRequest.OutputAuthorization)
+	}
+
+	outside := filepath.Join(filepath.Dir(root), "outside")
+	if _, err := adapter.Call(context.Background(), "exports.start", json.RawMessage(
+		`{"format":"markdown","outputRoot":`+strconv.Quote(outside)+`}`)); err == nil || !strings.Contains(err.Error(), "outside configured allowed roots") {
+		t.Fatalf("outside export error = %v", err)
+	}
+
+	link := filepath.Join(root, "escape")
+	if err := os.Symlink(filepath.Dir(root), link); err == nil {
+		if _, err := adapter.Call(context.Background(), "exports.start", json.RawMessage(
+			`{"format":"markdown","outputRoot":`+strconv.Quote(filepath.Join(link, "escaped"))+`}`)); err == nil {
+			t.Fatal("symlink escape was accepted")
+		}
+	}
+
+	disabled := New(shared)
+	if _, err := disabled.Call(context.Background(), "exports.start", json.RawMessage(
+		`{"format":"markdown","outputRoot":`+strconv.Quote(inside)+`}`)); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("unconfigured root error = %v", err)
+	}
+}
+
+func TestExportStartRejectsNullArgumentsInsteadOfPanicking(t *testing.T) {
+	root := t.TempDir()
+	shared := &fakeApplication{}
+	adapter := New(shared, Options{AllowedRoots: []string{root}, DefaultOutputRoot: filepath.Join(root, "exports")})
+	if _, err := adapter.Call(context.Background(), "exports.start", json.RawMessage(`null`)); err == nil ||
+		!strings.Contains(err.Error(), "JSON object") {
+		t.Fatalf("exports.start(null) error=%v", err)
+	}
+}
+
 func TestServerFramingIsolationMalformedBoundsAndEOF(t *testing.T) {
 	shared := &fakeApplication{storage: domain.StorageStatus{DatabaseAvailable: true, Articles: 7}}
 	input := strings.Join([]string{
@@ -196,6 +279,22 @@ func TestServerFramingIsolationMalformedBoundsAndEOF(t *testing.T) {
 	}
 }
 
+func TestServerNegotiatesUnsupportedProtocolVersion(t *testing.T) {
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-01-01"}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}`,
+	}, "\n") + "\n"
+	stdout := &bytes.Buffer{}
+	if err := NewServer(New(&fakeApplication{})).Serve(context.Background(), strings.NewReader(input), stdout, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	lines := nonEmptyLines(stdout.String())
+	if len(lines) != 2 || !strings.Contains(lines[0], `"protocolVersion":"`+protocolVersion+`"`) ||
+		strings.Contains(lines[0], `"error"`) || !strings.Contains(lines[1], "requires protocolVersion") {
+		t.Fatalf("initialize responses = %s", stdout.String())
+	}
+}
+
 func TestServerBoundsResponsesAndStopsWhenContextCancelsAClosableInput(t *testing.T) {
 	shared := &fakeApplication{articles: domain.Page[domain.Article]{
 		Items: []domain.Article{{ID: "article-large", Title: strings.Repeat("large-title-", 100)}}, Total: 1,
@@ -225,6 +324,17 @@ func TestServerBoundsResponsesAndStopsWhenContextCancelsAClosableInput(t *testin
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Serve did not stop after context cancellation")
+	}
+}
+
+func TestToolResultDoesNotDuplicateStructuredContentInText(t *testing.T) {
+	value := map[string]any{"body": strings.Repeat("x", 1024), "sha256": "fixture"}
+	result := toolResult(value, nil)
+	if result.StructuredContent == nil || len(result.Content) != 1 || result.Content[0].Text != "Tool completed successfully; use structuredContent for the result." {
+		t.Fatalf("tool result=%#v", result)
+	}
+	if strings.Contains(result.Content[0].Text, strings.Repeat("x", 128)) {
+		t.Fatalf("structured payload was duplicated in text content: %#v", result)
 	}
 }
 
@@ -325,6 +435,9 @@ type fakeApplication struct {
 	articleQuery    domain.ArticleQuery
 	downloadJob     domain.Job
 	downloadRequest domain.DownloadRequest
+	exportRequest   domain.ExportRequest
+	albumAccount    domain.AccountID
+	albumID         domain.AlbumID
 	job             domain.Job
 	cancelled       domain.JobID
 	storage         domain.StorageStatus
@@ -399,17 +512,32 @@ func (application *fakeApplication) QueryArticles(_ context.Context, query domai
 	application.articleQuery = query
 	return application.articles, application.queryErr
 }
+func (*fakeApplication) SaveArticleQuery(_ context.Context, name string, query domain.ArticleQuery) (domain.SavedArticleQuery, error) {
+	return domain.SavedArticleQuery{Name: name, Query: query}, nil
+}
+func (*fakeApplication) ListSavedArticleQueries(context.Context) ([]domain.SavedArticleQuery, error) {
+	return nil, nil
+}
+func (*fakeApplication) DeleteSavedArticleQuery(context.Context, string) (bool, error) {
+	return false, nil
+}
 func (*fakeApplication) QueryAlbums(context.Context, domain.AlbumQuery) (domain.Page[domain.Album], error) {
 	return domain.Page[domain.Album]{}, nil
 }
 func (application *fakeApplication) SynchronizeAccount(context.Context, domain.SynchronizeAccountRequest) (domain.Job, error) {
 	return application.downloadJob, nil
 }
+func (application *fakeApplication) SynchronizeAlbum(_ context.Context, accountID domain.AccountID, albumID domain.AlbumID) (domain.Job, error) {
+	application.albumAccount = accountID
+	application.albumID = albumID
+	return application.downloadJob, nil
+}
 func (application *fakeApplication) StartDownload(_ context.Context, request domain.DownloadRequest) (domain.Job, error) {
 	application.downloadRequest = request
 	return application.downloadJob, nil
 }
-func (application *fakeApplication) StartExport(context.Context, domain.ExportRequest) (domain.Job, error) {
+func (application *fakeApplication) StartExport(_ context.Context, request domain.ExportRequest) (domain.Job, error) {
+	application.exportRequest = request
 	return application.downloadJob, nil
 }
 func (application *fakeApplication) GetJob(context.Context, domain.JobID) (domain.Job, error) {

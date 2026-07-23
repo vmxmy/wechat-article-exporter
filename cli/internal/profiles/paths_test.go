@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -27,6 +28,97 @@ func TestResolvePortablePathsStayBelowExplicitRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimeutil.AssertPrivatePermissions(t, paths.DataRoot, 0o700)
+}
+
+func TestShouldUseLegacyMacOSRootsUntilModernDataExists(t *testing.T) {
+	home := t.TempDir()
+	legacyData := filepath.Join(home, ".local", "share", ApplicationDirectory)
+	legacyState := filepath.Join(home, ".local", "state", ApplicationDirectory)
+	modern := filepath.Join(home, "Library", "Application Support", ApplicationDirectory)
+	if err := os.MkdirAll(filepath.Join(legacyData, "profiles", "profile-a"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	useLegacy, err := shouldUseLegacyMacOSRoots(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !useLegacy {
+		t.Fatal("legacy application root was not selected when modern root was absent")
+	}
+	// Creating the legacy state root on the first launch must not make the
+	// second launch switch the data root to the modern layout.
+	if err := os.MkdirAll(filepath.Join(legacyState, "profiles", "profile-a"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	useLegacy, err = shouldUseLegacyMacOSRoots(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !useLegacy {
+		t.Fatal("legacy data/state decision changed across launches")
+	}
+	if err := os.MkdirAll(modern, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	useLegacy, err = shouldUseLegacyMacOSRoots(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !useLegacy {
+		t.Fatal("empty modern application directory hid the legacy data root")
+	}
+	if err := os.MkdirAll(filepath.Join(modern, "profiles", "profile-a"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	useLegacy, err = shouldUseLegacyMacOSRoots(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if useLegacy {
+		t.Fatal("legacy application root replaced a modern root with persisted data")
+	}
+}
+
+func TestShouldUseLegacyMacOSRootsAcceptsStateOnlyInstallation(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".local", "state", ApplicationDirectory, "profiles", "profile-a"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	useLegacy, err := shouldUseLegacyMacOSRoots(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !useLegacy {
+		t.Fatal("state-only legacy installation did not keep the paired legacy layout")
+	}
+}
+
+func TestShouldUseLegacyMacOSRootsIgnoresEmptyLegacyDirectories(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".local", "share", ApplicationDirectory), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	useLegacy, err := shouldUseLegacyMacOSRoots(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if useLegacy {
+		t.Fatal("empty legacy directory selected the legacy layout")
+	}
+}
+
+func TestLegacyMacOSDiscoveryRejectsUnexpectedFiles(t *testing.T) {
+	home := t.TempDir()
+	legacy := filepath.Join(home, ".local", "share", ApplicationDirectory)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := shouldUseLegacyMacOSRoots(home); err == nil {
+		t.Fatal("unexpected legacy file error = nil")
+	}
 }
 
 func TestResolvePathsRejectsUnsafePortableConfiguration(t *testing.T) {

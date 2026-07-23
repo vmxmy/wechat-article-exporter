@@ -3,6 +3,7 @@ package profiles
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -108,6 +109,8 @@ type ProfilePaths struct {
 	Objects  string
 }
 
+func (paths Paths) VaultFile() string { return filepath.Join(paths.ConfigRoot, "secrets.vault.json") }
+
 func explicitOrDefault(explicit string, fallback func() (string, error)) (string, error) {
 	if explicit != "" {
 		return secureAbsoluteRoot(explicit)
@@ -142,7 +145,7 @@ func defaultConfigRoot() (string, error) {
 }
 
 func defaultDataRoot() (string, error) {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
 		if value := absoluteEnv("XDG_DATA_HOME"); value != "" {
 			return value, nil
 		}
@@ -151,6 +154,23 @@ func defaultDataRoot() (string, error) {
 			return "", err
 		}
 		return filepath.Join(home, ".local", "share"), nil
+	}
+	if runtime.GOOS == "darwin" {
+		if value := absoluteEnv("XDG_DATA_HOME"); value != "" {
+			return value, nil
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		useLegacy, err := shouldUseLegacyMacOSRoots(home)
+		if err != nil {
+			return "", err
+		}
+		if useLegacy {
+			return filepath.Join(home, ".local", "share"), nil
+		}
+		return filepath.Join(home, "Library", "Application Support"), nil
 	}
 	return os.UserConfigDir()
 }
@@ -165,7 +185,7 @@ func defaultCacheRoot() (string, error) {
 }
 
 func defaultStateRoot() (string, error) {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
 		if value := absoluteEnv("XDG_STATE_HOME"); value != "" {
 			return value, nil
 		}
@@ -175,7 +195,99 @@ func defaultStateRoot() (string, error) {
 		}
 		return filepath.Join(home, ".local", "state"), nil
 	}
+	if runtime.GOOS == "darwin" {
+		if value := absoluteEnv("XDG_STATE_HOME"); value != "" {
+			return value, nil
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		useLegacy, err := shouldUseLegacyMacOSRoots(home)
+		if err != nil {
+			return "", err
+		}
+		if useLegacy {
+			return filepath.Join(home, ".local", "state"), nil
+		}
+		return filepath.Join(home, "Library", "Application Support"), nil
+	}
 	return os.UserConfigDir()
+}
+
+func shouldUseLegacyMacOSRoots(home string) (bool, error) {
+	legacyRoots := []string{
+		filepath.Join(home, ".local", "share", ApplicationDirectory),
+		filepath.Join(home, ".local", "state", ApplicationDirectory),
+	}
+	modern := filepath.Join(home, "Library", "Application Support", ApplicationDirectory)
+	modernHasData, err := applicationRootHasPersistedProfileData(modern)
+	if err != nil {
+		return false, fmt.Errorf("inspect modern macOS application root: %w", err)
+	}
+	if modernHasData {
+		return false, nil
+	}
+	for _, legacy := range legacyRoots {
+		hasData, err := applicationRootHasPersistedProfileData(legacy)
+		if err != nil {
+			return false, fmt.Errorf("inspect legacy macOS application root %s: %w", legacy, err)
+		}
+		if hasData {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func applicationRootHasPersistedProfileData(root string) (bool, error) {
+	rootExists, err := directoryExists(root)
+	if err != nil {
+		return false, err
+	}
+	if !rootExists {
+		return false, nil
+	}
+	for _, path := range []string{
+		filepath.Join(root, "profiles"),
+		filepath.Join(root, "data", "profiles"),
+		filepath.Join(root, "state", "profiles"),
+		filepath.Join(root, "library.sqlite3"),
+	} {
+		exists, err := pathExists(path)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func directoryExists(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, fmt.Errorf("path is not a directory")
+	}
+	return true, nil
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func absoluteEnv(name string) string {

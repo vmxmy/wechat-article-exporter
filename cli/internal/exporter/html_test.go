@@ -255,3 +255,23 @@ func TestExportHTMLBatchArchiveRejectsTraversal(t *testing.T) {
 		t.Fatalf("traversal error = %v", err)
 	}
 }
+
+func TestHTMLBatchRejectsDuplicateArticleIDsBeforePublishing(t *testing.T) {
+	root := t.TempDir()
+	manager, err := NewOutputManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	article := processor.Article{SchemaVersion: processor.NormalizedArticleSchemaVersion, Title: "duplicate", Content: "<p>body</p>"}
+	_, err = ExportHTMLBatchArchive(context.Background(), manager, "batch.zip", []HTMLArticleInput{
+		{ArticleID: "article-a", Directory: "one", Article: article},
+		{ArticleID: "article-a", Directory: "two", Article: article},
+	}, HTMLOptions{}, CollisionFail)
+	if err == nil || !strings.Contains(err.Error(), "duplicate article ID") {
+		t.Fatalf("duplicate batch error=%v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "batch.zip")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("batch archive was published before duplicate validation: %v", statErr)
+	}
+}

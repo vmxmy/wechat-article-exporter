@@ -21,6 +21,27 @@ wechat-article status --json
 - SQLite、普通配置、日志、诊断包和默认备份不保存 secret 字节。
 - 历史 remote OAuth token 不被当前 CLI 读取，也不会导入本地微信会话。
 
+加密 vault 必须显式初始化。passphrase 不支持 `--passphrase` 明文参数，避免进入 shell history；交互式命令使用隐藏输入，自动化使用仅当前用户可读的文件：
+
+```bash
+chmod 600 ./vault-passphrase
+wechat-article vault init --passphrase-file ./vault-passphrase
+WECHAT_ARTICLE_SECRET_BACKEND=vault \
+WECHAT_ARTICLE_VAULT_PASSPHRASE_FILE=./vault-passphrase \
+  wechat-article status --json
+```
+
+兼容 CI 的 `WECHAT_ARTICLE_VAULT_PASSPHRASE` 环境变量仍可解锁，但更容易被进程环境或诊断工具观察，优先使用 passphrase file。
+
+平台凭据库的发布 smoke 是测试专用且默认关闭。只有同时使用 `integration` build tag 和 `WECHAT_ARTICLE_KEYRING_INTEGRATION=1` 才会创建唯一命名的临时凭据，完成 Set/Get/Delete 后清理；测试值不会写入日志。原生 release runner 必须输出 `KEYRING_SMOKE_PASS`；仅 Linux runner 没有 Secret Service 时允许输出带 `reason=credential-service-unavailable` 的 `KEYRING_SMOKE_SKIP` receipt：
+
+```bash
+cd cli
+WECHAT_ARTICLE_KEYRING_INTEGRATION=1 \
+  go test -tags=integration -count=1 -v \
+  -run '^TestPlatformKeyringIntegration$' ./internal/secrets
+```
+
 不要把 Cookie、`key`、`pass_ticket`、`appmsg_token`、authorization 或 OAuth token 放入 issue、截图、shell history、版本库和云同步目录。
 
 ## 网络与代理信任
@@ -48,7 +69,10 @@ wechat-article proxy list --json
 
 ```bash
 wechat-article diagnostics status --json
+wechat-article diagnostics bundle --output ./diagnostics.zip
 ```
+
+诊断 ZIP 权限为 `0600`，默认只包含系统元数据、脱敏配置、schema 版本、最近任务和完整性结果；正文、会话、Credential、代理 authorization 与 vault 均不进入归档。命令拒绝覆盖已有文件。
 
 ## PDF
 

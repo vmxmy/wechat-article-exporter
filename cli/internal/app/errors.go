@@ -13,6 +13,20 @@ func (e *UsageError) Error() string { return e.Message }
 
 func usage(message string) error { return &UsageError{Message: message} }
 
+type ResultError struct {
+	Kind     string
+	Message  string
+	ExitCode int
+	Data     any
+}
+
+func (err *ResultError) Error() string {
+	if err == nil {
+		return ""
+	}
+	return err.Message
+}
+
 func ExitCode(err error) int {
 	if err == nil {
 		return 0
@@ -20,6 +34,10 @@ func ExitCode(err error) int {
 	var usageError *UsageError
 	if errors.As(err, &usageError) {
 		return 2
+	}
+	var resultError *ResultError
+	if errors.As(err, &resultError) && resultError != nil && resultError.ExitCode > 0 {
+		return resultError.ExitCode
 	}
 	return 1
 }

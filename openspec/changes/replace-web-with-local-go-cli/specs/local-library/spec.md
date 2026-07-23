@@ -23,7 +23,7 @@ The system SHALL store large HTML and binary resources outside SQLite by cryptog
 - **THEN** integrity checking reports corruption and the object is not used for export without explicit override
 
 ### Requirement: Schema migration safety
-Every persistent schema change SHALL use ordered migrations, a pre-migration backup or snapshot strategy, transactional application where SQLite permits it, and explicit compatibility bounds.
+Every persistent schema change SHALL use ordered migrations, a pre-migration backup or snapshot strategy, transactional application where SQLite permits it, and the exact documented compatibility window. For the first local stable line the window is schema 1 through the current schema 8, with upgrade fixtures for every baseline.
 
 #### Scenario: Supported upgrade
 - **WHEN** a binary opens a database created by an older supported release
@@ -32,6 +32,14 @@ Every persistent schema change SHALL use ordered migrations, a pre-migration bac
 #### Scenario: Newer unsupported database
 - **WHEN** an older binary encounters a database schema newer than it supports
 - **THEN** it refuses writes and explains how to upgrade or restore instead of attempting a downgrade
+
+#### Scenario: Interrupted or failed migration
+- **WHEN** a migration is cancelled or fails before commit
+- **THEN** the schema version, user records, and object references remain at the previous valid state and the pre-migration snapshot remains readable
+
+#### Scenario: Concurrent migration open
+- **WHEN** two processes open one older supported database at the same time
+- **THEN** one migration coordinator applies each migration once while the other process waits or fails safely without partial schema changes
 
 ### Requirement: Local query interface
 The library SHALL expose one typed query interface to Cobra, Bubble Tea, and MCP for account, article, album, job, export, and storage views.
@@ -50,6 +58,22 @@ The system SHALL create portable backups containing a manifest, SQLite snapshot,
 #### Scenario: Failed restore validation
 - **WHEN** a restore archive has a missing object or invalid checksum
 - **THEN** live state remains unchanged and the system reports every detected validation failure
+
+#### Scenario: Successful restore round trip
+- **WHEN** a verified backup is restored into a clean destination
+- **THEN** profile identities, table counts, object hashes, local query results, and cached-data exports match the source manifest subject to the chosen conflict policy
+
+#### Scenario: Restore interruption
+- **WHEN** restore is interrupted before the staged commit or a commit verification fails
+- **THEN** no partially restored database, object tree, or configuration becomes live, and staging or rollback files can be safely removed
+
+#### Scenario: Restore conflict
+- **WHEN** the archive conflicts with an existing profile identity or name
+- **THEN** the explicit `refuse` policy leaves live state unchanged or the explicit `rename` policy rewrites all profile-owned records consistently and reports the resolution
+
+#### Scenario: Unsafe backup archive
+- **WHEN** an archive contains path traversal, absolute paths, duplicate entries, symlink entries, undeclared files, invalid checksums, or entries beyond documented bounds
+- **THEN** verification and restore reject it before live state changes
 
 ### Requirement: Garbage collection and retention
 The system SHALL identify unreferenced objects, expired debug captures, completed-job logs, and obsolete temporary files, present a dry-run summary, and require explicit confirmation before deletion.

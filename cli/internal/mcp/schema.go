@@ -111,7 +111,7 @@ func jobQuerySchema() map[string]any {
 func contentSchema() map[string]any {
 	return objectSchema(map[string]any{
 		"articleId": stringProperty("Local article identifier"),
-		"kind":      map[string]any{"type": "string", "enum": []string{"html", "markdown", "text", "json"}},
+		"kind":      map[string]any{"type": "string", "enum": []string{"html", "markdown", "text", "json", "normalized"}},
 	}, "articleId", "kind")
 }
 

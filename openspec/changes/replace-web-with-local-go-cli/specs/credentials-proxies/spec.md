@@ -22,6 +22,14 @@ The system SHALL store WeChat sessions, article credentials, and proxy authoriza
 - **WHEN** the OS credential store is unavailable
 - **THEN** the user must explicitly initialize or unlock the encrypted fallback before persistent secrets are stored
 
+#### Scenario: Non-interactive vault unlock
+- **WHEN** a non-TTY process selects the encrypted vault
+- **THEN** unlock succeeds only with a protected passphrase file or explicitly provided automation environment, while absent input, wrong passphrase, an uninitialized vault, or group/world-readable passphrase file fails closed without echoing the secret
+
+#### Scenario: Process restart
+- **WHEN** a new process selects an initialized vault and supplies the correct passphrase source
+- **THEN** it decrypts the same profile-scoped secrets, and deleting one profile removes only that profile's vault entries
+
 ### Requirement: Secret redaction
 The system SHALL redact cookies, tokens, pass tickets, keys, app message tokens, authorization values, and sensitive URL query fields from logs, errors, dry runs, job records, JSON output, and diagnostics.
 

@@ -24,6 +24,12 @@ func (transport roundTripper) Do(request *http.Request) (*http.Response, error) 
 	return transport(request)
 }
 
+type customHTTPRoundTripper func(*http.Request) (*http.Response, error)
+
+func (transport customHTTPRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return transport(request)
+}
+
 func TestDestinationPolicyBlocksIPv4IPv6PrivateLinkLocalAndMetadata(t *testing.T) {
 	allowed, _ := url.Parse("https://mp.weixin.qq.com/s/example")
 	for name, address := range map[string]string{
@@ -133,6 +139,44 @@ func TestDirectRevalidatesRedirectDestinations(t *testing.T) {
 				t.Fatalf("CheckRedirect(%s) error = %v", rawURL, err)
 			}
 		})
+	}
+}
+
+func TestDirectDisablesEnvironmentProxyOnHTTPTransports(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:65535")
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:65535")
+
+	for name, input := range map[string]*http.Client{
+		"nil client":           nil,
+		"default transport":    {},
+		"configured transport": {Transport: &http.Transport{Proxy: http.ProxyFromEnvironment}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			direct := NewDirect(input, DestinationPolicy{})
+			client, ok := direct.HTTP.(*http.Client)
+			if !ok {
+				t.Fatalf("HTTP transport = %T", direct.HTTP)
+			}
+			transport, ok := client.Transport.(*http.Transport)
+			if !ok || transport.Proxy != nil {
+				t.Fatalf("direct transport = %#v", client.Transport)
+			}
+		})
+	}
+}
+
+func TestDirectReplacesUnauditableCustomTransport(t *testing.T) {
+	custom := customHTTPRoundTripper(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("custom transport should not be retained")
+	})
+	direct := NewDirect(&http.Client{Transport: custom}, DestinationPolicy{})
+	client, ok := direct.HTTP.(*http.Client)
+	if !ok {
+		t.Fatalf("HTTP transport = %T", direct.HTTP)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport.Proxy != nil {
+		t.Fatalf("direct transport=%#v", client.Transport)
 	}
 }
 

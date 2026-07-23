@@ -3,13 +3,15 @@
 - Audit date: 2026-07-22
 - Change: `replace-web-with-local-go-cli`
 - Sign-off: **signed-off** — All 24 mandatory parity entries have implementation, fixture or controlled-account evidence. This signs off task 16.7 only; compatibility release publication, final Web-capable archive, operational cloud shutdown, and clean-room retirement validation remain separate gates.
-- Release gate: **passed** (24/24 mandatory entries passed)
-- Gate execution: **executed**. The executable mandatory parity gate passed.
-- Web/Nitro/remote MCP code remains in place until the compatibility release and final Web-capable archive requirements are also satisfied.
+- Release gate: **not-run** (24/24 mandatory entries passed)
+- Gate execution: **not-invoked**. Generated reports record no invocation; `--gate` emits current-run receipts after executing the configured Go tests.
+- Historical note: Web/Nitro/remote MCP code was present when task 16.7 was signed. The current entrypoint inventory below reflects the post-retirement Go-only repository; removed implementations remain reproducible from the immutable Web-capable archive.
 
-This report is generated from `test/parity/matrix.json`. `yarn test:parity` verifies the matrix, every referenced test/fixture, `test/parity/report.json`, and this Markdown file are mutually consistent.
+This report is generated from `test/parity/matrix.json`. `go run ./test/parity/validate.go --gate` verifies the matrix, current entrypoints, every referenced test/fixture, `test/parity/report.json`, and this Markdown file without restoring Node or Web dependencies.
 
 ## Executed verification
+
+The entries below are historical audit executions recorded at sign-off; they are not current-run receipts.
 
 - `cd cli && go test ./...`: **passed**
 - `cd cli && go test -race ./...`: **passed**
@@ -296,7 +298,7 @@ This report is generated from `test/parity/matrix.json`. `yarn test:parity` veri
 
 ### automation.cobra — passed
 
-- Command: `cd cli && go test ./internal/app ./internal/safety`
+- Command: `cd cli && go test ./internal/app`
 - Test: `cli/internal/app/local_commands_test.go#TestLocalCommandGroupsArePresentInHelp`
 - Test: `cli/internal/app/local_commands_test.go#TestLocalJSONSuccessEnvelopeIsOnePureDocument`
 - Test: `cli/internal/app/local_commands_test.go#TestLocalErrorExitCodesAndVersionedJSON`
@@ -331,7 +333,7 @@ This report is generated from `test/parity/matrix.json`. `yarn test:parity` veri
 - Test: `cli/internal/mcp/adapter_test.go#TestPolicyReadOnlyAllowDenyConfirmationAndSensitiveRestrictions`
 - Test: `cli/internal/mcp/adapter_test.go#TestServerFramingIsolationMalformedBoundsAndEOF`
 - Test: `cli/internal/mcp/adapter_test.go#TestToolErrorsAreRedactedAndPackageHasNoRemoteOAuthDependency`
-- Test: `cli/internal/mcp/adapter_test.go#TestGoSDKClientConformsToLocalJSONRPCServer`
+- Test: `cli/internal/mcp/adapter_test.go#TestLocalStdioClientConformsToInitializeListCallAndShutdown`
 - Test: `cli/internal/app/local_commands_test.go#TestLocalMCPServeUsesStdioAndProfilePolicy`
 
 ## Migration-only entries

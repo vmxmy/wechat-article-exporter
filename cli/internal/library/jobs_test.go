@@ -14,6 +14,7 @@ import (
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/jobs"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/network"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/objects"
 )
 
 func TestJobStoreCreatesIdempotentlyTransitionsAndLeases(t *testing.T) {
@@ -55,6 +56,357 @@ func TestJobStoreCreatesIdempotentlyTransitionsAndLeases(t *testing.T) {
 	}
 }
 
+func TestRestoreBlockersIncludeRunningJobsAndActiveLeases(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	now := time.Unix(1_700_000_000, 0)
+	store.now = func() time.Time { return now }
+	running, err := store.Create(context.Background(), jobs.Spec{Kind: "download", Profile: "profile-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StartJob(context.Background(), running.ID, "worker-a", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := store.Create(context.Background(), jobs.Spec{Kind: "export", Profile: "profile-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := store.AcquireLease(context.Background(), queued.ID, "worker-b", time.Minute); err != nil || !ok {
+		t.Fatalf("queued lease = %v, %v", ok, err)
+	}
+	blockers, err := store.RestoreBlockers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[domain.JobID]bool{}
+	for _, blocker := range blockers {
+		seen[blocker.JobID] = true
+	}
+	if len(blockers) != 2 || !seen[running.ID] || !seen[queued.ID] {
+		t.Fatalf("restore blockers = %#v", blockers)
+	}
+	store.now = func() time.Time { return now.Add(2 * time.Minute) }
+	blockers, err = store.RestoreBlockers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blockers) != 1 || blockers[0].JobID != running.ID {
+		t.Fatalf("expired restore blockers = %#v", blockers)
+	}
+}
+
+func TestJobAdmissionGuardCoversCreationAndExecutionStart(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	store.SetAdmissionGuard(func(context.Context) (func() error, error) {
+		entered <- struct{}{}
+		<-release
+		return func() error { return nil }, nil
+	})
+
+	created := make(chan domain.Job, 1)
+	errorsChannel := make(chan error, 1)
+	go func() {
+		job, err := store.Create(context.Background(), jobs.Spec{Kind: "download", Profile: "profile-a"})
+		created <- job
+		errorsChannel <- err
+	}()
+	<-entered
+	var count int
+	if err := database.db.QueryRow("SELECT COUNT(*) FROM jobs").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("job was created before admission release: %d", count)
+	}
+	close(release)
+	job := <-created
+	if err := <-errorsChannel; err != nil {
+		t.Fatal(err)
+	}
+
+	startEntered := make(chan struct{}, 1)
+	startRelease := make(chan struct{})
+	store.SetAdmissionGuard(func(context.Context) (func() error, error) {
+		startEntered <- struct{}{}
+		<-startRelease
+		return func() error { return nil }, nil
+	})
+	startResult := make(chan error, 1)
+	go func() {
+		_, err := store.StartJob(context.Background(), job.ID, "worker-a", time.Minute)
+		startResult <- err
+	}()
+	<-startEntered
+	got, err := store.Get(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != domain.JobQueued {
+		t.Fatalf("job started before admission release: %s", got.State)
+	}
+	close(startRelease)
+	if err := <-startResult; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestJobAdmissionGuardCoversEveryRequeuePath(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(context.Context, *JobStore) domain.Job
+		requeue func(context.Context, *JobStore, domain.JobID) error
+	}{
+		{
+			name: "resume",
+			prepare: func(ctx context.Context, store *JobStore) domain.Job {
+				job, err := store.Create(ctx, jobs.Spec{Kind: "download", Profile: "profile-a"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.Pause(ctx, job.ID); err != nil {
+					t.Fatal(err)
+				}
+				return job
+			},
+			requeue: func(ctx context.Context, store *JobStore, id domain.JobID) error {
+				_, err := store.Resume(ctx, id)
+				return err
+			},
+		},
+		{
+			name: "retry",
+			prepare: func(ctx context.Context, store *JobStore) domain.Job {
+				job, err := store.Create(ctx, jobs.Spec{Kind: "download", Profile: "profile-a"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.Transition(ctx, job.ID, domain.JobRunning); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.Transition(ctx, job.ID, domain.JobFailed); err != nil {
+					t.Fatal(err)
+				}
+				return job
+			},
+			requeue: func(ctx context.Context, store *JobStore, id domain.JobID) error {
+				_, err := store.Retry(ctx, id)
+				return err
+			},
+		},
+		{
+			name: "generic transition",
+			prepare: func(ctx context.Context, store *JobStore) domain.Job {
+				job, err := store.Create(ctx, jobs.Spec{Kind: "download", Profile: "profile-a"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.Transition(ctx, job.ID, domain.JobRunning); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.Transition(ctx, job.ID, domain.JobFailed); err != nil {
+					t.Fatal(err)
+				}
+				return job
+			},
+			requeue: func(ctx context.Context, store *JobStore, id domain.JobID) error {
+				_, err := store.Transition(ctx, id, domain.JobQueued)
+				return err
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			database := openTestDatabase(t, "profile-a")
+			store := NewJobStore(database)
+			ctx := context.Background()
+			job := test.prepare(ctx, store)
+			before, err := store.Get(ctx, job.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			entered := make(chan struct{}, 1)
+			release := make(chan struct{})
+			store.SetAdmissionGuard(func(context.Context) (func() error, error) {
+				entered <- struct{}{}
+				<-release
+				return func() error { return nil }, nil
+			})
+			done := make(chan error, 1)
+			go func() { done <- test.requeue(ctx, store, job.ID) }()
+			<-entered
+			blocked, err := store.Get(ctx, job.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if blocked.State != before.State {
+				t.Fatalf("state changed before admission release: got %s want %s", blocked.State, before.State)
+			}
+			close(release)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			after, err := store.Get(ctx, job.ID)
+			if err != nil || after.State != domain.JobQueued {
+				t.Fatalf("requeued job=%#v err=%v", after, err)
+			}
+		})
+	}
+}
+
+func TestRecoverStaleUsesAdmissionGuardAndReleaseFailureDoesNotHideCommittedMutation(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	ctx := context.Background()
+	job, err := store.Create(ctx, jobs.Spec{Kind: "download", Profile: "profile-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StartJob(ctx, job.ID, "dead-worker", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	store.now = func() time.Time { return now.Add(2 * time.Second) }
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	store.SetAdmissionGuard(func(context.Context) (func() error, error) {
+		entered <- struct{}{}
+		<-release
+		return func() error { return errors.New("maintenance unlock failed after commit") }, nil
+	})
+	type result struct {
+		count int64
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		count, err := store.RecoverStale(ctx)
+		done <- result{count: count, err: err}
+	}()
+	<-entered
+	blocked, err := store.Get(ctx, job.ID)
+	if err != nil || blocked.State != domain.JobRunning {
+		t.Fatalf("job changed before admission release: %#v err=%v", blocked, err)
+	}
+	close(release)
+	got := <-done
+	if got.err != nil || got.count != 1 {
+		t.Fatalf("RecoverStale() count=%d err=%v", got.count, got.err)
+	}
+	recovered, err := store.Get(ctx, job.ID)
+	if err != nil || recovered.State != domain.JobQueued {
+		t.Fatalf("recovered job=%#v err=%v", recovered, err)
+	}
+}
+
+func TestRetryExportRollsBackWhenProvenanceIsBeingWritten(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	ctx := context.Background()
+	job, err := store.CreateWithItems(ctx, jobs.Spec{Kind: "export", Profile: "profile-a"}, []string{"article-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.ListItems(ctx, job.ID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%#v err=%v", items, err)
+	}
+	if err := store.UpdateItem(ctx, items[0].ID, domain.JobQueued, domain.JobRunning, nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateItem(ctx, items[0].ID, domain.JobRunning, domain.JobFailed, nil, "storage", "failed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition(ctx, job.ID, domain.JobRunning); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Transition(ctx, job.ID, domain.JobFailed); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.UpsertExport(ctx, ExportRecord{
+		ID: "export-a", JobID: job.ID, Format: "markdown", Manifest: map[string]any{"articleIds": []string{"article-a"}},
+		State: string(domain.JobFailed), CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.db.ExecContext(ctx, `UPDATE exports SET provenance_state='writing', provenance_claimed_at=? WHERE id=?`,
+		time.Now().UnixMilli(), "export-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.RetryExport(ctx, job.ID); !errors.Is(err, jobs.ErrStateChanged) {
+		t.Fatalf("RetryExport() error=%v", err)
+	}
+	got, err := store.Get(ctx, job.ID)
+	if err != nil || got.State != domain.JobFailed {
+		t.Fatalf("job=%#v err=%v", got, err)
+	}
+	items, err = store.ListItems(ctx, job.ID)
+	if err != nil || items[0].State != domain.JobFailed {
+		t.Fatalf("items=%#v err=%v", items, err)
+	}
+	record, err := database.GetExport(ctx, "export-a")
+	if err != nil || record.ProvenanceState != "writing" || record.ProvenanceGeneration != 1 {
+		t.Fatalf("record=%#v err=%v", record, err)
+	}
+}
+
+func TestExportProvenanceClaimsAreFencedRecoverStaleWritersAndRedactFailures(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	ctx := context.Background()
+	if err := database.UpsertExport(ctx, ExportRecord{
+		ID: "export-a", Format: "markdown", Manifest: map[string]any{"articleIds": []string{"article-a"}},
+		State: string(domain.JobCompleted), CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	generation, claimed, err := database.ClaimExportProvenance(ctx, "export-a", 1, time.Now().Add(-time.Minute))
+	if err != nil || !claimed || generation != 1 {
+		t.Fatalf("first claim generation=%d claimed=%v err=%v", generation, claimed, err)
+	}
+	if _, claimed, err := database.ClaimExportProvenance(ctx, "export-a", 1, time.Now().Add(-time.Minute)); err != nil || claimed {
+		t.Fatalf("second claim claimed=%v err=%v", claimed, err)
+	}
+	if _, err := database.db.ExecContext(ctx, `UPDATE exports SET provenance_claimed_at=? WHERE id=?`,
+		time.Now().Add(-10*time.Minute).UnixMilli(), "export-a"); err != nil {
+		t.Fatal(err)
+	}
+	staleGeneration, claimed, err := database.ClaimExportProvenance(ctx, "export-a", 1, time.Now().Add(-5*time.Minute))
+	if err != nil || !claimed || staleGeneration != generation+1 {
+		t.Fatalf("stale claim generation=%d claimed=%v err=%v", staleGeneration, claimed, err)
+	}
+	if err := database.FailExportProvenance(ctx, "export-a", generation,
+		"abandoned worker must be fenced"); !errors.Is(err, jobs.ErrStateChanged) {
+		t.Fatalf("old generation error=%v", err)
+	}
+	if err := database.FailExportProvenance(ctx, "export-a", staleGeneration,
+		"Authorization: Bearer secret-token access_token=another-secret failed"); err != nil {
+		t.Fatal(err)
+	}
+	record, err := database.GetExport(ctx, "export-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.ProvenanceState != "failed" || strings.Contains(record.ProvenanceError, "secret-token") ||
+		strings.Contains(record.ProvenanceError, "another-secret") || !strings.Contains(record.ProvenanceError, "[REDACTED]") {
+		t.Fatalf("provenance error=%q", record.ProvenanceError)
+	}
+	reclaimedGeneration, claimed, err := database.ClaimExportProvenance(ctx, "export-a", staleGeneration, time.Now())
+	if err != nil || !claimed || reclaimedGeneration != staleGeneration+1 {
+		t.Fatalf("failed reclaim generation=%d claimed=%v err=%v", reclaimedGeneration, claimed, err)
+	}
+	if err := database.CompleteExportProvenance(ctx, "export-a", staleGeneration, map[string]any{"stale": true},
+		"stale.json", strings.Repeat("0", 64)); !errors.Is(err, jobs.ErrStateChanged) {
+		t.Fatalf("old failed claimant completion error=%v", err)
+	}
+}
+
 func TestJobStorePersistsItemsAttemptsCheckpointsLogsAndRecovery(t *testing.T) {
 	database := openTestDatabase(t, "profile-a")
 	store := NewJobStore(database)
@@ -69,25 +421,27 @@ func TestJobStorePersistsItemsAttemptsCheckpointsLogsAndRecovery(t *testing.T) {
 	if err != nil || len(items) != 2 {
 		t.Fatalf("ListItems() = %#v, %v", items, err)
 	}
-	attempt, err := store.BeginAttempt(ctx, items[0], "", "request-a")
+	if _, err := store.StartJob(ctx, job.ID, "worker-a", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimItem(ctx, job.ID, items[0].ID, "worker-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := store.BeginAttempt(ctx, claimed, "worker-a", "", "request-a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	attempt.FailureClass = jobs.FailureNetwork
 	attempt.ErrorMessage = "timeout"
-	if err := store.FinishAttempt(ctx, attempt); err != nil {
+	if err := store.FinishAttempt(ctx, attempt, "worker-a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpdateItem(ctx, items[0].ID, domain.JobQueued, domain.JobRunning, map[string]any{"offset": 1}, "", ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpdateItem(ctx, items[0].ID, domain.JobRunning, domain.JobCompleted, map[string]any{"offset": 2}, "", ""); err != nil {
+	if _, err := store.TransitionItem(ctx, job.ID, items[0].ID, "worker-a", domain.JobRunning,
+		domain.JobCompleted, map[string]any{"offset": 2}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.AppendLog(ctx, job.ID, items[0].ID, "info", "completed", map[string]any{"route": "direct"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.Transition(ctx, job.ID, domain.JobRunning); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.db.Exec(`UPDATE jobs SET lease_owner='dead', lease_expires_at=? WHERE id=?`, now.Add(-time.Second).UnixMilli(), job.ID); err != nil {
@@ -107,6 +461,142 @@ func TestJobStorePersistsItemsAttemptsCheckpointsLogsAndRecovery(t *testing.T) {
 	}
 	if items[0].State != domain.JobCompleted || items[0].AttemptCount != 1 {
 		t.Fatalf("completed item after recovery = %#v", items[0])
+	}
+}
+
+func TestAppendLogOnceIsProfileScoped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.sqlite3")
+	firstDatabase := openPath(t, path, "profile-a")
+	secondDatabase := openPath(t, path, "profile-b")
+	firstStore := NewJobStore(firstDatabase)
+	secondStore := NewJobStore(secondDatabase)
+	job, err := firstStore.CreateWithItems(context.Background(), jobs.Spec{Kind: "download", Profile: "profile-a"}, []string{"a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secondStore.AppendLogOnce(context.Background(), job.ID, "", "info", "cross-profile", nil, "once"); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := firstStore.ListLogs(context.Background(), job.ID, 10)
+	if err != nil || len(logs) != 0 {
+		t.Fatalf("cross-profile logs=%#v error=%v", logs, err)
+	}
+}
+
+func TestJobStoreRejectsWhitespaceLeaseOwners(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	job, err := store.CreateWithItems(context.Background(), jobs.Spec{Kind: "download", Profile: "profile-a"}, []string{"a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StartJob(context.Background(), job.ID, "   ", time.Minute); err == nil {
+		t.Fatal("whitespace StartJob owner was accepted")
+	}
+	if acquired, err := store.AcquireLease(context.Background(), job.ID, "\t", time.Minute); err == nil || acquired {
+		t.Fatalf("whitespace AcquireLease acquired=%v error=%v", acquired, err)
+	}
+}
+
+func TestJobStoreFencesAttemptWritesAfterLeaseTakeover(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	ctx := context.Background()
+	job, err := store.CreateWithItems(ctx, jobs.Spec{Kind: "download", Profile: "profile-a"}, []string{"article-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StartJob(ctx, job.ID, "worker-old", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.ListItems(ctx, job.ID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%#v err=%v", items, err)
+	}
+	claimed, err := store.ClaimItem(ctx, job.ID, items[0].ID, "worker-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := store.BeginAttempt(ctx, claimed, "worker-old", "", "request-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := database.db.ExecContext(ctx, `UPDATE jobs SET lease_owner=?, lease_expires_at=? WHERE id=?`,
+		"worker-new", now.Add(time.Minute).UnixMilli(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+	attempt.ErrorMessage = "stale completion"
+	if err := store.FinishAttempt(ctx, attempt, "worker-old"); !errors.Is(err, jobs.ErrStateChanged) {
+		t.Fatalf("stale FinishAttempt() error=%v", err)
+	}
+	if _, err := store.BeginAttempt(ctx, claimed, "worker-old", "direct", "request-stale"); !errors.Is(err, jobs.ErrStateChanged) {
+		t.Fatalf("stale BeginAttempt() error=%v", err)
+	}
+
+	var completedAt any
+	if err := database.db.QueryRowContext(ctx, `SELECT completed_at FROM job_attempts
+WHERE job_id=? AND item_id=? AND attempt_number=?`, job.ID, claimed.ID, attempt.Number).Scan(&completedAt); err != nil {
+		t.Fatal(err)
+	}
+	if completedAt != nil {
+		t.Fatalf("stale owner completed attempt: %#v", completedAt)
+	}
+}
+
+func TestJobStoreFencesOwnerControlWritesAfterLeaseTakeover(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		operation func(context.Context, *JobStore, domain.JobID, string, string) error
+	}{
+		{name: "pause", operation: func(ctx context.Context, store *JobStore, jobID domain.JobID, _ string, oldOwner string) error {
+			_, err := store.PauseOwned(ctx, jobID, oldOwner)
+			return err
+		}},
+		{name: "block authentication", operation: func(ctx context.Context, store *JobStore, jobID domain.JobID, itemID, oldOwner string) error {
+			_, err := store.BlockAuthentication(ctx, jobID, itemID, oldOwner, "stale authentication failure")
+			return err
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			database := openTestDatabase(t, "profile-a")
+			store := NewJobStore(database)
+			now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+			store.now = func() time.Time { return now }
+			ctx := context.Background()
+			job, err := store.CreateWithItems(ctx, jobs.Spec{Kind: "download", Profile: "profile-a"}, []string{"article-a"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.StartJob(ctx, job.ID, "worker-old", time.Minute); err != nil {
+				t.Fatal(err)
+			}
+			items, err := store.ListItems(ctx, job.ID)
+			if err != nil || len(items) != 1 {
+				t.Fatalf("items=%#v err=%v", items, err)
+			}
+			claimed, err := store.ClaimItem(ctx, job.ID, items[0].ID, "worker-old")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := database.db.ExecContext(ctx, `UPDATE jobs SET lease_owner=?, lease_expires_at=? WHERE id=?`,
+				"worker-new", now.Add(time.Minute).UnixMilli(), job.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := test.operation(ctx, store, job.ID, claimed.ID, "worker-old"); !errors.Is(err, jobs.ErrStateChanged) {
+				t.Fatalf("stale owner operation error=%v", err)
+			}
+			current, err := store.Get(ctx, job.ID)
+			if err != nil || current.State != domain.JobRunning {
+				t.Fatalf("job after stale operation=%#v err=%v", current, err)
+			}
+			currentItems, err := store.ListItems(ctx, job.ID)
+			if err != nil || currentItems[0].State != domain.JobRunning {
+				t.Fatalf("item after stale operation=%#v err=%v", currentItems, err)
+			}
+		})
 	}
 }
 
@@ -142,7 +632,7 @@ func TestJobStoreRedactsEverySerializedPersistenceBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attempt, err := store.BeginAttempt(ctx, claimed, route.ID, "request access_token=request-secret")
+	attempt, err := store.BeginAttempt(ctx, claimed, "worker-a", route.ID, "request access_token=request-secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +644,7 @@ func TestJobStoreRedactsEverySerializedPersistenceBoundary(t *testing.T) {
 	}
 	attempt.FailureClass = jobs.FailureNetwork
 	attempt.ErrorMessage = "request failed: https://mp.weixin.qq.com/s/example?key=attempt-secret&keep=yes"
-	if err := store.FinishAttempt(ctx, attempt); err != nil {
+	if err := store.FinishAttempt(ctx, attempt, "worker-a"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.AppendLog(ctx, job.ID, claimed.ID, "error",
@@ -227,6 +717,52 @@ func TestJobStoreRedactsCreatePayloadOutsideItemTransactions(t *testing.T) {
 	}
 	if strings.Contains(payload, "create-secret") || !strings.Contains(payload, "create-visible") {
 		t.Fatalf("Create payload = %s", payload)
+	}
+}
+
+func TestListLogsBoundedUsesUTF8ByteBudgets(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	job, err := store.Create(context.Background(), jobs.Spec{Kind: "diagnostic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := strings.Repeat("界", 100)
+	if _, err := database.db.Exec(`INSERT INTO job_logs(job_id, level, message, fields_json, created_at)
+VALUES(?, 'info', ?, '{}', ?)`, job.ID, message, time.Now().UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := store.ListLogsBounded(context.Background(), job.ID, JobLogBudget{
+		MaximumRows: 10, MaximumRawBytes: 128, MaximumEntryBytes: 64,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].Message == message || len(logs[0].Message) > 128 {
+		t.Fatalf("bounded multibyte logs=%#v", logs)
+	}
+	if truncated, _ := logs[0].Fields["truncated"].(bool); !truncated {
+		t.Fatalf("bounded multibyte log was not marked truncated: %#v", logs[0])
+	}
+}
+
+func TestCreateWithItemsAndObjectsRollsBackMetadataWithoutDurablePin(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	object := objects.Object{Digest: strings.Repeat("a", 64), Size: 12, MediaType: "application/json"}
+	if _, err := store.CreateWithItemsAndObjects(context.Background(), jobs.Spec{Kind: "export"}, []string{""},
+		[]RegisteredJobObject{{Object: object, CreatedAt: time.Now()}}); err == nil {
+		t.Fatal("CreateWithItemsAndObjects() error = nil")
+	}
+	var objectCount, jobCount int
+	if err := database.db.QueryRow("SELECT COUNT(*) FROM objects WHERE digest=?", object.Digest).Scan(&objectCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.db.QueryRow("SELECT COUNT(*) FROM jobs WHERE kind='export'").Scan(&jobCount); err != nil {
+		t.Fatal(err)
+	}
+	if objectCount != 0 || jobCount != 0 {
+		t.Fatalf("rolled-back object/job counts=%d/%d", objectCount, jobCount)
 	}
 }
 
@@ -341,7 +877,7 @@ func TestJobStoreRecoversStaleRunningItemsFromCheckpointAcrossRestart(t *testing
 			if err := store.SaveCheckpoint(ctx, job.ID, item.ID, "dead-worker", map[string]any{"offset": 40}); err != nil {
 				t.Fatal(err)
 			}
-			attempt, err := store.BeginAttempt(ctx, claimed, "", "request-1")
+			attempt, err := store.BeginAttempt(ctx, claimed, "dead-worker", "", "request-1")
 			if err != nil {
 				t.Fatal(err)
 			}

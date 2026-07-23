@@ -297,10 +297,21 @@ type ExportOptions struct {
 	FormatOptions    map[string]any `json:"formatOptions,omitempty"`
 }
 
+// ExportOutputAuthorization is an internal, execution-time filesystem
+// capability created by a trusted adapter. It is deliberately excluded from
+// public JSON request decoding and is persisted only in durable job items.
+type ExportOutputAuthorization struct {
+	Root         string `json:"root"`
+	RelativePath string `json:"relativePath,omitempty"`
+	Device       uint64 `json:"device"`
+	Inode        uint64 `json:"inode"`
+}
+
 type ExportRequest struct {
-	ArticleIDs []ArticleID     `json:"articleIds,omitempty"`
-	Selection  ExportSelection `json:"selection,omitempty"`
-	Format     string          `json:"format"`
-	OutputRoot string          `json:"outputRoot,omitempty"`
-	Options    ExportOptions   `json:"options,omitempty"`
+	ArticleIDs          []ArticleID                `json:"articleIds,omitempty"`
+	Selection           ExportSelection            `json:"selection,omitempty"`
+	Format              string                     `json:"format"`
+	OutputRoot          string                     `json:"outputRoot,omitempty"`
+	Options             ExportOptions              `json:"options,omitempty"`
+	OutputAuthorization *ExportOutputAuthorization `json:"-"`
 }

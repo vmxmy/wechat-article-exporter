@@ -43,11 +43,23 @@ Before removal, the project SHALL tag or archive the final Web-capable release a
 - **THEN** the archived tag and retained fixtures provide a reproducible reference without restoring live project-operated services
 
 ### Requirement: Operational shutdown
-The retirement plan SHALL include disabling new remote authorization, revoking or expiring Worker OAuth material, retaining only the minimum legally and operationally required logs, removing Cloudflare bindings and secrets, and communicating shutdown dates.
+The retirement plan SHALL include disabling new remote authorization, revoking or expiring Worker OAuth material, retaining only the minimum legally and operationally required logs, removing Cloudflare bindings and secrets, communicating shutdown dates, and preserving a non-secret before/after resource receipt.
 
 #### Scenario: Shut down remote MCP
 - **WHEN** the retirement date is reached
 - **THEN** new authorization is disabled, existing clients receive a migration response for the announced grace period, and project secrets are removed after rollback needs expire
+
+#### Scenario: Pre-deletion data check
+- **WHEN** a KV, D1, object, or OAuth store is scheduled for deletion
+- **THEN** the receipt records its identity, user-data categories, key/row counts, retention decision, and any required export before deletion; an unexplained non-empty store keeps retirement blocked
+
+#### Scenario: Negative resource verification
+- **WHEN** deletion is reported complete
+- **THEN** authoritative provider list/GET checks no longer return the Worker, Pages project, KV namespaces, D1 database, bindings, or retired custom-hostname DNS records, and those negative results are retained without API tokens
+
+#### Scenario: Downstream log retention
+- **WHEN** provider audit logs, analytics, error monitoring, or log pipelines can retain request data independently of the deleted service
+- **THEN** the receipt identifies the applicable retention boundary or proves the integration was absent; deleting Cloudflare resources alone is not treated as proof of downstream deletion
 
 ### Requirement: Rollback boundary
 Rollback SHALL restore a tagged Web/MCP release and its compatible infrastructure without modifying or downgrading the user's local binary database.

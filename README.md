@@ -96,6 +96,33 @@ wechat-article db restore ./backups/work.zip \
   --confirm 'restore-backup:./backups/work.zip'
 ```
 
+当系统凭据库不可用时，可显式初始化加密 vault。passphrase 不作为命令行参数传递；自动化使用权限为 `0600` 的文件，交互使用隐藏输入：
+
+```bash
+wechat-article vault init --passphrase-file ./vault-passphrase
+export WECHAT_ARTICLE_SECRET_BACKEND=vault
+export WECHAT_ARTICLE_VAULT_PASSPHRASE_FILE=./vault-passphrase
+wechat-article vault verify --passphrase-file ./vault-passphrase
+```
+
+文章 Credential 可通过 JSON、环境变量或终端隐藏输入导入；`credential validate` 会在敏感路由策略下直接验证并更新状态：
+
+```bash
+wechat-article credential import --interactive
+wechat-article credential validate CREDENTIAL_ID --json
+```
+
+HTML 导出支持 `--html-resource-policy strict|best-effort` 与 `--html-batch-archive articles.zip`。每次 terminal export 都记录 fenced provenance generation；可离线校验输出：
+
+```bash
+wechat-article export verify \
+  --root ./exports \
+  --manifest export-EXPORT_ID-manifest.json \
+  --json
+```
+
+校验失败返回退出码 `1`，唯一 JSON error envelope 的 `data` 包含 affected article IDs、expected/actual checksum 或 size。TUI 导出操作必须选择稳定 export ID；任务与导出进度会自动刷新。SQLite leased scheduler permits 在 detached workers 和多个 CLI 进程之间共同执行 global、operation、host 与 sensitive 并发限制。
+
 默认网络路径是本地进程直连微信。代理必须由用户显式配置；包含 Cookie、Credential、评论、指标或付费授权的请求只能直连或通过用户明确确认的 `credential-trusted` 代理。详见 [本地数据与安全](./docs/operations/local-data-security.md) 和 [备份恢复](./docs/operations/backup-restore.md)。
 
 ## PDF
@@ -104,6 +131,7 @@ PDF 使用本机已安装的 Google Chrome、Chromium、Microsoft Edge 或 Brave
 
 ```bash
 wechat-article diagnostics status --json
+wechat-article diagnostics bundle --output ./diagnostics.zip
 ```
 
 ## 本地 stdio MCP

@@ -44,3 +44,29 @@ func TestReplyThreadPartialFailurePersistsAndResumeTargetsOnlyIncomplete(t *test
 		t.Fatalf("replies=%#v err=%v", replies, err)
 	}
 }
+
+func TestCommitReplyPageReturnsPersistedMonotonicMaxReplyID(t *testing.T) {
+	database := openContentDatabase(t)
+	seedContentArticle(t, database)
+	ctx := context.Background()
+	if _, err := database.CommitCommentPage(ctx, "article-a", CommentPageCommit{
+		Comments: []CommentRecord{{UpstreamID: "comment-1", ReplyTotal: 3}}, Complete: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := database.CommitReplyPage(ctx, "article-a", "comment-1", ReplyPageCommit{
+		Replies: []ReplyRecord{{UpstreamID: "10", Content: "newer"}}, MaxReplyID: 10,
+	})
+	if err != nil || first.MaxReplyID != 10 {
+		t.Fatalf("first page=%#v err=%v", first, err)
+	}
+	outOfOrder, err := database.CommitReplyPage(ctx, "article-a", "comment-1", ReplyPageCommit{
+		Replies: []ReplyRecord{{UpstreamID: "9", Content: "older"}}, MaxReplyID: 9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outOfOrder.MaxReplyID != 10 {
+		t.Fatalf("out-of-order page returned maxReplyId=%d, want persisted 10", outOfOrder.MaxReplyID)
+	}
+}
