@@ -331,6 +331,10 @@ export interface Preferences {
 export type PreferencesPatch = Partial<Preferences>
 export interface BackupReceipt { readonly id: string; readonly createdAt: string; readonly sha256: string; readonly bytes: number; readonly objects: number; readonly omitted?: readonly string[] }
 export interface BackupVerification { readonly backupId: string; readonly valid: boolean; readonly sha256?: string; readonly failures?: readonly string[] }
+export type RestoreConflictPolicy = 'refuse' | 'rename'
+export interface RestoreUploadReceipt { readonly handle: string; readonly sizeBytes: number; readonly sha256: string; readonly expiresAt: string }
+export interface RestorePreparation { readonly id: string; readonly confirmation: string; readonly conflictPolicy: RestoreConflictPolicy; readonly expiresAt: string }
+export interface RestoreCompletion { readonly restoredFiles: number; readonly restoredBytes: number; readonly profiles: number }
 export interface IntegrityIssue { readonly kind: string; readonly articleId?: string; readonly resourceId?: string; readonly objectDigest?: string; readonly message: string; readonly repairable: boolean; readonly recommendation?: string }
 export interface IntegrityReport { readonly checkedAt: string; readonly issues: readonly IntegrityIssue[] }
 export interface ReclaimableStorage { readonly count: number; readonly bytes: number }
@@ -476,6 +480,18 @@ export async function getPreferences(signal?: AbortSignal): Promise<Preferences>
 export async function patchPreferences(patch: PreferencesPatch): Promise<Preferences> { return mutate('settings/preferences', 'PATCH', patch) }
 export async function createBackup(): Promise<BackupReceipt> { return mutate('maintenance/backups', 'POST', {}) }
 export async function verifyBackup(backupId: string): Promise<BackupVerification> { return mutate('maintenance/backups/verify', 'POST', { backupId }) }
+export async function uploadRestoreArchive(archive: File): Promise<RestoreUploadReceipt> {
+  const csrfToken = await getCSRFToken()
+  const form = new FormData()
+  form.append('archive', archive)
+  return request<RestoreUploadReceipt>(`${apiBase}/maintenance/restore/upload`, {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': csrfToken },
+    body: form
+  })
+}
+export async function prepareRestore(uploadHandle: string, conflictPolicy: RestoreConflictPolicy): Promise<RestorePreparation> { return mutate('maintenance/restore/prepare', 'POST', { uploadHandle, conflictPolicy }) }
+export async function commitRestore(preparationId: string, confirmation: string): Promise<RestoreCompletion> { return mutate('maintenance/restore/commit', 'POST', { preparationId, confirmation }) }
 export async function getIntegrity(signal?: AbortSignal): Promise<IntegrityReport> { return request(`${apiBase}/maintenance/integrity`, { signal }) }
 export async function getDiagnostics(signal?: AbortSignal): Promise<DiagnosticsReport> { return request(`${apiBase}/maintenance/diagnostics`, { signal }) }
 export async function planGarbageCollection(): Promise<GarbageCollectionPlan> { return mutate('maintenance/gc/plan', 'POST', {}) }

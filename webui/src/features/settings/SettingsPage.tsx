@@ -3,7 +3,7 @@ import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { useMemo, useState } from 'react'
 import type { Locale, MessageCatalog } from '../../i18n'
-import { getProxyDisclosure, type GarbageCollectionPlan, type Preferences, type ProxyInput, type ProxyRequestClass, type ProxyTrust } from '../../lib/api'
+import { getProxyDisclosure, type GarbageCollectionPlan, type Preferences, type ProxyInput, type ProxyRequestClass, type ProxyTrust, type RestoreCompletion, type RestoreConflictPolicy, type RestorePreparation } from '../../lib/api'
 import { useCredentials, useDiagnostics, useIntegrity, usePreferences, useProxies, useWorkspaceMutations } from '../../lib/queries'
 
 const proxyClasses: readonly ProxyRequestClass[] = ['public_content', 'public_resource', 'management_session', 'article_credential', 'engagement_metrics', 'comments', 'paid_content']
@@ -33,12 +33,44 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
       <CredentialsPanel locale={locale} messages={messages} data={credentials.data} loading={credentials.isLoading} pending={mutations.importCredential.isPending || mutations.removeCredential.isPending} onImport={(input) => mutations.importCredential.mutate(input, { onSuccess: () => setNotice(copy.credentials.imported), onError: failure })} onRemove={(id) => mutations.removeCredential.mutate(id, { onSuccess: () => setNotice(undefined), onError: failure })} />
       <ProxiesPanel messages={messages} data={proxies.data} loading={proxies.isLoading} pending={mutations.addProxy.isPending} onAdd={(input) => mutations.addProxy.mutate(input, { onSuccess: () => setNotice(undefined), onError: failure })} onRemove={(id) => mutations.removeProxy.mutate(id, { onError: failure })} onToggle={(id, enabled) => mutations.setProxyEnabled.mutate({ id, enabled }, { onError: failure })} onTest={(id) => mutations.testProxy.mutate(id, { onError: failure })} probe={mutations.testProxy.data} />
       <PreferencesPanel messages={messages} value={preferences.data} loading={preferences.isLoading} pending={mutations.patchPreferences.isPending} onSave={(value) => mutations.patchPreferences.mutate(value, { onSuccess: () => setNotice(copy.preferences.saved), onError: failure })} />
-      <section className="workspace-panel" aria-labelledby="backup-title"><h2 id="backup-title">{copy.backups.title}</h2><p>{copy.backups.description}</p><div className="settings-form"><Button label={copy.backups.create} variant="primary" isLoading={mutations.createBackup.isPending} onClick={() => mutations.createBackup.mutate(undefined, { onSuccess: (result) => { setBackupID(result.id); setNotice(copy.backups.created) }, onError: failure })} />{backupID ? <TextInput label={copy.backups.backupId} value={backupID} onChange={setBackupID} /> : null}<Button label={copy.backups.verify} variant="secondary" isLoading={mutations.verifyBackup.isPending} isDisabled={!backupID} onClick={() => mutations.verifyBackup.mutate(backupID, { onError: failure })} />{mutations.verifyBackup.data ? <p role="status">{mutations.verifyBackup.data.valid ? copy.backups.valid : copy.backups.invalid}</p> : null}</div><div className="availability-note"><h3>{copy.backups.restoreTitle}</h3><p>{copy.backups.restoreUnsupported}</p></div></section>
+      <section className="workspace-panel" aria-labelledby="backup-title"><h2 id="backup-title">{copy.backups.title}</h2><p>{copy.backups.description}</p><div className="settings-form"><Button label={copy.backups.create} variant="primary" isLoading={mutations.createBackup.isPending} onClick={() => mutations.createBackup.mutate(undefined, { onSuccess: (result) => { setBackupID(result.id); setNotice(copy.backups.created) }, onError: failure })} />{backupID ? <TextInput label={copy.backups.backupId} value={backupID} onChange={setBackupID} /> : null}<Button label={copy.backups.verify} variant="secondary" isLoading={mutations.verifyBackup.isPending} isDisabled={!backupID} onClick={() => mutations.verifyBackup.mutate(backupID, { onError: failure })} />{mutations.verifyBackup.data ? <p role="status">{mutations.verifyBackup.data.valid ? copy.backups.valid : copy.backups.invalid}</p> : null}</div><RestorePanel messages={messages} mutations={mutations} onFailure={failure} /></section>
       <IntegrityPanel locale={locale} messages={messages} loading={integrity.isLoading} report={integrity.data} />
       <section className="workspace-panel" aria-labelledby="gc-title"><h2 id="gc-title">{copy.gc.title}</h2><p>{copy.gc.description}</p><div className="settings-form"><Button label={copy.gc.plan} variant="secondary" isLoading={mutations.planGarbageCollection.isPending} onClick={() => mutations.planGarbageCollection.mutate(undefined, { onSuccess: (next) => { setPlan(next); setConfirmation(''); setNotice(copy.gc.planned) }, onError: failure })} />{plan ? <GCPlan locale={locale} messages={messages} plan={plan} confirmation={confirmation} onConfirmation={setConfirmation} onApply={() => mutations.applyGarbageCollection.mutate({ planId: plan.id, confirmation }, { onSuccess: () => { setNotice(copy.gc.result); setPlan(undefined); setConfirmation('') }, onError: (reason) => { setPlan(undefined); setConfirmation(''); failure(reason) } })} pending={mutations.applyGarbageCollection.isPending} /> : null}</div></section>
       <DiagnosticsPanel locale={locale} messages={messages} loading={diagnostics.isLoading} report={diagnostics.data} />
     </div>
   </section>
+}
+
+type RestoreMutations = ReturnType<typeof useWorkspaceMutations>
+
+function RestorePanel({ messages, mutations, onFailure }: { readonly messages: MessageCatalog; readonly mutations: RestoreMutations; readonly onFailure: (reason: unknown) => void }) {
+  const copy = messages.settings.backups
+  const [archive, setArchive] = useState<File>()
+  const [policy, setPolicy] = useState<RestoreConflictPolicy>('refuse')
+  const [preparation, setPreparation] = useState<RestorePreparation>()
+  const [confirmation, setConfirmation] = useState('')
+  const [completed, setCompleted] = useState<RestoreCompletion>()
+  const staging = mutations.uploadRestoreArchive.isPending || mutations.prepareRestore.isPending
+  const stage = () => {
+    if (!archive) return
+    setPreparation(undefined)
+    setConfirmation('')
+    const stagedArchive = archive
+    const stagedPolicy = policy
+    mutations.uploadRestoreArchive.mutate(stagedArchive, {
+      onSuccess: (upload) => mutations.prepareRestore.mutate({ uploadHandle: upload.handle, conflictPolicy: stagedPolicy }, {
+        onSuccess: (next) => { if (archive === stagedArchive && policy === stagedPolicy) setPreparation(next) },
+        onError: onFailure
+      }),
+      onError: onFailure
+    })
+  }
+  const commit = () => {
+    if (!preparation) return
+    mutations.commitRestore.mutate({ preparationId: preparation.id, confirmation }, { onSuccess: setCompleted, onError: onFailure })
+  }
+  if (completed) return <div className="confirmation-proof" role="status" aria-live="assertive"><h3>{copy.terminalTitle}</h3><p>{copy.terminalMessage}</p></div>
+  return <section className="confirmation-proof" aria-labelledby="restore-title"><h3 id="restore-title">{copy.restoreTitle}</h3><p>{copy.restoreDescription}</p><p role="alert"><strong>{copy.destructiveWarning}</strong></p><label>{copy.archive}<input type="file" accept=".wab,application/octet-stream" disabled={staging} onChange={(event) => { setArchive(event.currentTarget.files?.[0]); setPreparation(undefined); setConfirmation('') }} /></label><label>{copy.policy}<select value={policy} disabled={staging} onChange={(event) => { setPolicy(event.target.value as RestoreConflictPolicy); setPreparation(undefined); setConfirmation('') }}><option value="refuse">{copy.refuse}</option><option value="rename">{copy.rename}</option></select></label><Button label={staging ? copy.staging : copy.stage} variant="secondary" isLoading={staging} isDisabled={!archive || staging} onClick={stage} />{preparation ? <div className="confirmation-proof"><code>{preparation.confirmation}</code><p>{copy.confirmationHint}</p><TextInput label={copy.confirmation} value={confirmation} onChange={setConfirmation} /><Button label={copy.commit} variant="primary" isLoading={mutations.commitRestore.isPending} isDisabled={confirmation !== preparation.confirmation} onClick={commit} /></div> : null}</section>
 }
 
 function CredentialsPanel({ locale, messages, data, loading, pending, onImport, onRemove }: { readonly locale: Locale; readonly messages: MessageCatalog; readonly data?: readonly { readonly id: string; readonly accountId: string; readonly kind: string; readonly status: string; readonly updatedAt: string }[]; readonly loading: boolean; readonly pending: boolean; readonly onImport: (input: { nickname?: string; cookie?: string }) => void; readonly onRemove: (id: string) => void }) {

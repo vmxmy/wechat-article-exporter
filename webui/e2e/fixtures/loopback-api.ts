@@ -81,7 +81,7 @@ interface State {
 
 async function fulfillAPI(route: Route, url: URL, state: State) {
   const method = route.request().method()
-  const body = method === 'GET' ? undefined : JSON.parse(route.request().postData() || '{}') as Record<string, unknown>
+  const body = method === 'GET' || url.pathname === '/api/v1/maintenance/restore/upload' ? undefined : JSON.parse(route.request().postData() || '{}') as Record<string, unknown>
   if (method !== 'GET' && url.pathname !== '/api/v1/status') {
     expect(route.request().headers()['x-csrf-token']).toBe(csrfToken)
   }
@@ -133,6 +133,9 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/maintenance/diagnostics') return json(route, { collectedAt: now, checks: [{ name: 'loopback', status: 'ok', summary: 'Sanitized local fixture' }] })
   if (url.pathname === '/api/v1/maintenance/backups') { state.onBackupID('backup-fixture'); return json(route, { id: 'backup-fixture', createdAt: now, sha256: 'b'.repeat(64), bytes: 64, objects: 1 }) }
   if (url.pathname === '/api/v1/maintenance/backups/verify') return json(route, { backupId: state.backupID || 'backup-fixture', valid: true })
+  if (url.pathname === '/api/v1/maintenance/restore/upload') return json(route, { handle: 'restore-upload-fixture', sizeBytes: 24, sha256: 'c'.repeat(64), expiresAt: '2026-07-24T09:45:00.000Z' })
+  if (url.pathname === '/api/v1/maintenance/restore/prepare') return json(route, { id: 'restore-preparation-fixture', confirmation: 'confirm-restore-fixture', conflictPolicy: body?.conflictPolicy, expiresAt: '2026-07-24T09:45:00.000Z' })
+  if (url.pathname === '/api/v1/maintenance/restore/commit') return json(route, { restoredFiles: 2, restoredBytes: 24, profiles: 1 })
   if (url.pathname === '/api/v1/maintenance/gc/plan') { state.onGCPlan(true); return json(route, gc()) }
   if (url.pathname === '/api/v1/maintenance/gc/apply') { state.onGCPlan(false); return json(route, { deletedObjects: { count: 1, bytes: 42 }, deletedTemporaryFiles: { count: 0, bytes: 0 }, deletedDebugCaptures: { count: 0, bytes: 0 }, deletedCompletedJobLogs: { count: 0, bytes: 0 }, skipped: 0 }) }
 

@@ -134,6 +134,29 @@ test('sanitized settings and storage maintenance flows do not reveal secrets', a
   await expectOnlyLoopbackRequests(page)
 })
 
+test('sanitized restore stages one archive, prepares explicit confirmation, and closes the workspace', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/settings')
+  await expect(page.getByRole('alert')).toContainText('Destructive action')
+  await page.getByLabel('Backup archive').setInputFiles({ name: 'sanitized-backup.wab', mimeType: 'application/octet-stream', buffer: Buffer.from('sanitized restore archive') })
+  const uploadRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/maintenance/restore/upload'))
+  const prepareRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/maintenance/restore/prepare'))
+  await page.getByRole('button', { name: 'Stage archive for restore' }).click()
+  const upload = await uploadRequest
+  expect(await upload.headerValue('content-type')).toContain('multipart/form-data')
+  expect(upload.postData()).toContain('name="archive"')
+  expect(upload.postData()).not.toContain('name="uploadHandle"')
+  expect((await prepareRequest).postDataJSON()).toEqual({ uploadHandle: 'restore-upload-fixture', conflictPolicy: 'refuse' })
+  await expect(page.getByRole('textbox', { name: 'Exact one-time restore confirmation' })).toBeVisible()
+  await page.getByRole('textbox', { name: 'Exact one-time restore confirmation' }).fill('confirm-restore-fixture')
+  const commitRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/maintenance/restore/commit'))
+  await page.getByRole('button', { name: 'Restore and close workspace' }).click()
+  expect((await commitRequest).postDataJSON()).toEqual({ preparationId: 'restore-preparation-fixture', confirmation: 'confirm-restore-fixture' })
+  await expect(page.getByRole('status').filter({ hasText: 'The local workspace has closed.' })).toContainText('The local workspace has closed. Run wechat-article web again to open it.')
+  await expect(page.locator('body')).not.toContainText('/Users/')
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('failure states remain usable with sanitized local errors', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.route('**/api/v1/articles?**', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Sanitized fixture unavailable' } }) }))
