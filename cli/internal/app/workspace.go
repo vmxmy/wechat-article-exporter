@@ -41,6 +41,23 @@ func (extensions *workspaceExtensions) active() (*ProfileRuntime, error) {
 	return extensions.app.active, nil
 }
 
+// DefaultExportRoot uses the configured root when present. Otherwise the TUI
+// offers a visible local Downloads path that needs no setup.
+func (extensions *workspaceExtensions) DefaultExportRoot(context.Context) (string, error) {
+	active, err := extensions.active()
+	if err != nil {
+		return "", err
+	}
+	configuration, _, err := profiles.NewConfigStore(active.Profile.Paths.Config).Read()
+	if err != nil {
+		return "", err
+	}
+	if root := strings.TrimSpace(configuration.Preferences.Export.Root); root != "" {
+		return root, nil
+	}
+	return "~/Downloads/wechat-article-exports", nil
+}
+
 func (extensions *workspaceExtensions) Panel(ctx context.Context, area tui.Area) (tui.OperationResult, error) {
 	active, err := extensions.active()
 	if err != nil {

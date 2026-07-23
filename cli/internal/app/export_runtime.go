@@ -138,7 +138,12 @@ func (runtime *localExportRuntime) Start(ctx context.Context, request domain.Exp
 }
 
 func (runtime *localExportRuntime) startAdmitted(ctx context.Context, request domain.ExportRequest) (domain.Job, error) {
-	if strings.TrimSpace(request.OutputRoot) == "" {
+	outputRoot, err := normalizeExportOutputRoot(request.OutputRoot)
+	if err != nil {
+		return domain.Job{}, err
+	}
+	request.OutputRoot = outputRoot
+	if request.OutputRoot == "" {
 		return domain.Job{}, errors.New("export output root is required")
 	}
 	if request.OutputAuthorization == nil {
@@ -147,6 +152,10 @@ func (runtime *localExportRuntime) startAdmitted(ctx context.Context, request do
 			return domain.Job{}, err
 		}
 		request.OutputAuthorization = authorization
+		// Persist the same absolute path represented by the authorization. A TUI
+		// user commonly enters a relative directory; leaving it relative causes
+		// the worker's later path/identity verification to reject its own job.
+		request.OutputRoot = authorization.Root
 	}
 	format := strings.ToLower(strings.TrimSpace(request.Format))
 	if !supportedLocalExportFormat(format) {
@@ -253,6 +262,25 @@ func (runtime *localExportRuntime) startAdmitted(ctx context.Context, request do
 		return domain.Job{}, err
 	}
 	return job, nil
+}
+
+func normalizeExportOutputRoot(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if value == "~" || strings.HasPrefix(value, "~/") || strings.HasPrefix(value, `~\`) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory for export output: %w", err)
+		}
+		if value == "~" {
+			value = home
+		} else {
+			value = filepath.Join(home, value[2:])
+		}
+	}
+	return value, nil
 }
 
 func (runtime *localExportRuntime) Run(ctx context.Context, id domain.JobID) (domain.Job, error) {

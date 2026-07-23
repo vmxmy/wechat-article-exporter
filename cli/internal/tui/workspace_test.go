@@ -491,6 +491,10 @@ func TestWorkspacePromptsForAccountImportRestoreAndExportParameters(t *testing.T
 	}
 	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = next.(Model)
+	if model.inputMode != inputExportOutput || model.input != "~/Downloads/wechat-article-exports" ||
+		model.inputLabel != "Export output directory (Enter accepts default)" {
+		t.Fatalf("export output prompt mode=%q label=%q input=%q", model.inputMode, model.inputLabel, model.input)
+	}
 	model.input = "/tmp/exports"
 	next, command = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = next.(Model)
@@ -547,6 +551,9 @@ func TestWorkspacePromptsForHTMLPolicyAndOptionalBatchArchive(t *testing.T) {
 	model.input = "articles.zip"
 	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = next.(Model)
+	if model.inputMode != inputExportOutput || model.input != "~/Downloads/wechat-article-exports" {
+		t.Fatalf("HTML export output prompt mode=%q input=%q", model.inputMode, model.input)
+	}
 	model.input = "/tmp/html-exports"
 	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = next.(Model)
@@ -555,6 +562,29 @@ func TestWorkspacePromptsForHTMLPolicyAndOptionalBatchArchive(t *testing.T) {
 	if message.err != nil || last.Parameters["format"] != "html" || last.Parameters["htmlResourcePolicy"] != "strict" ||
 		last.Parameters["htmlBatchArchive"] != "articles.zip" || last.Parameters["outputRoot"] != "/tmp/html-exports" {
 		t.Fatalf("HTML export request=%#v err=%v", last, message.err)
+	}
+}
+
+func TestWorkspaceUsesConfiguredExportRootAsDefault(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	extensions := &fakeWorkspaceExtensions{defaultExportRoot: "/tmp/preferred-exports"}
+	model := loadedWorkspace(t, app, extensions)
+	model.state.Area = AreaArticles
+	model.state.Selection.Toggle(AreaArticles, "article-a")
+
+	next, _ := model.chooseAction(actionItem{Kind: "article_export"})
+	model = next.(Model)
+	next, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	if model.inputMode != inputExportOutput || model.input != "/tmp/preferred-exports" {
+		t.Fatalf("configured export output prompt mode=%q input=%q", model.inputMode, model.input)
+	}
+	next, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = next.(Model)
+	message := runCommand(t, command).(actionResultMsg)
+	last := extensions.requests[len(extensions.requests)-1]
+	if message.err != nil || last.Parameters["outputRoot"] != "/tmp/preferred-exports" {
+		t.Fatalf("default export request=%#v err=%v", last, message.err)
 	}
 }
 
@@ -987,9 +1017,14 @@ func scaledQRPNG(t *testing.T, modules, scale, quiet int) []byte {
 }
 
 type fakeWorkspaceExtensions struct {
-	preview  PreviewDocument
-	opened   int
-	requests []OperationRequest
+	preview           PreviewDocument
+	opened            int
+	requests          []OperationRequest
+	defaultExportRoot string
+}
+
+func (extensions *fakeWorkspaceExtensions) DefaultExportRoot(context.Context) (string, error) {
+	return extensions.defaultExportRoot, nil
 }
 
 func (extensions *fakeWorkspaceExtensions) Panel(_ context.Context, area Area) (OperationResult, error) {

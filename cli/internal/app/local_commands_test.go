@@ -688,6 +688,58 @@ func TestLocalExportRuntimeExecutesAllNonPDFFormats(t *testing.T) {
 	}
 }
 
+func TestLocalExportRuntimeExecutesRelativeOutputRoot(t *testing.T) {
+	applicationAdapter, _, _ := newTestApp(t)
+	prepareExportArticle(t, applicationAdapter)
+	workingDirectory := t.TempDir()
+	root := filepath.Join(workingDirectory, "relative-export")
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(workingDirectory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+
+	job, err := applicationAdapter.active.Exports.Start(context.Background(), domain.ExportRequest{
+		Selection: domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs, ArticleIDs: []domain.ArticleID{"article-a"}},
+		Format:    "markdown", OutputRoot: "relative-export",
+		Options: domain.ExportOptions{NamingTemplate: "{title}", MaximumNameBytes: 180, CollisionPolicy: "fail"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, err := applicationAdapter.active.Exports.Run(context.Background(), job.ID)
+	if err != nil || final.State != domain.JobCompleted {
+		t.Fatalf("final=%#v err=%v", final, err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("output entries=%#v err=%v", entries, err)
+	}
+}
+
+func TestNormalizeExportOutputRootExpandsHomeShortcut(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for raw, want := range map[string]string{
+		"~":              home,
+		"~/Downloads":    filepath.Join(home, "Downloads"),
+		"~/downloads/":   filepath.Join(home, "downloads"),
+		"./downloads":    "./downloads",
+		"/tmp/exports":   "/tmp/exports",
+		"  ~/Downloads ": filepath.Join(home, "Downloads"),
+	} {
+		got, err := normalizeExportOutputRoot(raw)
+		if err != nil || got != want {
+			t.Fatalf("normalizeExportOutputRoot(%q) = %q, %v; want %q", raw, got, err, want)
+		}
+	}
+}
+
 func TestQueuedExportUsesImmutableMetadataCommentsAndResourceSnapshot(t *testing.T) {
 	applicationAdapter, _, _ := newTestApp(t)
 	prepareExportArticle(t, applicationAdapter)

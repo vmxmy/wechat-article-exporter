@@ -506,8 +506,8 @@ func (model Model) submitInput() (tea.Model, tea.Cmd) {
 			return model, nil
 		}
 		model.inputMode = inputExportOutput
-		model.inputLabel = "Export output directory"
-		model.input = ""
+		model.inputLabel = "Export output directory (Enter accepts default)"
+		model.input = model.defaultExportRoot()
 		model.modal = modalInput
 		return model, nil
 	case inputExportPolicy:
@@ -528,8 +528,8 @@ func (model Model) submitInput() (tea.Model, tea.Cmd) {
 		}
 		model.inputParams["htmlBatchArchive"] = value
 		model.inputMode = inputExportOutput
-		model.inputLabel = "Export output directory"
-		model.input = ""
+		model.inputLabel = "Export output directory (Enter accepts default)"
+		model.input = model.defaultExportRoot()
 		return model, nil
 	case inputExportOutput:
 		if value == "" {
@@ -689,6 +689,19 @@ func (model Model) submitInput() (tea.Model, tea.Cmd) {
 		return model.executeExtension(OperationDiagnosticBundle, nil, map[string]string{"path": value})
 	}
 	return model, nil
+}
+
+func (model Model) defaultExportRoot() string {
+	const fallback = "~/Downloads/wechat-article-exports"
+	provider, ok := model.options.Extensions.(ExportRootProvider)
+	if !ok {
+		return fallback
+	}
+	root, err := provider.DefaultExportRoot(model.options.Context)
+	if err != nil || strings.TrimSpace(root) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(root)
 }
 
 func (model Model) movePage(direction int) bool {

@@ -123,6 +123,13 @@ type WorkspaceExtensions interface {
 	Operate(context.Context, OperationRequest) (OperationResult, error)
 }
 
+// ExportRootProvider optionally supplies the preferred local output directory
+// for new export jobs. Workspace implementations fall back to a readable
+// Downloads path when this capability is unavailable.
+type ExportRootProvider interface {
+	DefaultExportRoot(context.Context) (string, error)
+}
+
 type WorkspaceOptions struct {
 	Context     context.Context
 	Application WorkspaceApplication
