@@ -191,6 +191,11 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: webui/pnpm-lock.yaml
 
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
       - name: Enable pinned pnpm
         run: corepack enable
 
@@ -211,6 +216,9 @@ jobs:
 
       - name: Sanitized loopback browser E2E
         run: pnpm run e2e
+
+      - name: Real Go loopback browser E2E
+        run: pnpm run e2e:real
 
   test:
     strategy:

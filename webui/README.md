@@ -22,6 +22,8 @@ Release builds compile only the committed Go asset tree with `//go:embed`; Node 
 
 `pnpm run e2e` serves the SPA only on `127.0.0.1` and intercepts every API call with deterministic sanitized fixtures. The fixture route blocks non-loopback requests, contains no real WeChat account, article, QR, cookie, or filesystem data, and verifies the login, account/article selection, job control, export, settings/storage, and failure-state journeys.
 
+`pnpm run e2e:real` builds the local Go CLI, starts `wechat-article web --no-open` with a disposable memory-backed portable profile, and opens its one-time URL in Chromium. It performs no API interception: the test verifies bootstrap-token removal, observable HttpOnly/session cookies, embedded SPA deep-route behavior, security headers, same-origin requests, and a real preference save against the temporary profile. It needs Go as well as the pinned Chromium browser, but never contacts WeChat.
+
 ## API boundary
 
 The SPA only calls same-origin `/api/v1/*` endpoints through `src/lib/api.ts`. It sends cookies (`credentials: 'same-origin'`) and adds the required same-origin CSRF header for mutations. Domain persistence, WeChat protocol, scheduling, export, and secret handling remain behind the local HTTP adapter.
