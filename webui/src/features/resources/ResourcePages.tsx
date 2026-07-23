@@ -1,4 +1,5 @@
 import { StatusDot } from '@astryxdesign/core/StatusDot'
+import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { Button } from '@astryxdesign/core/Button'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { useMemo, useState } from 'react'
@@ -9,6 +10,7 @@ import { getAccountManifestDownloadURL } from '../../lib/api'
 import { useAccountPage, useAccountSearch, useAlbumPage, useJobDetail, useJobPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 import { ResourceTable } from './ResourceTable'
 import { UnavailableActionPanel } from '../actions/UnavailableActionPanel'
+import { navigateTo } from '../../app/navigation'
 
 const pageSize = 25
 
@@ -20,6 +22,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   const [name, setName] = useState('')
   const [alias, setAlias] = useState('')
   const [notice, setNotice] = useState<string>()
+  const [isDeleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false)
   const query = useAccountPage({ page: pageIndex + 1, pageSize })
   const discovery = useAccountSearch({ page: 1, pageSize, search })
   const mutations = useWorkspaceMutations()
@@ -49,10 +52,11 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
       <UnavailableActionPanel messages={messages} title={actions.title} description={actions.description}>
         <div className="account-action-form"><TextInput label={actions.search} value={search} onChange={setSearch} /><Button label={actions.discover} variant="secondary" isLoading={discovery.isFetching} onClick={() => void discovery.refetch()} /></div>
         {discovery.data?.data.length ? <p>{discovery.data.data.map((account) => `${account.name} (${account.id})`).join(' · ')}</p> : null}
-        <div className="account-action-form"><TextInput label={actions.fakeid} value={fakeid} onChange={setFakeid} /><TextInput label={actions.name} value={name} onChange={setName} /><TextInput label={actions.alias} value={alias} onChange={setAlias} /><Button label={actions.add} variant="primary" isLoading={mutations.saveAccount.isPending} isDisabled={!accountInput.fakeid || !accountInput.name} onClick={() => mutations.saveAccount.mutate(accountInput, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.edit} variant="secondary" isLoading={mutations.updateAccount.isPending} isDisabled={!one || !accountInput.fakeid || !accountInput.name} onClick={() => one && mutations.updateAccount.mutate({ id: one, input: accountInput }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.sync} variant="secondary" isLoading={mutations.syncAccount.isPending} isDisabled={!one} onClick={() => one && mutations.syncAccount.mutate(one, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.remove} variant="secondary" isLoading={mutations.deleteAccounts.isPending} isDisabled={selected.length === 0} onClick={() => { if (window.confirm(actions.deleteConfirm)) mutations.deleteAccounts.mutate(selected, { onSuccess: () => { setSelected([]); setNotice(undefined) }, onError: () => setNotice(actions.actionFailed) }) }} /></div>
+        <div className="account-action-form"><TextInput label={actions.fakeid} value={fakeid} onChange={setFakeid} /><TextInput label={actions.name} value={name} onChange={setName} /><TextInput label={actions.alias} value={alias} onChange={setAlias} /><Button label={actions.add} variant="primary" isLoading={mutations.saveAccount.isPending} isDisabled={!accountInput.fakeid || !accountInput.name} onClick={() => mutations.saveAccount.mutate(accountInput, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.edit} variant="secondary" isLoading={mutations.updateAccount.isPending} isDisabled={!one || !accountInput.fakeid || !accountInput.name} onClick={() => one && mutations.updateAccount.mutate({ id: one, input: accountInput }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.sync} variant="secondary" isLoading={mutations.syncAccount.isPending} isDisabled={!one} onClick={() => one && mutations.syncAccount.mutate(one, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /><Button label={actions.remove} variant="secondary" isLoading={mutations.deleteAccounts.isPending} isDisabled={selected.length === 0} onClick={() => setDeleteConfirmationOpen(true)} /></div>
         <div className="account-action-form"><a className="artifact-download" href={getAccountManifestDownloadURL()}>{actions.downloadManifest}</a><label>{actions.importManifest}<input type="file" accept="application/json,.json" disabled={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending} onChange={(event) => { const manifest = event.currentTarget.files?.[0]; event.currentTarget.value = ''; importManifest(manifest) }} /></label><p className="field-hint">{actions.manifestHint}</p></div>
         {!one && selected.length > 0 ? <p>{actions.selectOne}</p> : null}{notice ? <p role="alert">{notice}</p> : null}
       </UnavailableActionPanel>
+      <AlertDialog isOpen={isDeleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen} title={actions.deleteTitle} description={actions.deleteConfirm} actionLabel={actions.confirmDelete} cancelLabel={actions.cancelDelete} isActionLoading={mutations.deleteAccounts.isPending} onAction={() => mutations.deleteAccounts.mutate(selected, { onSuccess: () => { setSelected([]); setNotice(undefined); setDeleteConfirmationOpen(false) }, onError: () => setNotice(actions.actionFailed) })} />
     </>
   )
 }
@@ -94,6 +98,7 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   const [pageIndex, setPageIndex] = useState(0)
   const [selected, setSelected] = useState<readonly string[]>([])
   const [notice, setNotice] = useState<string>()
+  const [confirmationAction, setConfirmationAction] = useState<JobConfirmationAction>()
   const query = useJobPage({ page: pageIndex + 1, pageSize })
   const detail = useJobDetail(selected.length === 1 ? selected[0] : undefined)
   const mutations = useWorkspaceMutations()
@@ -112,10 +117,10 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   }
   const control = (action: 'pause' | 'resume' | 'retry' | 'cancel') => {
     if (!one) return setNotice(actions.selectOne)
-    const confirmations = { pause: actions.confirmPause, resume: undefined, retry: actions.confirmRetry, cancel: actions.confirmCancel } as const
-    const confirmation = confirmations[action]
-    if (!confirmation || window.confirm(confirmation)) mutations.controlJob.mutate({ id: one, action }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })
+    if (action === 'resume') return mutations.controlJob.mutate({ id: one, action }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })
+    setConfirmationAction(action)
   }
+  const confirmation = confirmationAction ? jobConfirmation(actions, confirmationAction) : undefined
   return (
     <>
       <ResourceTable eyebrow={messages.navigation.operations} messages={messages.resources.jobs} columns={columns} query={query} pageIndex={pageIndex} onPageChange={changePage} onSelectionChange={setSelected} />
@@ -123,6 +128,7 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
         <Button label={actions.pause} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('pause')} /><Button label={actions.resume} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('resume')} /><Button label={actions.retry} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('retry')} /><Button label={actions.cancel} variant="secondary" isLoading={mutations.controlJob.isPending} isDisabled={!one} onClick={() => control('cancel')} />
         {notice ? <p role="alert">{notice}</p> : null}
       </UnavailableActionPanel>
+      <AlertDialog isOpen={Boolean(confirmationAction)} onOpenChange={(isOpen) => { if (!isOpen) setConfirmationAction(undefined) }} title={confirmation?.title ?? ''} description={confirmation?.description ?? ''} actionLabel={confirmation?.actionLabel ?? ''} cancelLabel={actions.cancelConfirmation} isActionLoading={mutations.controlJob.isPending} onAction={() => { if (one && confirmationAction) mutations.controlJob.mutate({ id: one, action: confirmationAction }, { onSuccess: () => { setNotice(undefined); setConfirmationAction(undefined) }, onError: () => setNotice(actions.actionFailed) }) }} />
       {one ? <JobDetailPanel detail={detail} messages={messages} locale={locale} /> : null}
     </>
   )
@@ -155,6 +161,7 @@ export function SavedQueriesPage({ messages, locale }: { readonly messages: Mess
   const [name, setName] = useState('')
   const [queryText, setQueryText] = useState(() => JSON.stringify(consumeArticleQueryHandoff() ?? { keyword: '' }, null, 2))
   const [notice, setNotice] = useState<string>()
+  const [queryPendingDeletion, setQueryPendingDeletion] = useState<string>()
   const query = useSavedQueryPage({ page: pageIndex + 1, pageSize })
   const mutations = useWorkspaceMutations()
   const columns = useMemo<ColumnDef<SavedQueryRecord>[]>(() => [
@@ -186,8 +193,7 @@ export function SavedQueriesPage({ messages, locale }: { readonly messages: Mess
   }
   const remove = () => {
     if (!selectedQuery) return setNotice(actions.selectOne)
-    if (!window.confirm(actions.deleteConfirm(selectedQuery.name))) return
-    mutations.deleteSavedQuery.mutate(selectedQuery.name, { onSuccess: () => { setSelected([]); setNotice(actions.deleted(selectedQuery.name)) }, onError: () => setNotice(actions.actionFailed) })
+    setQueryPendingDeletion(selectedQuery.name)
   }
   return (
     <>
@@ -197,8 +203,20 @@ export function SavedQueriesPage({ messages, locale }: { readonly messages: Mess
         <Button label={actions.create} variant="primary" isLoading={mutations.saveSavedQuery.isPending} onClick={save} /><Button label={actions.edit} variant="secondary" isDisabled={!selectedQuery} onClick={edit} /><Button label={actions.remove} variant="secondary" isLoading={mutations.deleteSavedQuery.isPending} isDisabled={!selectedQuery} onClick={remove} />
         {notice ? <p role="status">{notice}</p> : null}
       </UnavailableActionPanel>
+      <AlertDialog isOpen={Boolean(queryPendingDeletion)} onOpenChange={(isOpen) => { if (!isOpen) setQueryPendingDeletion(undefined) }} title={actions.deleteTitle} description={queryPendingDeletion ? actions.deleteConfirm(queryPendingDeletion) : ''} actionLabel={actions.confirmDelete} cancelLabel={actions.cancelDelete} isActionLoading={mutations.deleteSavedQuery.isPending} onAction={() => { if (queryPendingDeletion) mutations.deleteSavedQuery.mutate(queryPendingDeletion, { onSuccess: () => { setSelected([]); setNotice(actions.deleted(queryPendingDeletion)); setQueryPendingDeletion(undefined) }, onError: () => setNotice(actions.actionFailed) }) }} />
     </>
   )
+}
+
+type JobConfirmationAction = 'pause' | 'retry' | 'cancel'
+
+function jobConfirmation(actions: MessageCatalog['resources']['jobs']['actions'], action: JobConfirmationAction) {
+  const confirmations = {
+    pause: { title: actions.pauseTitle, description: actions.confirmPause, actionLabel: actions.pause },
+    retry: { title: actions.retryTitle, description: actions.confirmRetry, actionLabel: actions.retry },
+    cancel: { title: actions.cancelTitle, description: actions.confirmCancel, actionLabel: actions.cancel }
+  } as const
+  return confirmations[action]
 }
 
 function State({ value, locale }: { readonly value: string; readonly locale: Locale }) {

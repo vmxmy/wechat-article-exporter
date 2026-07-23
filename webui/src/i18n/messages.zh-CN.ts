@@ -237,7 +237,7 @@ export const zhCN = {
       description: '已保存的本地账号按受限服务端分页展示。此只读 Beta 暂不提供账号修改和同步控制。',
       loading: '正在加载本地账号页…', unavailable: '本地 accounts API 尚不可用。', empty: '没有与查询匹配的已保存账号。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '账号分页', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见账号列',
       columns: { name: '账号', alias: '别名', articles: '文章数', synced: '最近同步', state: '同步状态' },
-      actions: { title: '账号操作', description: '发现账号、保存本地账号记录，或为一个已选账号启动同步。', search: '搜索发现', fakeid: '账号 fakeid', name: '账号名称', alias: '别名', discover: '发现账号', add: '保存账号', edit: '更新所选账号', remove: '删除所选账号', sync: '同步所选账号', downloadManifest: '下载账号清单', importManifest: '导入账号清单', manifestHint: '所选 JSON 清单仅在本机上传，随后立即从控件中清除。本页面不会保留文件名或内容。', manifestImported: (added: number, merged: number, unchanged: number) => `账号清单已导入：新增 ${added} 个，合并 ${merged} 个，未变更 ${unchanged} 个。`, manifestFailed: '无法导入账号清单。', selectOne: '请先仅选择一个账号。', deleteConfirm: '删除所选本地账号记录？此操作无法撤销。', actionFailed: '无法完成账号操作。' }
+      actions: { title: '账号操作', description: '发现账号、保存本地账号记录，或为一个已选账号启动同步。', search: '搜索发现', fakeid: '账号 fakeid', name: '账号名称', alias: '别名', discover: '发现账号', add: '保存账号', edit: '更新所选账号', remove: '删除所选账号', sync: '同步所选账号', downloadManifest: '下载账号清单', importManifest: '导入账号清单', manifestHint: '所选 JSON 清单仅在本机上传，随后立即从控件中清除。本页面不会保留文件名或内容。', manifestImported: (added: number, merged: number, unchanged: number) => `账号清单已导入：新增 ${added} 个，合并 ${merged} 个，未变更 ${unchanged} 个。`, manifestFailed: '无法导入账号清单。', selectOne: '请先仅选择一个账号。', deleteTitle: '删除所选账号', deleteConfirm: '删除所选本地账号记录？此操作无法撤销。', confirmDelete: '删除账号', cancelDelete: '保留账号', actionFailed: '无法完成账号操作。' }
     },
     albums: {
       title: '专辑',
@@ -251,7 +251,7 @@ export const zhCN = {
       description: '查看共享持久任务、刷新其 SQLite 快照，并在范围确认后使用允许的控制操作。',
       loading: '正在加载本地任务快照…', unavailable: '本地 jobs 快照 API 尚不可用。', empty: '尚未记录持久任务。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '任务分页', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见任务列',
       columns: { kind: '类型', state: '状态', created: '创建时间', updated: '更新时间', counts: '进度' },
-      actions: { title: '任务控制', description: '暂停、继续、重试或取消一个已选持久化任务。', start: '启动任务', pause: '暂停所选任务', resume: '继续所选任务', retry: '重试所选任务', cancel: '取消所选任务', selectOne: '请先仅选择一个任务。', confirmPause: '暂停此任务？', confirmRetry: '重试此任务？', confirmCancel: '取消此任务？这可能中断本地工作。', actionFailed: '无法完成任务操作。' },
+      actions: { title: '任务控制', description: '暂停、继续、重试或取消一个已选持久化任务。', start: '启动任务', pause: '暂停所选任务', resume: '继续所选任务', retry: '重试所选任务', cancel: '取消所选任务', selectOne: '请先仅选择一个任务。', pauseTitle: '暂停所选任务', retryTitle: '重试所选任务', cancelTitle: '取消所选任务', confirmPause: '暂停此任务？现有精确确认仅会随此所选任务发送。', confirmRetry: '重试此任务？现有精确确认仅会随此所选任务发送。', confirmCancel: '取消此任务？这可能中断本地工作。现有精确确认仅会随此所选任务发送。', cancelConfirmation: '保持任务运行', actionFailed: '无法完成任务操作。' },
       detail: { title: '任务详情', description: '重连或刷新后会重新读取受限的本地状态。不会显示日志字段、任务载荷、执行者身份或路径。', refresh: '刷新详情', refreshing: '正在刷新详情…', loading: '正在加载任务详情…', unavailable: '无法获取任务详情，可安全重试。', items: '任务项', itemsLimited: (shown: number, total: number) => `显示 ${shown} / ${total} 个任务项。`, noItems: '该任务没有已记录的任务项。', logs: '最近日志', noLogs: '没有已记录的受限日志。', lease: '执行租约', leaseActive: '有效', leaseInactive: '无效', expires: '到期时间', attempts: '尝试次数', errorClass: '错误类别', refreshed: '最近刷新' }
     },
     savedQueries: {
@@ -259,7 +259,7 @@ export const zhCN = {
       description: '保存、更新和删除可复用的本地文章查询定义。',
       loading: '正在加载已保存查询…', unavailable: '本地 saved-queries API 尚不可用。', empty: '尚未保存文章查询。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '已保存查询分页', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见已保存查询列',
       columns: { name: '名称', query: '查询条件', updated: '更新时间' },
-      actions: { title: '已保存查询操作', description: '同名保存会更新本地定义；删除需要确认。', name: '查询名称', query: '查询 JSON', create: '保存查询', edit: '载入所选查询', remove: '删除所选查询', selectOne: '请先仅选择一个已保存查询。', invalidQuery: '请输入名称和 JSON 对象形式的查询。', deleteConfirm: (name: string) => `删除已保存查询“${name}”？此操作无法撤销。`, saved: (name: string) => `已保存查询“${name}”。`, editing: (name: string) => `已载入“${name}”以供编辑。`, deleted: (name: string) => `已删除已保存查询“${name}”。`, actionFailed: '无法完成已保存查询操作。' }
+      actions: { title: '已保存查询操作', description: '同名保存会更新本地定义；删除需要确认。', name: '查询名称', query: '查询 JSON', create: '保存查询', edit: '载入所选查询', remove: '删除所选查询', selectOne: '请先仅选择一个已保存查询。', invalidQuery: '请输入名称和 JSON 对象形式的查询。', deleteTitle: '删除已保存查询', deleteConfirm: (name: string) => `删除已保存查询“${name}”？此操作无法撤销。`, confirmDelete: '删除查询', cancelDelete: '保留查询', saved: (name: string) => `已保存查询“${name}”。`, editing: (name: string) => `已载入“${name}”以供编辑。`, deleted: (name: string) => `已删除已保存查询“${name}”。`, actionFailed: '无法完成已保存查询操作。' }
     }
   }
 } as const

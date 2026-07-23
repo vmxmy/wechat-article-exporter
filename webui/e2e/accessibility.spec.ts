@@ -45,6 +45,25 @@ test('keyboard-only exact confirmation gates destructive garbage collection', as
   await expectOnlyLoopbackRequests(page)
 })
 
+test('keyboard-only destructive task confirmation can be cancelled without a native dialog', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/jobs')
+  await page.getByRole('checkbox', { name: 'Select job-fixture-1' }).check()
+
+  const pause = page.getByRole('button', { name: 'Pause selected task' }).first()
+  await focusWithKeyboard(page, pause)
+  await page.keyboard.press('Enter')
+  const confirmation = page.getByRole('alertdialog', { name: 'Pause selected task' })
+  await expect(confirmation).toBeVisible()
+  const keepRunning = confirmation.getByRole('button', { name: 'Keep task running' })
+  await focusWithKeyboard(page, keepRunning)
+  await page.keyboard.press('Enter')
+  await expect(confirmation).toBeHidden()
+  await expect(pause).toBeFocused()
+  expect(fixture.controls).toHaveLength(0)
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('narrow viewport keeps the sanitized export workspace usable without page overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await installLoopbackFixture(page)
