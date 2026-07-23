@@ -1,6 +1,9 @@
 package web
 
 import (
+	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -14,10 +17,9 @@ const (
 	maximumExportVerifications         = 4
 )
 
-// exportRead owns the authenticated, read-only export routes. It deliberately
-// receives only WorkspaceExportService DTOs, never an export root or a file
-// descriptor. Artifact bytes and desktop opening are therefore unavailable
-// until the application facade grows a separately-authorized streaming seam.
+// exportRead owns authenticated, read-only export routes. Artifact streaming
+// only accepts opaque export and artifact identifiers; path resolution remains
+// entirely in the application facade.
 func (server *Server) exportRead(writer http.ResponseWriter, request *http.Request) bool {
 	if request.URL.Path == "/api/v1/export-directories" {
 		server.apiError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "method is not allowed")
@@ -33,8 +35,10 @@ func (server *Server) exportRead(writer http.ResponseWriter, request *http.Reque
 			server.exportManifest(writer, request, id)
 		case "verify":
 			server.apiError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "method is not allowed")
-		case "artifact", "open":
-			server.exportArtifactUnavailable(writer, request)
+		case "artifact":
+			server.exportArtifact(writer, request, id)
+		case "open":
+			server.apiError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "method is not allowed")
 		default:
 			server.apiError(writer, http.StatusNotFound, "not_found", "workspace resource was not found")
 		}
@@ -48,6 +52,9 @@ func (server *Server) exportRead(writer http.ResponseWriter, request *http.Reque
 }
 
 func (server *Server) exportControl(writer http.ResponseWriter, request *http.Request) bool {
+	if request.Method == http.MethodGet {
+		return false
+	}
 	path := strings.TrimPrefix(request.URL.Path, "/api/v1/exports/")
 	if path == request.URL.Path {
 		return false
@@ -59,8 +66,10 @@ func (server *Server) exportControl(writer http.ResponseWriter, request *http.Re
 	switch action {
 	case "verify":
 		server.exportVerify(writer, request, id)
-	case "artifact", "open":
-		server.exportArtifactUnavailable(writer, request)
+	case "artifact":
+		server.apiError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "method is not allowed")
+	case "open":
+		server.exportOpen(writer, request, id)
 	default:
 		return false
 	}
@@ -236,12 +245,58 @@ func (server *Server) exportVerify(writer http.ResponseWriter, request *http.Req
 	writeAPI(writer, http.StatusOK, value)
 }
 
-func (server *Server) exportArtifactUnavailable(writer http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodGet && request.Method != http.MethodPost {
-		server.apiError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "method is not allowed")
+func (server *Server) exportArtifact(writer http.ResponseWriter, request *http.Request, id string) {
+	artifactID := strings.TrimSpace(request.URL.Query().Get("artifactId"))
+	if artifactID == "" || len(request.URL.Query()) != 1 {
+		server.apiError(writer, http.StatusBadRequest, "invalid_argument", "an artifact capability is required")
 		return
 	}
-	server.apiError(writer, http.StatusServiceUnavailable, "unavailable", "safe artifact streaming and desktop opening are not available")
+	service := server.exportService(writer)
+	if service == nil {
+		return
+	}
+	artifact, err := service.DownloadArtifact(request.Context(), application.WorkspaceDownloadArtifactRequest{ExportID: id, ArtifactID: artifactID})
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	if artifact.Reader == nil {
+		server.apiError(writer, http.StatusServiceUnavailable, "unavailable", "artifact streaming is unavailable")
+		return
+	}
+	defer artifact.Reader.Close()
+	writer.Header().Set("Content-Type", safeArtifactMediaType(artifact.MediaType))
+	writer.Header().Set("Content-Disposition", "attachment; filename="+mimeFilename(artifact.Name))
+	writer.Header().Set("Content-Length", fmt.Sprint(artifact.SizeBytes))
+	writer.Header().Set("X-Content-Type-Options", "nosniff")
+	writer.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(writer, artifact.Reader)
+}
+
+func (server *Server) exportOpen(writer http.ResponseWriter, request *http.Request, id string) {
+	if !server.apiMutation(writer, request, http.MethodPost) {
+		return
+	}
+	var input struct {
+		Confirmation string `json:"confirm"`
+	}
+	if err := decodeControl(request, &input); err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	if input.Confirmation != exportOpenConfirmation(id) {
+		server.apiError(writer, http.StatusBadRequest, "invalid_argument", "export output opening confirmation is invalid")
+		return
+	}
+	service := server.exportService(writer)
+	if service == nil {
+		return
+	}
+	if err := service.OpenExportOutput(request.Context(), id); err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func exportDirectoryCreateConfirmation(parent application.WorkspaceDirectoryHandle, name string) string {
@@ -254,6 +309,25 @@ func exportStartConfirmation(token application.WorkspaceDirectoryHandle) string 
 
 func exportVerifyConfirmation(id string) string {
 	return "verify-export:" + strings.TrimSpace(id)
+}
+
+func exportOpenConfirmation(id string) string {
+	return "open-export-output:" + strings.TrimSpace(id)
+}
+
+func safeArtifactMediaType(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsAny(value, "\r\n") {
+		return "application/octet-stream"
+	}
+	if _, _, err := mime.ParseMediaType(value); err != nil {
+		return "application/octet-stream"
+	}
+	return value
+}
+
+func mimeFilename(value string) string {
+	return `"` + strings.NewReplacer(`\`, `_`, `"`, `'`, "\r", "_", "\n", "_").Replace(filepath.Base(value)) + `"`
 }
 
 func validDirectoryToken(token application.WorkspaceDirectoryHandle) bool {

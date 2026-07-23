@@ -68,6 +68,15 @@ func TestWebCommandRejectsJSONOutput(t *testing.T) {
 	}
 }
 
+func TestWebCommandRequiresTheActiveExportLibrary(t *testing.T) {
+	applicationAdapter, _, _ := newTestApp(t)
+	applicationAdapter.active = nil
+	err := applicationAdapter.Execute(context.Background(), []string{"web", "--no-open"})
+	if err == nil || !strings.Contains(err.Error(), "active export workspace is unavailable") {
+		t.Fatalf("web command error = %v", err)
+	}
+}
+
 type webURLWriter struct {
 	urlWritten chan<- string
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	localweb "github.com/wechat-article/wechat-article-exporter/cli/internal/web"
 )
 
@@ -23,7 +24,11 @@ func (a *App) webCommand() *cobra.Command {
 			if a.core == nil {
 				return errors.New("active profile runtime is unavailable")
 			}
-			server, err := localweb.New(localweb.Options{Application: a.core})
+			if a.active == nil || a.active.Library == nil {
+				return errors.New("active export workspace is unavailable")
+			}
+			exports := application.NewWorkspaceExports(a.core, a.active.Library)
+			server, err := localweb.New(localweb.Options{Application: a.core, Exports: exports})
 			if err != nil {
 				return err
 			}

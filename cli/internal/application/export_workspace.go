@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -32,6 +33,7 @@ type WorkspaceExportService interface {
 	ExportManifest(context.Context, string) (WorkspaceExportManifest, error)
 	VerifyExport(context.Context, string) (WorkspaceExportVerification, error)
 	DownloadArtifact(context.Context, WorkspaceDownloadArtifactRequest) (WorkspaceDownloadArtifact, error)
+	OpenExportOutput(context.Context, string) error
 }
 
 // WorkspaceExportDirectory carries a token only. Its host path and filesystem
@@ -79,12 +81,13 @@ type WorkspaceExportRecord struct {
 }
 
 type WorkspaceExportFile struct {
-	ArticleID string `json:"articleId,omitempty"`
-	Path      string `json:"path"`
-	SizeBytes int64  `json:"sizeBytes"`
-	SHA256    string `json:"sha256"`
-	MediaType string `json:"mediaType,omitempty"`
-	Status    string `json:"status"`
+	ArtifactID string `json:"artifactId"`
+	ArticleID  string `json:"articleId,omitempty"`
+	Path       string `json:"path"`
+	SizeBytes  int64  `json:"sizeBytes"`
+	SHA256     string `json:"sha256"`
+	MediaType  string `json:"mediaType,omitempty"`
+	Status     string `json:"status"`
 }
 
 type WorkspaceExportManifest struct {
@@ -105,19 +108,25 @@ type WorkspaceExportVerification struct {
 }
 
 type WorkspaceDownloadArtifactRequest struct {
-	ExportID string `json:"exportId"`
-	Path     string `json:"path"`
+	ExportID   string `json:"exportId"`
+	ArtifactID string `json:"artifactId"`
 }
 
 // WorkspaceDownloadArtifact describes a verified file that a local adapter
 // may stream. It intentionally contains no absolute filename.
 type WorkspaceDownloadArtifact struct {
-	ExportID  string `json:"exportId"`
-	Path      string `json:"path"`
-	Name      string `json:"name"`
-	SizeBytes int64  `json:"sizeBytes"`
-	SHA256    string `json:"sha256"`
-	MediaType string `json:"mediaType,omitempty"`
+	ExportID  string        `json:"exportId"`
+	Path      string        `json:"path"`
+	Name      string        `json:"name"`
+	SizeBytes int64         `json:"sizeBytes"`
+	SHA256    string        `json:"sha256"`
+	MediaType string        `json:"mediaType,omitempty"`
+	Reader    io.ReadCloser `json:"-"`
+}
+
+type workspaceArtifactCapability struct {
+	exportID domain.ExportID
+	path     string
 }
 
 type workspaceExportDirectoryCapability struct {
@@ -136,10 +145,12 @@ type WorkspaceExports struct {
 	application Application
 	library     workspaceExportLibrary
 	directories map[WorkspaceDirectoryHandle]workspaceExportDirectoryCapability
+	artifacts   map[string]workspaceArtifactCapability
 	mu          sync.Mutex
 	now         func() time.Time
 	home        func() (string, error)
 	random      func([]byte) (int, error)
+	openOutput  func(context.Context, string) error
 }
 
 type workspaceExportLibrary interface {
@@ -153,9 +164,11 @@ func NewWorkspaceExports(application Application, records workspaceExportLibrary
 		application: application,
 		library:     records,
 		directories: make(map[WorkspaceDirectoryHandle]workspaceExportDirectoryCapability),
+		artifacts:   make(map[string]workspaceArtifactCapability),
 		now:         time.Now,
 		home:        os.UserHomeDir,
 		random:      rand.Read,
+		openOutput:  workspaceOpenOutput,
 	}
 }
 
@@ -273,9 +286,12 @@ func (service *WorkspaceExports) ExportManifest(ctx context.Context, exportID st
 	if err != nil {
 		return WorkspaceExportManifest{}, err
 	}
+	workspaceFiles, err := service.workspaceExportFiles(files)
+	if err != nil {
+		return WorkspaceExportManifest{}, workspaceError(err)
+	}
 	return WorkspaceExportManifest{ExportID: string(record.ID), Format: record.Format, State: record.State,
-		ProvenanceState: record.ProvenanceState, ProvenanceGeneration: record.ProvenanceGeneration,
-		Files: workspaceExportFiles(files)}, nil
+		ProvenanceState: record.ProvenanceState, ProvenanceGeneration: record.ProvenanceGeneration, Files: workspaceFiles}, nil
 }
 
 func (service *WorkspaceExports) VerifyExport(ctx context.Context, exportID string) (WorkspaceExportVerification, error) {
@@ -303,23 +319,50 @@ func (service *WorkspaceExports) VerifyExport(ctx context.Context, exportID stri
 }
 
 func (service *WorkspaceExports) DownloadArtifact(ctx context.Context, request WorkspaceDownloadArtifactRequest) (WorkspaceDownloadArtifact, error) {
-	_, files, err := service.exportRecordAndFiles(ctx, request.ExportID)
+	if err := ctx.Err(); err != nil {
+		return WorkspaceDownloadArtifact{}, workspaceError(err)
+	}
+	capability, err := service.artifact(request.ExportID, request.ArtifactID)
 	if err != nil {
 		return WorkspaceDownloadArtifact{}, err
 	}
-	path, err := workspaceSafeArtifactPath(request.Path)
+	record, files, err := service.exportRecordAndFiles(ctx, string(capability.exportID))
 	if err != nil {
 		return WorkspaceDownloadArtifact{}, err
 	}
 	for _, file := range files {
-		if file.RelativePath != path {
+		if file.RelativePath != capability.path {
 			continue
 		}
+		reader, err := workspaceOpenExportArtifact(record.OutputAuthorization, file)
+		if err != nil {
+			return WorkspaceDownloadArtifact{}, workspaceError(err)
+		}
 		artifact := WorkspaceDownloadArtifact{ExportID: string(file.ExportID), Path: file.RelativePath, Name: filepath.Base(file.RelativePath),
-			SizeBytes: file.SizeBytes, SHA256: file.SHA256, MediaType: file.MediaType}
+			SizeBytes: file.SizeBytes, SHA256: file.SHA256, MediaType: file.MediaType, Reader: reader}
 		return artifact, nil
 	}
-	return WorkspaceDownloadArtifact{}, workspaceError(fmt.Errorf("export artifact %q: %w", path, fs.ErrNotExist))
+	return WorkspaceDownloadArtifact{}, workspaceError(fmt.Errorf("export artifact %q: %w", capability.path, fs.ErrNotExist))
+}
+
+// OpenExportOutput opens only the output directory authenticated by the export
+// record. The host path never crosses the facade boundary.
+func (service *WorkspaceExports) OpenExportOutput(ctx context.Context, exportID string) error {
+	if err := ctx.Err(); err != nil {
+		return workspaceError(err)
+	}
+	record, _, err := service.exportRecordAndFiles(ctx, exportID)
+	if err != nil {
+		return err
+	}
+	root, err := workspaceAuthorizedOutputRoot(record.OutputAuthorization)
+	if err != nil {
+		return workspaceError(err)
+	}
+	if service.openOutput == nil {
+		return workspaceError(fmt.Errorf("open export output: %w", ErrUnavailable))
+	}
+	return workspaceError(service.openOutput(ctx, root))
 }
 
 func (service *WorkspaceExports) exportRecordAndFiles(ctx context.Context, exportID string) (library.ExportRecord, []library.ExportFileRecord, error) {
@@ -341,14 +384,52 @@ func (service *WorkspaceExports) exportRecordAndFiles(ctx context.Context, expor
 	return record, files, nil
 }
 
-func workspaceExportFiles(files []library.ExportFileRecord) []WorkspaceExportFile {
+func (service *WorkspaceExports) workspaceExportFiles(files []library.ExportFileRecord) ([]WorkspaceExportFile, error) {
 	items := make([]WorkspaceExportFile, 0, len(files))
 	for _, file := range files {
-		item := WorkspaceExportFile{ArticleID: string(file.ArticleID), Path: file.RelativePath, SizeBytes: file.SizeBytes,
+		artifactID, err := service.issueArtifact(file.ExportID, file.RelativePath)
+		if err != nil {
+			return nil, err
+		}
+		item := WorkspaceExportFile{ArtifactID: artifactID, ArticleID: string(file.ArticleID), Path: file.RelativePath, SizeBytes: file.SizeBytes,
 			SHA256: file.SHA256, MediaType: file.MediaType, Status: file.Status}
 		items = append(items, item)
 	}
-	return items
+	return items, nil
+}
+
+func (service *WorkspaceExports) issueArtifact(exportID domain.ExportID, path string) (string, error) {
+	path, err := workspaceSafeArtifactPath(path)
+	if err != nil {
+		return "", err
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	for id, capability := range service.artifacts {
+		if capability.exportID == exportID && capability.path == path {
+			return id, nil
+		}
+	}
+	buffer := make([]byte, 18)
+	if _, err := service.random(buffer); err != nil {
+		return "", fmt.Errorf("issue artifact capability: %w", err)
+	}
+	id := "artifact_" + hex.EncodeToString(buffer)
+	service.artifacts[id] = workspaceArtifactCapability{exportID: exportID, path: path}
+	return id, nil
+}
+
+func (service *WorkspaceExports) artifact(exportID, artifactID string) (workspaceArtifactCapability, error) {
+	if strings.TrimSpace(exportID) == "" || strings.TrimSpace(artifactID) == "" {
+		return workspaceArtifactCapability{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "export and artifact identifiers are required"}
+	}
+	service.mu.Lock()
+	capability, ok := service.artifacts[artifactID]
+	service.mu.Unlock()
+	if !ok || capability.exportID != domain.ExportID(exportID) {
+		return workspaceArtifactCapability{}, &WorkspaceError{Code: WorkspaceErrorNotFound, Message: "export artifact was not found"}
+	}
+	return capability, nil
 }
 
 func (service *WorkspaceExports) issueOpenedDirectory(path string, root *os.Root, label string, isDefault bool) (WorkspaceExportDirectory, error) {

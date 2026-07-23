@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -17,8 +18,10 @@ type exportAPIService struct {
 	page      application.WorkspacePage[application.WorkspaceExportRecord]
 	manifest  application.WorkspaceExportManifest
 	verify    application.WorkspaceExportVerification
+	artifact  application.WorkspaceDownloadArtifact
 	create    application.WorkspaceCreateExportDirectoryRequest
 	start     application.WorkspaceStartExportRequest
+	openID    string
 }
 
 func (service *exportAPIService) DefaultExportDirectory(context.Context) (application.WorkspaceExportDirectory, error) {
@@ -41,8 +44,12 @@ func (service *exportAPIService) ExportManifest(context.Context, string) (applic
 func (service *exportAPIService) VerifyExport(context.Context, string) (application.WorkspaceExportVerification, error) {
 	return service.verify, nil
 }
-func (*exportAPIService) DownloadArtifact(context.Context, application.WorkspaceDownloadArtifactRequest) (application.WorkspaceDownloadArtifact, error) {
-	return application.WorkspaceDownloadArtifact{}, nil
+func (service *exportAPIService) DownloadArtifact(context.Context, application.WorkspaceDownloadArtifactRequest) (application.WorkspaceDownloadArtifact, error) {
+	return service.artifact, nil
+}
+func (service *exportAPIService) OpenExportOutput(_ context.Context, exportID string) error {
+	service.openID = exportID
+	return nil
 }
 
 func TestExportAPIUsesOpaqueCapabilitiesAndFacadeOnly(t *testing.T) {
@@ -112,6 +119,43 @@ func TestExportAPIUsesOpaqueCapabilitiesAndFacadeOnly(t *testing.T) {
 	response.Body.Close()
 }
 
+func TestExportAPIStreamsOpaqueArtifactsAndProtectsDesktopOpening(t *testing.T) {
+	service := &exportAPIService{
+		artifact: application.WorkspaceDownloadArtifact{ExportID: "export-1", Path: "private/article.md", Name: "article.md", SizeBytes: 7,
+			MediaType: "text/markdown", Reader: io.NopCloser(strings.NewReader("content"))},
+	}
+	server, client := startExportAPIServer(t, service)
+	base := authorizeAPI(t, client, server.URL())
+	response := get(t, client, base+"/api/v1/exports/export-1/artifact?artifactId=artifact_opaque")
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/markdown" || response.Header.Get("Content-Disposition") != `attachment; filename="article.md"` {
+		t.Fatalf("artifact status=%d headers=%v body=%s", response.StatusCode, response.Header, readResponse(t, response))
+	}
+	if body := readResponse(t, response); body != "content" {
+		t.Fatalf("artifact body=%q", body)
+	}
+
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+	request := requestWith(t, http.MethodPost, base+"/api/v1/exports/export-1/open", strings.NewReader(`{"confirm":"open-export-output:export-1"}`), map[string]string{"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf})
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusNoContent || service.openID != "export-1" {
+		t.Fatalf("open status=%d id=%q body=%s", response.StatusCode, service.openID, readResponse(t, response))
+	}
+	response.Body.Close()
+
+	request = requestWith(t, http.MethodPost, base+"/api/v1/exports/export-1/open", strings.NewReader(`{"confirm":"open-export-output:export-1"}`), map[string]string{"Origin": "http://evil.example", "Content-Type": "application/json", "X-CSRF-Token": csrf})
+	response, err = client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-origin open status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "forbidden")
+}
+
 func TestExportAPIRejectsEscapesBadConfirmationAndMissingMutationCredentials(t *testing.T) {
 	service := &exportAPIService{directory: application.WorkspaceExportDirectory{Token: "dir_root"}}
 	server, client := startExportAPIServer(t, service)
@@ -146,10 +190,10 @@ func TestExportAPIRejectsEscapesBadConfirmationAndMissingMutationCredentials(t *
 	}
 	assertAPIError(t, response, "forbidden")
 	response = get(t, client, base+"/api/v1/exports/export-1/artifact?path=../secret")
-	if response.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("artifact fallback status=%d body=%s", response.StatusCode, readResponse(t, response))
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("artifact capability status=%d body=%s", response.StatusCode, readResponse(t, response))
 	}
-	assertAPIError(t, response, "unavailable")
+	assertAPIError(t, response, "invalid_argument")
 }
 
 func TestExportVerificationIsRateLimited(t *testing.T) {

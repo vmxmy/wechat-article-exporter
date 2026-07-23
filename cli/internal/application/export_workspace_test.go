@@ -2,7 +2,10 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -145,16 +148,61 @@ func TestWorkspaceExportsReturnSafeManifestAndArtifactMetadata(t *testing.T) {
 	if err != nil || len(manifest.Files) != 1 || manifest.Files[0].Path != "article.md" {
 		t.Fatalf("ExportManifest() = %#v, %v", manifest, err)
 	}
-	artifact, err := service.DownloadArtifact(context.Background(), WorkspaceDownloadArtifactRequest{ExportID: "export-1", Path: "article.md"})
-	if err != nil || artifact.Path != "article.md" || artifact.Name != "article.md" {
-		t.Fatalf("DownloadArtifact() = %#v, %v", artifact, err)
+	if manifest.Files[0].ArtifactID == "" {
+		t.Fatalf("manifest did not issue an artifact handle: %#v", manifest)
 	}
-	if reflect.ValueOf(artifact).FieldByName("AbsolutePath").IsValid() {
-		t.Fatalf("artifact exposed absolute path: %#v", artifact)
+	_, err = service.DownloadArtifact(context.Background(), WorkspaceDownloadArtifactRequest{ExportID: "export-1", ArtifactID: manifest.Files[0].ArtifactID})
+	if err == nil {
+		t.Fatal("DownloadArtifact() opened a record without output authorization")
 	}
-	_, err = service.DownloadArtifact(context.Background(), WorkspaceDownloadArtifactRequest{ExportID: "export-1", Path: "../article.md"})
+	_, err = service.DownloadArtifact(context.Background(), WorkspaceDownloadArtifactRequest{ExportID: "export-1", ArtifactID: "../article.md"})
 	var workspaceErr *WorkspaceError
-	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInvalidArgument {
-		t.Fatalf("unsafe artifact error = %#v", err)
+	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorNotFound {
+		t.Fatalf("opaque artifact error = %#v", err)
+	}
+}
+
+func TestWorkspaceExportsStreamsOnlyManifestListedVerifiedArtifactsAndOpensAuthorizedOutput(t *testing.T) {
+	directory := t.TempDir()
+	contents := []byte("private article")
+	if err := os.WriteFile(filepath.Join(directory, "article.md"), contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, inode, err := workspaceExportRootIdentityFromFile(info)
+	if closeErr := info.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(contents)
+	record := library.ExportRecord{ID: "export-1", OutputAuthorization: &domain.ExportOutputAuthorization{Root: directory, Device: device, Inode: inode}}
+	files := []library.ExportFileRecord{{ExportID: "export-1", RelativePath: "article.md", SizeBytes: int64(len(contents)), SHA256: fmt.Sprintf("%x", digest), MediaType: "text/markdown"}}
+	service := NewWorkspaceExports(nil, workspaceExportRecords{record: record, files: files})
+	var opened string
+	service.openOutput = func(_ context.Context, path string) error { opened = path; return nil }
+
+	manifest, err := service.ExportManifest(context.Background(), "export-1")
+	if err != nil || len(manifest.Files) != 1 || manifest.Files[0].ArtifactID == "" {
+		t.Fatalf("ExportManifest() = %#v, %v", manifest, err)
+	}
+	artifact, err := service.DownloadArtifact(context.Background(), WorkspaceDownloadArtifactRequest{ExportID: "export-1", ArtifactID: manifest.Files[0].ArtifactID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer artifact.Reader.Close()
+	got, err := io.ReadAll(artifact.Reader)
+	if err != nil || string(got) != string(contents) {
+		t.Fatalf("artifact contents = %q, %v", got, err)
+	}
+	if artifact.Path != "article.md" || artifact.Name != "article.md" || artifact.Reader == nil {
+		t.Fatalf("artifact = %#v", artifact)
+	}
+	if err := service.OpenExportOutput(context.Background(), "export-1"); err != nil || opened != directory {
+		t.Fatalf("OpenExportOutput() opened %q, %v", opened, err)
 	}
 }
