@@ -258,7 +258,7 @@ function TypedConfirmationDialog({ isOpen, onOpenChange, title, description, exp
     event.preventDefault()
     if (confirmation === expected) onAction()
   }
-  return <Dialog isOpen={isOpen} onOpenChange={onOpenChange} purpose="form" aria-label={title}>
+  return <Dialog isOpen={isOpen} onOpenChange={onOpenChange} purpose="form" role="alertdialog" aria-label={title}>
     <DialogHeader title={title} subtitle={description} onOpenChange={onOpenChange} />
     <form className="typed-confirmation-dialog" onSubmit={submit}>
       <div className="confirmation-proof"><strong>{inputLabel}</strong><code>{expected}</code><p>{inputHint}</p></div>
