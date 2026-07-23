@@ -446,7 +446,7 @@ export async function logout(): Promise<void> { await mutate<void>('session/logo
 export async function searchAccounts(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<AccountRecord>> { return getPage<AccountRecord>('accounts/search', params, signal) }
 export async function saveAccount(input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>('accounts', 'POST', input) }
 export async function updateAccount(id: string, input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>(`accounts/${encodeURIComponent(id)}`, 'PATCH', input) }
-export async function deleteAccounts(ids: readonly string[]): Promise<void> { await mutate('accounts', 'DELETE', { ids, confirm: `delete-accounts:${ids.join(',')}` }) }
+export async function deleteAccounts(ids: readonly string[], confirmation: string): Promise<void> { await mutate('accounts', 'DELETE', { ids, confirm: confirmation }) }
 export function getAccountManifestDownloadURL(): string { return `${apiBase}/accounts/manifest` }
 export async function uploadAccountManifest(manifest: File): Promise<RestoreUploadReceipt> {
   const csrfToken = await getCSRFToken()
@@ -472,20 +472,23 @@ export async function getArticleResourceSummary(articleId: string, signal?: Abor
   return request<ArticleResourceSummary>(`${apiBase}/articles/${encodeURIComponent(articleId)}/resources`, { signal })
 }
 export async function saveSavedQuery(input: SavedQueryInput): Promise<SavedQueryRecord> { return mutate<SavedQueryRecord>('saved-queries', 'POST', input) }
-export async function deleteSavedQuery(name: string): Promise<void> {
+export async function deleteSavedQuery(name: string, confirmation: string): Promise<void> {
   const csrfToken = await getCSRFToken()
   const response = await fetch(`${apiBase}/saved-queries`, {
     method: 'DELETE', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-    body: JSON.stringify({ name, confirm: `delete-saved-query:${name}` })
+    body: JSON.stringify({ name, confirm: confirmation })
   })
   if (!response.ok) throw new ApiError(response.status, await readErrorMessage(response))
 }
 export async function traverseAlbum(albumId: string, accountId: string, order: AlbumTraversalOrder, download: boolean): Promise<JobRecord> {
   return mutate<JobRecord>(`albums/${encodeURIComponent(albumId)}/traverse`, 'POST', { accountId, order, download })
 }
-export async function controlJob(id: string, action: 'cancel' | 'pause' | 'resume' | 'retry'): Promise<JobRecord> {
-  const confirm = action === 'resume' ? undefined : `${action}-job:${id}`
-  return mutate<JobRecord>(`jobs/${encodeURIComponent(id)}/${action}`, 'POST', confirm ? { confirm } : {})
+export type ConfirmedJobControlAction = 'cancel' | 'pause' | 'retry'
+
+export async function controlJob(id: string, action: 'resume'): Promise<JobRecord>
+export async function controlJob(id: string, action: ConfirmedJobControlAction, confirmation: string): Promise<JobRecord>
+export async function controlJob(id: string, action: ConfirmedJobControlAction | 'resume', confirmation?: string): Promise<JobRecord> {
+  return mutate<JobRecord>(`jobs/${encodeURIComponent(id)}/${action}`, 'POST', action === 'resume' ? {} : { confirm: confirmation })
 }
 
 export async function getAccountPage(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<AccountRecord>> {

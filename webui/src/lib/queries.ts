@@ -24,6 +24,7 @@ import {
   type PageParams,
   type RestoreConflictPolicy
   ,type SavedQueryInput
+  ,type ConfirmedJobControlAction
 } from './api'
 
 export const queryKeys = {
@@ -133,16 +134,16 @@ export function useWorkspaceMutations() {
     logout: useMutation({ mutationFn: logout, onSuccess: refreshAfterLogout }),
     saveAccount: useMutation({ mutationFn: (input: AccountInput) => saveAccount(input), onSuccess: refresh }),
     updateAccount: useMutation({ mutationFn: ({ id, input }: { id: string; input: AccountInput }) => updateAccount(id, input), onSuccess: refresh }),
-    deleteAccounts: useMutation({ mutationFn: (ids: readonly string[]) => deleteAccounts(ids), onSuccess: refresh }),
+    deleteAccounts: useMutation({ mutationFn: ({ ids, confirmation }: { ids: readonly string[]; confirmation: string }) => deleteAccounts(ids, confirmation), onSuccess: refresh }),
     uploadAccountManifest: useMutation({ mutationFn: uploadAccountManifest }),
     importAccountManifest: useMutation({ mutationFn: importAccountManifest, onSuccess: refresh }),
     syncAccount: useMutation({ mutationFn: syncAccount, onSuccess: refresh }),
     ingestURL: useMutation({ mutationFn: ({ url, force }: { url: string; force: boolean }) => ingestURL(url, force), onSuccess: refresh }),
     downloadArticles: useMutation({ mutationFn: ({ articleIds, kind, force }: { articleIds: readonly string[]; kind: ArticleDownloadKind; force?: boolean }) => downloadArticles(articleIds, kind, force), onSuccess: refresh }),
     saveSavedQuery: useMutation({ mutationFn: (input: SavedQueryInput) => saveSavedQuery(input), onSuccess: refresh }),
-    deleteSavedQuery: useMutation({ mutationFn: (name: string) => deleteSavedQuery(name), onSuccess: refresh }),
+    deleteSavedQuery: useMutation({ mutationFn: ({ name, confirmation }: { name: string; confirmation: string }) => deleteSavedQuery(name, confirmation), onSuccess: refresh }),
     traverseAlbum: useMutation({ mutationFn: ({ albumId, accountId, order, download }: { albumId: string; accountId: string; order: AlbumTraversalOrder; download: boolean }) => traverseAlbum(albumId, accountId, order, download), onSuccess: refresh }),
-    controlJob: useMutation({ mutationFn: ({ id, action }: { id: string; action: 'cancel' | 'pause' | 'resume' | 'retry' }) => controlJob(id, action), onSuccess: refresh }),
+    controlJob: useMutation({ mutationFn: (input: { id: string; action: 'resume' } | { id: string; action: ConfirmedJobControlAction; confirmation: string }) => input.action === 'resume' ? controlJob(input.id, input.action) : controlJob(input.id, input.action, input.confirmation), onSuccess: refresh }),
     authorizeDefaultExportDirectory: useMutation({ mutationFn: authorizeDefaultExportDirectory }),
     createExportDirectory: useMutation({ mutationFn: ({ parentToken, name }: { parentToken: string; name: string }) => createExportDirectory(parentToken, name) }),
     startExport: useMutation({ mutationFn: startExport, onSuccess: refresh }),

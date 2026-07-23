@@ -5,7 +5,8 @@ const csrfToken = 'sanitized-e2e-csrf-token'
 
 export interface LoopbackFixture {
   readonly requests: readonly string[]
-  readonly controls: readonly string[]
+  readonly controls: readonly { readonly path: string; readonly confirmation?: string }[]
+  readonly accountDeletions: readonly unknown[]
   readonly exports: readonly string[]
   readonly accountManifestImports: readonly unknown[]
   readonly preferencePatches: readonly unknown[]
@@ -18,7 +19,8 @@ export interface LoopbackFixture {
 
 export async function installLoopbackFixture(page: Page): Promise<LoopbackFixture> {
   const requests: string[] = []
-  const controls: string[] = []
+  const controls: Array<{ path: string; confirmation?: string }> = []
+  const accountDeletions: unknown[] = []
   const exports: string[] = []
   const accountManifestImports: unknown[] = []
   const preferencePatches: unknown[] = []
@@ -51,6 +53,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       backupID,
       gcPlan,
       controls,
+      accountDeletions,
       exports,
       accountManifestImports,
       preferencePatches,
@@ -67,7 +70,7 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       ,onSavedQueries: (next) => { savedQueries = next }
     })
   })
-  return { requests, controls, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, proxyRemovals, resourceDownloads, albumTraversals }
+  return { requests, controls, accountDeletions, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, proxyRemovals, resourceDownloads, albumTraversals }
 }
 
 export async function expectOnlyLoopbackRequests(page: Page) {
@@ -86,7 +89,8 @@ interface State {
   readonly directory: { readonly token: string; readonly label: string }
   readonly backupID: string
   readonly gcPlan: boolean
-  readonly controls: string[]
+  readonly controls: Array<{ path: string; confirmation?: string }>
+  readonly accountDeletions: unknown[]
   readonly exports: string[]
   readonly accountManifestImports: unknown[]
   readonly preferencePatches: unknown[]
@@ -121,6 +125,11 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/login/complete') { state.onLoginState('authenticated'); return json(route, { state: 'authenticated', accountId: 'account-fixture', accountName: 'Fixture Account' }) }
   if (url.pathname === '/api/v1/session/logout') { state.onLoginState('unauthenticated'); return route.fulfill({ status: 204, body: '' }) }
 
+  if (url.pathname === '/api/v1/accounts' && method === 'DELETE') {
+    if (body?.confirm !== 'delete-accounts:account-fixture') return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Confirmation required' } }) })
+    state.accountDeletions.push(body)
+    return route.fulfill({ status: 204, body: '' })
+  }
   if (url.pathname === '/api/v1/accounts' || url.pathname === '/api/v1/accounts/search') return page(route, [{ id: 'account-fixture', name: 'Fixture Account', alias: 'fixture', articleCount: 2, lastSyncAt: now, syncCompleted: true }])
   if (url.pathname === '/api/v1/accounts/manifest') return route.fulfill({ contentType: 'application/json', headers: { 'content-disposition': 'attachment; filename="wechat-article-accounts-manifest.json"' }, body: '{"schemaVersion":1,"accounts":[]}' })
   if (url.pathname === '/api/v1/accounts/manifest/upload') return json(route, { handle: 'account-manifest-upload-fixture', sizeBytes: 24, sha256: 'e'.repeat(64), expiresAt: '2026-07-24T09:45:00.000Z' })
@@ -147,7 +156,12 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   }
   if (url.pathname === '/api/v1/jobs') return page(route, [{ id: 'job-fixture-1', kind: 'export', state: 'running', profile: 'fixture-profile', createdAt: now, updatedAt: now, counts: { completed: 1, total: 2 } }])
   if (url.pathname === '/api/v1/jobs/job-fixture-1/detail') return json(route, { job: { id: 'job-fixture-1', kind: 'export', state: 'running', profile: 'fixture-profile', createdAt: now, updatedAt: now, counts: { completed: 1, total: 2 } }, items: [{ id: 'item-fixture-1', state: 'completed', attemptCount: 1, createdAt: now, updatedAt: now }, { id: 'item-fixture-2', state: 'running', attemptCount: 2, errorClass: 'network', createdAt: now, updatedAt: now }], itemsTotal: 2, itemsLimited: false, logs: [{ id: 1, itemId: 'item-fixture-2', level: 'info', message: 'Sanitized local progress', createdAt: now }], lease: { active: true, expiresAt: '2026-07-24T09:35:00.000Z' }, refreshedAt: now })
-  if (/^\/api\/v1\/jobs\/job-fixture-1\/(pause|resume|retry|cancel)$/.test(url.pathname)) { state.controls.push(url.pathname); return json(route, { id: 'job-fixture-1', kind: 'export', state: url.pathname.endsWith('cancel') ? 'cancelled' : 'running', createdAt: now, updatedAt: now }) }
+  if (/^\/api\/v1\/jobs\/job-fixture-1\/(pause|resume|retry|cancel)$/.test(url.pathname)) {
+    const action = url.pathname.split('/').at(-1)
+    if (action !== 'resume' && body?.confirm !== `${action}-job:job-fixture-1`) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Confirmation required' } }) })
+    state.controls.push({ path: url.pathname, confirmation: typeof body?.confirm === 'string' ? body.confirm : undefined })
+    return json(route, { id: 'job-fixture-1', kind: 'export', state: url.pathname.endsWith('cancel') ? 'cancelled' : 'running', createdAt: now, updatedAt: now })
+  }
 
   if (url.pathname === '/api/v1/export-directories/authorize') return json(route, state.directory)
   if (url.pathname === '/api/v1/export-directories') { const name = String(body?.name || 'child'); const next = { token: `dir-${name}`, label: `Sanitized exports/${name}` }; state.onDirectory(next); return json(route, next) }

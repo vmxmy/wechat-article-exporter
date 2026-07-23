@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
+  controlJob,
+  deleteAccounts,
   deleteSavedQuery,
   getAccountPage,
   getAlbumPage,
@@ -82,14 +84,21 @@ describe('browser API client', () => {
     }))
   })
 
-  it('adds the CSRF proof and scoped confirmation for saved-query deletion', async () => {
+  it('sends caller-supplied exact confirmations for account and saved-query deletion', async () => {
     fetchMock
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
+      .mockResolvedValueOnce(jsonResponse({}))
       .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
       .mockResolvedValueOnce(jsonResponse({}))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(deleteSavedQuery('draft / query')).resolves.toBeUndefined()
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/saved-queries', {
+    await expect(deleteAccounts(['account / one'], 'user-account-proof')).resolves.toBeUndefined()
+    await expect(deleteSavedQuery('draft / query', 'user-query-proof')).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/accounts', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ ids: ['account / one'], confirm: 'user-account-proof' })
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/saved-queries', {
       method: 'DELETE',
       credentials: 'same-origin',
       headers: {
@@ -97,8 +106,22 @@ describe('browser API client', () => {
         'Content-Type': 'application/json',
         'X-CSRF-Token': 'csrf-fixture'
       },
-      body: JSON.stringify({ name: 'draft / query', confirm: 'delete-saved-query:draft / query' })
+      body: JSON.stringify({ name: 'draft / query', confirm: 'user-query-proof' })
     })
+  })
+
+  it('sends caller-supplied job proofs while leaving resume confirmation-free', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { id: 'job / one' } }))
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { id: 'job / one' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await controlJob('job / one', 'pause', 'user-pause-proof')
+    await controlJob('job / one', 'resume')
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/jobs/job%20%2F%20one/pause', expect.objectContaining({ body: JSON.stringify({ confirm: 'user-pause-proof' }) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/jobs/job%20%2F%20one/resume', expect.objectContaining({ body: '{}' }))
   })
 
   it('revokes the local session with the CSRF proof and accepts an empty response', async () => {
