@@ -88,6 +88,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		model.clampCursor()
 		return model, nil
+	case loginPollTickMsg:
+		if model.modal != modalLogin || model.busy {
+			return model, nil
+		}
+		return model, (&model).pollLoginCmd()
 	case actionResultMsg:
 		if !model.finishCommand(typed.generation) {
 			return model, nil
@@ -116,8 +121,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		model.loginFlow = typed.flow
 		model.modal = modalLogin
-		model.notice = "scan the QR code in WeChat, then press r to check status"
-		return model, nil
+		model.notice = "scan the QR code in WeChat; login status refreshes automatically"
+		return model, model.scheduleLoginPollCmd()
 	case loginPolledMsg:
 		if !model.finishCommand(typed.generation) {
 			return model, nil
@@ -138,7 +143,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			model.notice = "login status: " + string(typed.result.State)
 		}
-		return model, nil
+		return model, model.scheduleLoginPollCmd()
 	case loginCompletedMsg:
 		if !model.finishCommand(typed.generation) {
 			return model, nil
@@ -150,7 +155,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.session = typed.session
 		model.modal = modalNone
 		model.notice = "WeChat session authenticated"
-		return model, nil
+		model.loading = true
+		return model, model.loadWorkspaceCmd()
 	case previewLoadedMsg:
 		if !model.finishCommand(typed.generation) {
 			return model, nil
@@ -358,10 +364,7 @@ func (model Model) updateModalKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case modalLogin:
 		if value == "r" {
-			return model, model.beginCommand(func(ctx context.Context) tea.Msg {
-				result, err := model.options.Application.PollLogin(ctx)
-				return loginPolledMsg{result: result, err: err}
-			})
+			return model, (&model).pollLoginCmd()
 		}
 	}
 	return model, nil

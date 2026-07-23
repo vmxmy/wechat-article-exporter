@@ -403,7 +403,7 @@ func TestCompleteLoginPersistsTokenCookieAttributesAndIdentity(t *testing.T) {
 			if _, err := request.Cookie("bizuin"); err != nil {
 				t.Fatalf("missing authenticated cookie: %v", err)
 			}
-			io.WriteString(writer, `wx.cgiData.nick_name = "Fixture Account"; wx.cgiData.head_img = "https://example.invalid/avatar"; wx.cgiData.fakeid = "fixture-fakeid";`)
+			io.WriteString(writer, `wx.cgiData.nick_name = "Fixture&nbsp;Account"; wx.cgiData.head_img = "https://example.invalid/avatar"; wx.cgiData.fakeid = "fixture-fakeid";`)
 		default:
 			t.Fatalf("unexpected request %s", request.URL)
 		}

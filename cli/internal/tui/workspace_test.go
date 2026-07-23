@@ -276,6 +276,38 @@ func TestWorkspaceLoginCompletesAfterScannedStatus(t *testing.T) {
 	}
 }
 
+func TestWorkspaceLoginPollsAutomaticallyAndReloadsWorkspace(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	app.session = wechat.Session{State: wechat.SessionMissing}
+	app.loginPoll = wechat.PollResult{State: wechat.QRScanned, AccountCount: 1}
+	model := loadedWorkspace(t, app, nil)
+	model.modal = modalLogin
+
+	next, command := model.Update(loginPollTickMsg(time.Now()))
+	model = next.(Model)
+	if command == nil {
+		t.Fatal("automatic login poll command is nil")
+	}
+	next, command = model.Update(runCommand(t, command))
+	model = next.(Model)
+	if command == nil {
+		t.Fatal("login completion command is nil")
+	}
+	next, command = model.Update(runCommand(t, command))
+	model = next.(Model)
+	if command == nil || !model.loading {
+		t.Fatalf("workspace reload command=%v loading=%t", command, model.loading)
+	}
+	model = updateWorkspace(t, model, runCommand(t, command))
+
+	if model.session.State != wechat.SessionAuthenticated || model.modal != modalNone || model.loading {
+		t.Fatalf("session=%#v modal=%q loading=%t", model.session, model.modal, model.loading)
+	}
+	if !slices.Contains(app.calls, "PollLogin") || !slices.Contains(app.calls, "RuntimeStatus") {
+		t.Fatalf("application calls = %#v", app.calls)
+	}
+}
+
 func TestWorkspaceLoginModalRendersRasterQRAtModuleWidth(t *testing.T) {
 	app := newFakeWorkspaceApplication()
 	model := loadedWorkspace(t, app, nil)

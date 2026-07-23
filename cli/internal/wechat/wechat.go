@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
@@ -679,7 +680,11 @@ func (client *Client) fetchHome(ctx context.Context, token string) (homeInfo, er
 	if match := accountIDPattern.FindSubmatch(body); len(match) >= 2 {
 		accountID = string(match[1])
 	}
-	return homeInfo{AccountID: accountID, AccountName: string(nameMatch[1]), AvatarURL: avatar}, nil
+	return homeInfo{
+		AccountID:   accountID,
+		AccountName: strings.TrimSpace(strings.ReplaceAll(html.UnescapeString(string(nameMatch[1])), "\u00a0", " ")),
+		AvatarURL:   avatar,
+	}, nil
 }
 
 func (client *Client) request(ctx context.Context, method, path string, query url.Values, body io.Reader) (*http.Response, error) {

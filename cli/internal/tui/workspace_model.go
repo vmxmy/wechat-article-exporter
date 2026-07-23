@@ -124,6 +124,8 @@ type workspaceRefreshMsg struct {
 
 type workspaceRefreshTickMsg time.Time
 
+type loginPollTickMsg time.Time
+
 type actionResultMsg struct {
 	generation uint64
 	job        domain.Job
@@ -335,6 +337,17 @@ func (model Model) loadWorkspaceCmd() tea.Cmd {
 		return workspaceLoadedMsg{runtime: runtimeStatus, session: session, accounts: accounts, articles: articles,
 			albums: albums, jobs: jobsPage, exports: exportsPage, storage: storage, panels: panels, warning: warning}
 	}
+}
+
+func (model Model) scheduleLoginPollCmd() tea.Cmd {
+	return tea.Tick(2*time.Second, func(value time.Time) tea.Msg { return loginPollTickMsg(value) })
+}
+
+func (model *Model) pollLoginCmd() tea.Cmd {
+	return model.beginCommand(func(ctx context.Context) tea.Msg {
+		result, err := model.options.Application.PollLogin(ctx)
+		return loginPolledMsg{result: result, err: err}
+	})
 }
 
 func (model *Model) loadAreaCmd(area Area) tea.Cmd {
