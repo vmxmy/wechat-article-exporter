@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func runTUISmoke(ctx context.Context, binary string, environment []string) (map[string]string, error) {
+func runTUISmoke(ctx context.Context, binary string, environment []string) (evidence map[string]string, resultErr error) {
 	harnessContext, cancelHarness := context.WithCancel(ctx)
 	defer cancelHarness()
 	environment, err := candidateEnvironment(append(append([]string(nil), environment...),
@@ -25,7 +25,7 @@ func runTUISmoke(ctx context.Context, binary string, environment []string) (map[
 	}
 	defer func() {
 		cancelHarness()
-		_ = harness.close()
+		resultErr = errors.Join(resultErr, harness.close())
 	}()
 	if err := harness.start(harnessContext, binary, environment); err != nil {
 		return nil, fmt.Errorf("start candidate TUI in PTY: %w", err)
@@ -78,7 +78,9 @@ func runTUISmoke(ctx context.Context, binary string, environment []string) (map[
 	case <-time.After(10 * time.Second):
 		return nil, errors.New("candidate TUI did not exit after q")
 	}
-	_ = harness.close()
+	if err := harness.close(); err != nil {
+		return nil, fmt.Errorf("close candidate PTY: %w", err)
+	}
 	select {
 	case readErr := <-readDone:
 		if readErr != nil && !isPTYCompletionError(readErr) {

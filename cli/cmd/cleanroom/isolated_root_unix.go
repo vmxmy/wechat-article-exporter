@@ -22,15 +22,15 @@ func openIsolatedRoot(path string) (*isolatedRoot, error) {
 	}
 	parent := filepath.Dir(absolute)
 	name := filepath.Base(absolute)
+	if err := validateIsolatedRootAncestors(parent); err != nil {
+		return nil, err
+	}
 	parentFile, _, err := openDirectoryNoFollow(parent)
 	if err != nil {
 		return nil, err
 	}
 	defer parentFile.Close()
 	parentFD := int(parentFile.Fd())
-	if err := validateIsolatedRootParent(parentFD); err != nil {
-		return nil, err
-	}
 	fd, err := unix.Openat(parentFD, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_DIRECTORY, 0)
 	if errors.Is(err, unix.ENOENT) {
 		if mkdirErr := unix.Mkdirat(parentFD, name, 0o700); mkdirErr != nil && !errors.Is(mkdirErr, unix.EEXIST) {
@@ -52,18 +52,55 @@ func openIsolatedRoot(path string) (*isolatedRoot, error) {
 	return &isolatedRoot{fd: fd}, nil
 }
 
-func validateIsolatedRootParent(fd int) error {
+func validateIsolatedRootAncestors(path string) error {
+	components, err := unixNoFollowPathComponents(path)
+	if err != nil {
+		return err
+	}
+	fd, err := unix.Open(string(filepath.Separator), unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_DIRECTORY, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(fd) }()
+	if err := validateIsolatedRootAncestor(fd, string(filepath.Separator)); err != nil {
+		return err
+	}
+	for _, component := range components {
+		nextFD, openErr := unix.Openat(fd, component, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_DIRECTORY, 0)
+		if openErr != nil {
+			return fmt.Errorf("open isolated root ancestor %q: %w", component, openErr)
+		}
+		_ = unix.Close(fd)
+		fd = nextFD
+		if err := validateIsolatedRootAncestor(fd, component); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateIsolatedRootAncestor(fd int, component string) error {
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return err
 	}
-	if stat.Uid != uint32(unix.Geteuid()) {
-		return errors.New("isolated root parent is not owned by the current user")
+	if stat.Mode&unix.S_IFMT != unix.S_IFDIR {
+		return fmt.Errorf("isolated root ancestor %q is not a directory", component)
 	}
-	if stat.Mode&0o022 != 0 {
-		return errors.New("isolated root parent must not be group or world writable")
+	uid := uint32(unix.Geteuid())
+	if stat.Uid == uid && stat.Mode&0o022 == 0 {
+		return nil
 	}
-	return nil
+	// A root-owned sticky directory (for example /tmp) cannot have an entry
+	// owned by this user replaced by another unprivileged user. It is safe only
+	// as an ancestor; the next component still undergoes its own validation.
+	if stat.Uid == 0 && stat.Mode&unix.S_ISVTX != 0 {
+		return nil
+	}
+	if stat.Uid == 0 && stat.Mode&0o022 == 0 {
+		return nil
+	}
+	return fmt.Errorf("isolated root ancestor %q is not trusted", component)
 }
 
 func validateIsolatedRootDirectory(fd int) error {
