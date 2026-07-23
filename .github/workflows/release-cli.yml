@@ -197,7 +197,8 @@ jobs:
       - name: Verify browser workspace and checked-in Go assets
         run: |
           set -euo pipefail
-          pnpm run lint
+          pnpm run check
+          pnpm run test
           pnpm run build
           pnpm run verify:go-assets
           pnpm run check:release-size
