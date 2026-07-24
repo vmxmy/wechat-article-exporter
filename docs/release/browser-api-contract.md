@@ -245,9 +245,20 @@ ordinary additive evolution.
 
 | Classification | Routes | Response | Stable identity / request lifetime |
 | --- | --- | --- | --- |
+| Synchronous, bounded session-account switch | `POST /session/accounts/{id}/switch` | `200 OK` with the safe workspace-session DTO | Creates no browser job. The authenticated mutation requires the exact loopback Host before routing, then an authenticated local session, exact loopback `Origin`, and CSRF proof. Its `{id}` path input is limited to 1–128 ASCII letters, digits, `-`, or `_`; an invalid identifier is `400 invalid_argument` and a malformed route shape is `404 not_found`. The response excludes session credentials. |
 | Synchronous, bounded mutation | Login polling/completion and logout; account, saved-query, directory, credential, proxy, preference, backup, integrity/GC, diagnostic-bundle, manifest/credential upload/import, and restore controls | `200 OK`, `201 Created`, or `204 No Content`, according to the resource operation | Returns the bounded resource/result/opaque capability, or no body. It does not create a browser job unless the underlying application operation explicitly does so. |
 | Persistent job creation | `POST /accounts/{id}/sync`; `/ingest/url`; `/articles/download`; `/articles/metadata`; `/articles/comments`; `/articles/resources`; `/albums/{id}/traverse`; `/albums/traverse`; `/exports/start` | `202 Accepted` | The first eight routes return the shared persistent job DTO with its stable `id`; `POST /albums/traverse` accepts 1–50 unique stable local `albumIds`, order, and optional download intent, then queues one durable album operation. Export start returns `{ "jobId": "<stable persistent job id>" }`. The handler only queues shared application work and never waits for job execution. |
 | Persistent job control | `POST /jobs/{id}/pause`; `/resume`; `/retry`; `/cancel` | `200 OK` | Returns the shared job DTO after the permitted state transition. Its `id` remains the route job ID, so clients continue observing the same persistent job. |
+
+`GET /api/v1/session/accounts` is an authenticated read (`401` without the
+local browser session) that returns `200 OK` with the safe switchable-account
+DTO: only `id`, `name`, and optional `alias`, plus the availability state. It
+does not expose the upstream account payload, session credentials, resource
+locations, or local storage references. The focused
+`TestSessionAccountSwitchingAPIUsesSafeWorkspaceDTOs`
+(`cli/internal/web/api_test.go`) exercises the read authentication and safe
+DTO redaction, the switch's successful `200` response without the session
+secret, invalid path input, and rejected cross-origin mutation.
 
 The handler tests cover every route in the two persistent-job rows, asserting
 both its status and the exact fixture job ID. This makes the classification

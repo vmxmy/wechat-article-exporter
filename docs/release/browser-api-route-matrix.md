@@ -20,6 +20,7 @@ presence or absence of at least one asserting test per cell.
 | --- | --- | --- | --- | --- | --- |
 | `GET /runtime` | ✓ | ✓ | – (no query params) | ✓ | `TestReadAPIProvidesVersionedBoundedWorkspaceData`, `TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries` (auth), inline runtime-path-leak assertion in `TestReadAPIProvidesVersionedBoundedWorkspaceData` |
 | `GET /session` | ✓ | ✓ | – | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData` |
+| `GET /session/accounts` | ✓ | ✓ (`200` + safe switchable-account DTO) | – (no query params) | ✓ (identity-only DTO excludes upstream payload, session credentials, resource locations, and local storage references) | `TestSessionAccountSwitchingAPIUsesSafeWorkspaceDTOs` |
 | `GET /accounts` | ✓ | ✓ | ✓ (`sort=name` unsupported param) | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData`, `TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries` |
 | `GET /accounts/manifest` | (shared with control auth) | – | – | – | none found; see Manifest control family below for the export/import path |
 | `GET /accounts/search` | ✓ (shared middleware) | ✓ | – | – | `TestAccountCRUDAndSearchUseAuthenticatedWorkspaceFacade` |
@@ -44,6 +45,7 @@ presence or absence of at least one asserting test per cell.
 | --- | --- | --- | --- | --- | --- |
 | `POST /login/begin`, `/login/poll`, `/login/complete` | ✓ (shared CSRF/Origin middleware via `apiMutation`) | ✓ | – | – | `TestControlAPIUsesWorkspaceFacadeWithExactConfirmations` |
 | `POST /session/logout` | ✓ | ✓ (204, application logout invoked) | – | – | `TestControlAPIUsesWorkspaceFacadeWithExactConfirmations` |
+| `POST /session/accounts/{id}/switch` | ✓ (exact loopback Host enforced before routing; authenticated session plus exact loopback Origin and CSRF proof) | ✓ (`200` + safe workspace-session DTO) | ✓ (`id` is a 1–128-character ASCII letter/digit/`-`/`_` path segment; invalid identifiers return `400 invalid_argument`, malformed route shapes return `404`) | ✓ (response omits session credentials; switchable-account read DTO is identity-only) | `TestSessionAccountSwitchingAPIUsesSafeWorkspaceDTOs` |
 | `POST /accounts/{id}/sync` | ✓ | ✓ (`202` + stable job ID; incremental and full modes) | – | – | `TestControlAPIUsesWorkspaceFacadeWithExactConfirmations` |
 | `POST /ingest/url` | ✓ | ✓ (`202` + stable job ID) | – | – | `TestControlAPIUsesWorkspaceFacadeWithExactConfirmations` |
 | `POST /articles/download`, `/articles/metadata`, `/articles/comments`, `/articles/resources` | ✓ | ✓ (`202` + stable job ID per kind) | – | – | `TestControlAPIUsesWorkspaceFacadeWithExactConfirmations` |
