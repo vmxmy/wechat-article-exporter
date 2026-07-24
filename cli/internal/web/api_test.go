@@ -59,6 +59,77 @@ func TestReadAPIProvidesVersionedBoundedWorkspaceData(t *testing.T) {
 	}
 }
 
+func TestSessionAccountSwitchingAPIUsesSafeWorkspaceDTOs(t *testing.T) {
+	app := &apiApplication{
+		switchable: []wechat.SwitchableAccount{{ID: "account-1", Name: "Fixture", AvatarURL: "https://sensitive.example/avatar", Alias: "fixture"}},
+		switched:   wechat.Session{State: wechat.SessionAuthenticated, AccountID: "account-1", AccountName: "Fixture", Token: "session-secret"},
+	}
+	server, client := startAPIApplicationServer(t, app)
+	base := strings.TrimSuffix(strings.Split(server.URL(), "?")[0], "/")
+
+	response := get(t, client, base+"/api/v1/session/accounts")
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated GET status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	base = authorizeAPI(t, client, server.URL())
+	response = get(t, client, base+"/api/v1/session/accounts")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	body := readResponse(t, response)
+	for _, forbidden := range []string{"session-secret", "token", "resource", "digest", "path", "sensitive.example"} {
+		if strings.Contains(strings.ToLower(body), forbidden) {
+			t.Fatalf("switchable account response leaked %q: %s", forbidden, body)
+		}
+	}
+	var accounts application.WorkspaceSwitchableAccounts
+	if err := json.Unmarshal([]byte(body), &accounts); err != nil || !accounts.Available || len(accounts.Accounts) != 1 || accounts.Accounts[0].ID != "account-1" {
+		t.Fatalf("accounts=%#v err=%v", accounts, err)
+	}
+
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+	request := requestWith(t, http.MethodPost, base+"/api/v1/session/accounts/account-1/switch", strings.NewReader(`{}`), map[string]string{"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf})
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("switch status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	body = readResponse(t, response)
+	if strings.Contains(body, "session-secret") || app.switchedAccountID != "account-1" {
+		t.Fatalf("switch response=%s account=%q", body, app.switchedAccountID)
+	}
+
+	for _, request := range []*http.Request{
+		requestWith(t, http.MethodGet, base+"/api/v1/session/accounts/account-1/switch", nil, nil),
+		requestWith(t, http.MethodPost, base+"/api/v1/session/accounts/%2e%2e%2Fsecret/switch", strings.NewReader(`{}`), map[string]string{"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf}),
+		requestWith(t, http.MethodPost, base+"/api/v1/session/accounts/account-1/switch", strings.NewReader(`{}`), map[string]string{"Origin": "http://evil.example", "Content-Type": "application/json", "X-CSRF-Token": csrf}),
+	} {
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusBadRequest && response.StatusCode != http.StatusForbidden && response.StatusCode != http.StatusMethodNotAllowed && response.StatusCode != http.StatusNotFound {
+			t.Fatalf("request %s %s status=%d body=%s", request.Method, request.URL, response.StatusCode, readResponse(t, response))
+		}
+		response.Body.Close()
+	}
+
+	app.switchableErr = wechat.ErrAccountSwitching
+	response = get(t, client, base+"/api/v1/session/accounts")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unavailable GET status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	if err := json.NewDecoder(response.Body).Decode(&struct {
+		Data application.WorkspaceSwitchableAccounts `json:"data"`
+	}{}); err != nil {
+		response.Body.Close()
+		t.Fatal(err)
+	}
+	response.Body.Close()
+}
+
 func TestSnapshotPollingRevisionAdvancesOnlyForObservedStateChanges(t *testing.T) {
 	now := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
 	app := &apiApplication{
@@ -742,6 +813,10 @@ type apiApplication struct {
 	savedName            string
 	savedQuery           domain.ArticleQuery
 	deletedSavedName     string
+	switchable           []wechat.SwitchableAccount
+	switchableErr        error
+	switched             wechat.Session
+	switchedAccountID    string
 }
 
 func (app *apiApplication) BeginLogin(_ context.Context, id string) (wechat.LoginFlow, error) {
@@ -824,6 +899,13 @@ func (app *apiApplication) RuntimeStatus(context.Context) (domain.RuntimeStatus,
 }
 func (app *apiApplication) SessionStatus(context.Context) (wechat.Session, error) {
 	return app.session, nil
+}
+func (app *apiApplication) ListSwitchableAccounts(context.Context) ([]wechat.SwitchableAccount, error) {
+	return append([]wechat.SwitchableAccount(nil), app.switchable...), app.switchableErr
+}
+func (app *apiApplication) SwitchAccount(_ context.Context, accountID string) (wechat.Session, error) {
+	app.switchedAccountID = accountID
+	return app.switched, nil
 }
 func (app *apiApplication) QueryAccounts(_ context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
 	app.accountQuery = query

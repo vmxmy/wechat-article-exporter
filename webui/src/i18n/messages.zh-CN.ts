@@ -68,6 +68,13 @@ export const zhCN = {
     logout: '退出登录',
     logoutComplete: '已退出本地会话。',
     logoutUnavailable: '无法退出本地会话。',
+    switchTitle: '切换账号',
+    switchAccount: '可切换账号',
+    switchChecking: '正在检查可切换账号…',
+    switchEmpty: '没有其他可切换账号。',
+    switchUnavailable: '当前本地会话暂不支持切换账号。',
+    switching: '正在切换账号…',
+    switchComplete: (name: string) => `已切换至 ${name}。`,
     states: { authenticated: '已登录', unauthenticated: '未登录', waiting: '等待扫码', scanned: '已扫码', confirmed: '已确认', expired: '已过期', completed: '已完成' }
   },
   import: {

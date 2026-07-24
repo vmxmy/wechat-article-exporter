@@ -171,6 +171,23 @@ type WorkspaceSession struct {
 	Validation      string              `json:"validation,omitempty"`
 }
 
+// WorkspaceSwitchableAccount is the browser-safe identity projection used by
+// account switching. It intentionally excludes the upstream account payload,
+// session credentials, resource locations, and any local storage references.
+type WorkspaceSwitchableAccount struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Alias string `json:"alias,omitempty"`
+}
+
+// WorkspaceSwitchableAccounts makes an unavailable upstream capability
+// distinguishable from an available account list without surfacing an
+// upstream error or any internal capability detail.
+type WorkspaceSwitchableAccounts struct {
+	Available bool                         `json:"available"`
+	Accounts  []WorkspaceSwitchableAccount `json:"accounts"`
+}
+
 type WorkspaceAccountQuery struct {
 	Keyword string               `json:"keyword,omitempty"`
 	Page    WorkspacePageRequest `json:"page"`
@@ -363,6 +380,8 @@ type WorkspaceController interface {
 	PollLogin(context.Context) (wechat.PollResult, error)
 	CompleteLogin(context.Context) (WorkspaceSession, error)
 	Logout(context.Context) error
+	SwitchableAccounts(context.Context) (WorkspaceSwitchableAccounts, error)
+	SwitchAccount(context.Context, string) (WorkspaceSession, error)
 	SynchronizeAccount(context.Context, domain.SynchronizeAccountRequest) (domain.Job, error)
 	SynchronizeAlbum(context.Context, WorkspaceAlbumTraversalRequest) (domain.Job, error)
 	StartDownload(context.Context, domain.DownloadRequest) (domain.Job, error)
@@ -511,6 +530,50 @@ func (workspace *Workspace) CompleteLogin(ctx context.Context) (WorkspaceSession
 
 func (workspace *Workspace) Logout(ctx context.Context) error {
 	return workspaceError(workspace.application.Logout(ctx))
+}
+
+func (workspace *Workspace) SwitchableAccounts(ctx context.Context) (WorkspaceSwitchableAccounts, error) {
+	accounts, err := workspace.application.ListSwitchableAccounts(ctx)
+	if errors.Is(err, wechat.ErrAccountSwitching) || errors.Is(err, ErrUnavailable) {
+		return WorkspaceSwitchableAccounts{Available: false, Accounts: []WorkspaceSwitchableAccount{}}, nil
+	}
+	if err != nil {
+		return WorkspaceSwitchableAccounts{}, workspaceError(err)
+	}
+	items := make([]WorkspaceSwitchableAccount, 0, len(accounts))
+	for _, account := range accounts {
+		id := strings.TrimSpace(account.ID)
+		if id == "" {
+			continue
+		}
+		items = append(items, WorkspaceSwitchableAccount{ID: id, Name: strings.TrimSpace(account.Name), Alias: strings.TrimSpace(account.Alias)})
+	}
+	return WorkspaceSwitchableAccounts{Available: true, Accounts: items}, nil
+}
+
+func (workspace *Workspace) SwitchAccount(ctx context.Context, accountID string) (WorkspaceSession, error) {
+	accountID = strings.TrimSpace(accountID)
+	if !validWorkspaceSwitchableAccountID(accountID) {
+		return WorkspaceSession{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "account identifier is invalid"}
+	}
+	session, err := workspace.application.SwitchAccount(ctx, accountID)
+	if err != nil {
+		return WorkspaceSession{}, workspaceError(err)
+	}
+	return workspaceSession(session), nil
+}
+
+func validWorkspaceSwitchableAccountID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '-' || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (workspace *Workspace) SynchronizeAccount(ctx context.Context, request domain.SynchronizeAccountRequest) (domain.Job, error) {

@@ -73,6 +73,8 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		server.runtime(writer, request)
 	case "/api/v1/session":
 		server.session(writer, request)
+	case "/api/v1/session/accounts":
+		server.switchableAccounts(writer, request)
 	case "/api/v1/accounts":
 		server.accounts(writer, request)
 	case "/api/v1/accounts/manifest":
@@ -98,6 +100,11 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 	case "/api/v1/exports":
 		server.exportsList(writer, request)
 	default:
+		if strings.HasPrefix(request.URL.Path, "/api/v1/session/accounts/") {
+			writer.Header().Set("Allow", http.MethodPost)
+			server.apiError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "method is not allowed")
+			return
+		}
 		if server.exportRead(writer, request) {
 			return
 		}
@@ -160,6 +167,15 @@ func (server *Server) runtime(writer http.ResponseWriter, request *http.Request)
 
 func (server *Server) session(writer http.ResponseWriter, request *http.Request) {
 	value, err := server.workspace.Session(request.Context())
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusOK, value)
+}
+
+func (server *Server) switchableAccounts(writer http.ResponseWriter, request *http.Request) {
+	value, err := server.workspace.SwitchableAccounts(request.Context())
 	if err != nil {
 		server.workspaceError(writer, err)
 		return

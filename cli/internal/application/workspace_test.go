@@ -216,6 +216,41 @@ func TestWorkspaceArticleResourcesReturnsSafeCompletenessAggregate(t *testing.T)
 	}
 }
 
+func TestWorkspaceAccountSwitchingProjectsOnlySafeIdentityAndSessionFields(t *testing.T) {
+	service := New(Options{Session: &workspaceSessionGateway{
+		switchable: []wechat.SwitchableAccount{{ID: " account-1 ", Name: " Fixture ", AvatarURL: "https://safe.example/avatar", Alias: " fixture "}, {Name: "discarded"}},
+		switched:   wechat.Session{State: wechat.SessionAuthenticated, AccountID: "account-1", AccountName: "Fixture", Token: "session-secret"},
+	}})
+	workspace := NewWorkspace(service)
+
+	accounts, err := workspace.SwitchableAccounts(context.Background())
+	if err != nil || !accounts.Available || len(accounts.Accounts) != 1 || accounts.Accounts[0] != (WorkspaceSwitchableAccount{ID: "account-1", Name: "Fixture", Alias: "fixture"}) {
+		t.Fatalf("SwitchableAccounts() = %#v, %v", accounts, err)
+	}
+	encoded, err := json.Marshal(accounts)
+	if err != nil || strings.Contains(string(encoded), "session-secret") || strings.Contains(string(encoded), "safe.example") {
+		t.Fatalf("switchable account JSON = %s, %v", encoded, err)
+	}
+
+	session, err := workspace.SwitchAccount(context.Background(), "account-1")
+	if err != nil || session.AccountID != "account-1" || session.AccountName != "Fixture" {
+		t.Fatalf("SwitchAccount() = %#v, %v", session, err)
+	}
+	encoded, err = json.Marshal(session)
+	if err != nil || strings.Contains(string(encoded), "session-secret") {
+		t.Fatalf("switched session JSON = %s, %v", encoded, err)
+	}
+	if _, err = workspace.SwitchAccount(context.Background(), "../session-secret"); err == nil {
+		t.Fatal("SwitchAccount accepted an unsafe identifier")
+	}
+
+	unavailable := NewWorkspace(New(Options{Session: &workspaceSessionGateway{switchableErr: wechat.ErrAccountSwitching}}))
+	accounts, err = unavailable.SwitchableAccounts(context.Background())
+	if err != nil || accounts.Available || len(accounts.Accounts) != 0 {
+		t.Fatalf("unavailable SwitchableAccounts() = %#v, %v", accounts, err)
+	}
+}
+
 func TestWorkspaceArticleDetailReturnsBoundedSafeMetricsAndResources(t *testing.T) {
 	capturedAt := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
 	service := New(Options{Library: &workspaceLibrary{
@@ -351,6 +386,32 @@ type workspaceControlApplication struct {
 	albumDownload bool
 	albumOrder    wechat.AlbumOrder
 }
+
+type workspaceSessionGateway struct {
+	switchable    []wechat.SwitchableAccount
+	switchableErr error
+	switched      wechat.Session
+}
+
+func (*workspaceSessionGateway) BeginLogin(context.Context, string) (wechat.LoginFlow, error) {
+	return wechat.LoginFlow{}, nil
+}
+func (*workspaceSessionGateway) PollLogin(context.Context) (wechat.PollResult, error) {
+	return wechat.PollResult{}, nil
+}
+func (*workspaceSessionGateway) CompleteLogin(context.Context) (wechat.Session, error) {
+	return wechat.Session{}, nil
+}
+func (*workspaceSessionGateway) SessionStatus(context.Context) (wechat.Session, error) {
+	return wechat.Session{}, nil
+}
+func (gateway *workspaceSessionGateway) ListSwitchableAccounts(context.Context) ([]wechat.SwitchableAccount, error) {
+	return append([]wechat.SwitchableAccount(nil), gateway.switchable...), gateway.switchableErr
+}
+func (gateway *workspaceSessionGateway) SwitchAccount(context.Context, string) (wechat.Session, error) {
+	return gateway.switched, nil
+}
+func (*workspaceSessionGateway) Logout(context.Context) error { return nil }
 
 func (application *workspaceControlApplication) GetArticle(ctx context.Context, id domain.ArticleID) (domain.Article, error) {
 	return application.Service.library.(*workspaceLibrary).GetArticle(ctx, id)

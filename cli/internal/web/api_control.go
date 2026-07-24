@@ -57,73 +57,114 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 		server.loginComplete(writer, request)
 	case "/api/v1/session/logout":
 		server.logout(writer, request)
-	case "/api/v1/accounts":
-		switch request.Method {
-		case http.MethodPost:
-			// Preserve the read endpoint's historical method contract when a
-			// browser has not supplied mutation credentials.
-			if _, ok := server.authorizeMutation(request); !ok {
-				return false
-			}
-			server.accountSave(writer, request)
-		case http.MethodDelete:
-			if _, ok := server.authorizeMutation(request); !ok {
-				return false
-			}
-			server.accountDelete(writer, request)
-		default:
-			return false
-		}
-	case "/api/v1/accounts/search":
-		return false
-	case "/api/v1/ingest/url":
-		server.ingestURL(writer, request)
-	case "/api/v1/articles/download":
-		server.articleDownload(writer, request)
-	case "/api/v1/articles/metadata":
-		server.articleDownloadKind(writer, request, "metadata")
-	case "/api/v1/articles/comments":
-		server.articleDownloadKind(writer, request, "comments")
-	case "/api/v1/articles/resources":
-		server.articleDownloadKind(writer, request, "resources")
-	case "/api/v1/albums/traverse":
-		server.albumsTraverse(writer, request)
 	default:
-		if server.exportControl(writer, request) {
-			return true
-		}
-		if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/accounts/"); ok {
-			if accountID, suffix, found := strings.Cut(id, "/"); found && suffix == "sync" {
-				server.accountSync(writer, request, domain.AccountID(accountID))
-			} else if !found {
-				server.accountUpdate(writer, request, domain.AccountID(id))
-			} else {
-				return false
-			}
-		} else if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/jobs/"); ok {
-			jobID, action, found := strings.Cut(id, "/")
-			if !found {
-				return false
-			}
-			if !validJobID(jobID) {
-				server.apiError(writer, http.StatusBadRequest, "invalid_argument", "job identifier is invalid")
+		if suffix, ok := strings.CutPrefix(request.URL.Path, "/api/v1/session/accounts/"); ok {
+			accountID, action, hasAction := strings.Cut(suffix, "/")
+			if accountID == "" || !hasAction || action != "switch" || strings.Contains(accountID, "/") {
+				server.apiError(writer, http.StatusNotFound, "not_found", "workspace resource was not found")
 				return true
 			}
-			switch action {
-			case "cancel", "pause", "resume", "retry":
-				server.jobControl(writer, request, domain.JobID(jobID), action)
-			default:
-				return false
-			}
-		} else if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/albums/"); ok {
-			albumID, action, found := strings.Cut(id, "/")
-			if !found || action != "traverse" {
-				return false
-			}
-			server.albumTraverse(writer, request, domain.AlbumID(albumID))
+			server.sessionAccountSwitch(writer, request, accountID)
 		} else {
-			return false
+			switch request.URL.Path {
+			case "/api/v1/accounts":
+				switch request.Method {
+				case http.MethodPost:
+					// Preserve the read endpoint's historical method contract when a
+					// browser has not supplied mutation credentials.
+					if _, ok := server.authorizeMutation(request); !ok {
+						return false
+					}
+					server.accountSave(writer, request)
+				case http.MethodDelete:
+					if _, ok := server.authorizeMutation(request); !ok {
+						return false
+					}
+					server.accountDelete(writer, request)
+				default:
+					return false
+				}
+			case "/api/v1/accounts/search":
+				return false
+			case "/api/v1/ingest/url":
+				server.ingestURL(writer, request)
+			case "/api/v1/articles/download":
+				server.articleDownload(writer, request)
+			case "/api/v1/articles/metadata":
+				server.articleDownloadKind(writer, request, "metadata")
+			case "/api/v1/articles/comments":
+				server.articleDownloadKind(writer, request, "comments")
+			case "/api/v1/articles/resources":
+				server.articleDownloadKind(writer, request, "resources")
+			case "/api/v1/albums/traverse":
+				server.albumsTraverse(writer, request)
+			default:
+				if server.exportControl(writer, request) {
+					return true
+				}
+				if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/accounts/"); ok {
+					if accountID, suffix, found := strings.Cut(id, "/"); found && suffix == "sync" {
+						server.accountSync(writer, request, domain.AccountID(accountID))
+					} else if !found {
+						server.accountUpdate(writer, request, domain.AccountID(id))
+					} else {
+						return false
+					}
+				} else if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/jobs/"); ok {
+					jobID, action, found := strings.Cut(id, "/")
+					if !found {
+						return false
+					}
+					if !validJobID(jobID) {
+						server.apiError(writer, http.StatusBadRequest, "invalid_argument", "job identifier is invalid")
+						return true
+					}
+					switch action {
+					case "cancel", "pause", "resume", "retry":
+						server.jobControl(writer, request, domain.JobID(jobID), action)
+					default:
+						return false
+					}
+				} else if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/albums/"); ok {
+					albumID, action, found := strings.Cut(id, "/")
+					if !found || action != "traverse" {
+						return false
+					}
+					server.albumTraverse(writer, request, domain.AlbumID(albumID))
+				} else {
+					return false
+				}
+			}
 		}
+	}
+	return true
+}
+
+func (server *Server) sessionAccountSwitch(writer http.ResponseWriter, request *http.Request, accountID string) {
+	if !server.apiMutation(writer, request, http.MethodPost) {
+		return
+	}
+	if !applicationValidSwitchableAccountID(accountID) {
+		server.apiError(writer, http.StatusBadRequest, "invalid_argument", "account identifier is invalid")
+		return
+	}
+	value, err := server.workspace.SwitchAccount(request.Context(), accountID)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusOK, value)
+}
+
+func applicationValidSwitchableAccountID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '-' || character == '_' {
+			continue
+		}
+		return false
 	}
 	return true
 }

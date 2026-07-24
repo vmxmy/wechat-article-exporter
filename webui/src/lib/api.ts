@@ -73,6 +73,17 @@ export interface SessionStatus {
   readonly validation?: string
 }
 
+export interface SwitchableAccount {
+  readonly id: string
+  readonly name: string
+  readonly alias?: string
+}
+
+export interface SwitchableAccounts {
+  readonly available: boolean
+  readonly accounts: readonly SwitchableAccount[]
+}
+
 export interface AccountRecord {
   readonly id: string
   readonly fakeid?: string
@@ -456,6 +467,10 @@ export async function getSessionStatus(signal?: AbortSignal): Promise<SessionSta
   return request<SessionStatus>(`${apiBase}/session`, { signal })
 }
 
+export async function getSwitchableAccounts(signal?: AbortSignal): Promise<SwitchableAccounts> {
+  return request<SwitchableAccounts>(`${apiBase}/session/accounts`, { signal })
+}
+
 export async function getStorageStatus(signal?: AbortSignal): Promise<StorageStatus> {
   return request<StorageStatus>(`${apiBase}/storage`, { signal })
 }
@@ -473,6 +488,9 @@ export async function beginLogin(sessionId: string): Promise<LoginFlow> { return
 export async function pollLogin(): Promise<LoginPollResult> { return mutate<LoginPollResult>('login/poll', 'POST', {}) }
 export async function completeLogin(): Promise<SessionStatus> { return mutate<SessionStatus>('login/complete', 'POST', {}) }
 export async function logout(): Promise<void> { await mutate<void>('session/logout', 'POST', {}) }
+export async function switchAccount(id: string): Promise<SessionStatus> {
+  return mutate<SessionStatus>(`session/accounts/${encodeURIComponent(id)}/switch`, 'POST', {})
+}
 export async function searchAccounts(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<AccountRecord>> { return getPage<AccountRecord>('accounts/search', params, signal) }
 export async function saveAccount(input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>('accounts', 'POST', input) }
 export async function updateAccount(id: string, input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>(`accounts/${encodeURIComponent(id)}`, 'PATCH', input) }

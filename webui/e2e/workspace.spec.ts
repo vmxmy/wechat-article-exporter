@@ -11,11 +11,24 @@ test('sanitized loopback fixture covers QR login and logout UI', async ({ page }
   await expect(page.getByText('Scanned', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Complete login' }).click()
   await expect(page.getByText('Authenticated', { exact: true })).toBeVisible()
+  await page.getByRole('combobox', { name: 'Eligible account' }).selectOption('account-fixture-2')
+  await expect(page.getByRole('status').filter({ hasText: 'Switched to Second Fixture Account.' })).toBeVisible()
+  expect(fixture.accountSwitches).toEqual(['account-fixture-2'])
   await page.getByRole('button', { name: 'Log out' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Signed out of the local session.' })).toBeVisible()
   await expect(page.getByText('Not signed in', { exact: true })).toBeVisible()
   expect(fixture.requests).toContain('POST /api/v1/session/logout')
   await expectOnlyLoopbackRequests(page)
+})
+
+test('login clearly reports unavailable account switching', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.route('**/api/v1/session/accounts', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ apiVersion: 'v1', data: { available: false, accounts: [] } }) }))
+  await page.goto('/login')
+  await page.getByRole('button', { name: 'Start QR login' }).click()
+  await page.getByRole('button', { name: 'Poll login status' }).click()
+  await page.getByRole('button', { name: 'Complete login' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Account switching is not available for this local session.' })).toBeVisible()
 })
 
 test('sanitized account and article selections remain browser-local', async ({ page }) => {

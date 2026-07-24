@@ -68,6 +68,13 @@ export const en = {
     logout: 'Log out',
     logoutComplete: 'Signed out of the local session.',
     logoutUnavailable: 'The local session could not be signed out.',
+    switchTitle: 'Switch account',
+    switchAccount: 'Eligible account',
+    switchChecking: 'Checking eligible accounts…',
+    switchEmpty: 'No other eligible accounts are available.',
+    switchUnavailable: 'Account switching is not available for this local session.',
+    switching: 'Switching account…',
+    switchComplete: (name: string) => `Switched to ${name}.`,
     states: { authenticated: 'Authenticated', unauthenticated: 'Not signed in', waiting: 'Waiting for scan', scanned: 'Scanned', confirmed: 'Confirmed', expired: 'Expired', completed: 'Completed' }
   },
   import: {

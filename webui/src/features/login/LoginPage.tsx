@@ -1,10 +1,11 @@
 import { Button } from '@astryxdesign/core/Button'
 import { useCallback, useEffect, useState } from 'react'
 import type { MessageCatalog } from '../../i18n'
-import { useSessionStatus, useWorkspaceMutations } from '../../lib/queries'
+import { useSessionStatus, useSwitchableAccounts, useWorkspaceMutations } from '../../lib/queries'
 
 export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
   const session = useSessionStatus()
+  const switchableAccounts = useSwitchableAccounts(session.data?.state === 'authenticated')
   const mutations = useWorkspaceMutations()
   const [loginSessionId, setLoginSessionId] = useState('')
   const [qrCode, setQRCode] = useState<string>()
@@ -42,6 +43,13 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
     onSuccess: () => { setError(undefined); setNotice(messages.login.logoutComplete); setQRCode(undefined); setLoginState(undefined) },
     onError: (reason) => setError(reason instanceof Error ? reason.message : messages.login.logoutUnavailable)
   })
+  const switchIdentity = (id: string) => mutations.switchAccount.mutate(id, {
+    onSuccess: (nextSession) => {
+      setError(undefined)
+      setNotice(messages.login.switchComplete(nextSession.accountName ?? id))
+    },
+    onError: (reason) => setError(reason instanceof Error ? reason.message : messages.login.switchUnavailable)
+  })
   return (
     <section aria-labelledby="login-title">
       <header className="page-heading">
@@ -58,6 +66,22 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
           {session.isError ? <p role="alert">{messages.login.unavailable}</p> : null}
           {session.data ? <dl className="facts-list"><div><dt>{messages.login.account}</dt><dd>{session.data.accountName ?? '—'}</dd></div><div><dt>{messages.login.state}</dt><dd>{messages.login.states[session.data.state] ?? session.data.state}</dd></div></dl> : null}
           {session.data?.state === 'authenticated' ? <div className="action-button-group"><Button label={messages.login.logout} variant="destructive" isLoading={mutations.logout.isPending} onClick={logout} /></div> : null}
+        </section>
+        <section className="workspace-panel" aria-labelledby="account-switch-title">
+          <h2 id="account-switch-title">{messages.login.switchTitle}</h2>
+          {session.data?.state === 'authenticated' && switchableAccounts.isLoading ? <p role="status">{messages.login.switchChecking}</p> : null}
+          {session.data?.state === 'authenticated' && switchableAccounts.isError ? <p role="alert">{messages.login.switchUnavailable}</p> : null}
+          {session.data?.state === 'authenticated' && switchableAccounts.data && !switchableAccounts.data.available ? <p role="status">{messages.login.switchUnavailable}</p> : null}
+          {session.data?.state === 'authenticated' && switchableAccounts.data?.available && switchableAccounts.data.accounts.length === 0 ? <p>{messages.login.switchEmpty}</p> : null}
+          {session.data?.state === 'authenticated' && switchableAccounts.data?.available && switchableAccounts.data.accounts.length > 0 ? (
+            <div className="action-button-group" aria-live="polite">
+              <label htmlFor="switchable-account">{messages.login.switchAccount}</label>
+              <select id="switchable-account" value={session.data?.accountId ?? ''} onChange={(event) => switchIdentity(event.target.value)} disabled={mutations.switchAccount.isPending}>
+                {switchableAccounts.data.accounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.alias || account.id}</option>)}
+              </select>
+              {mutations.switchAccount.isPending ? <p role="status">{messages.login.switching}</p> : null}
+            </div>
+          ) : null}
         </section>
         <section className="workspace-panel login-flow" aria-labelledby="qr-login-title">
           <h2 id="qr-login-title">{messages.login.qrTitle}</h2>

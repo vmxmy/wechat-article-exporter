@@ -18,6 +18,7 @@ export interface LoopbackFixture {
   readonly proxyRemovals: readonly unknown[]
   readonly resourceDownloads: readonly unknown[]
   readonly albumTraversals: readonly unknown[]
+  readonly accountSwitches: readonly string[]
 }
 
 export async function installLoopbackFixture(page: Page, options: { readonly displayLanguage?: 'en' | 'zh-CN' } = {}): Promise<LoopbackFixture> {
@@ -35,6 +36,7 @@ export async function installLoopbackFixture(page: Page, options: { readonly dis
   const proxyRemovals: unknown[] = []
   const resourceDownloads: unknown[] = []
   const albumTraversals: unknown[] = []
+  const accountSwitches: string[] = []
   let loginState = 'unauthenticated'
   let directory = { token: 'dir-sanitized', label: 'Sanitized exports' }
   let backupID = ''
@@ -71,6 +73,7 @@ export async function installLoopbackFixture(page: Page, options: { readonly dis
       proxyRemovals,
       resourceDownloads,
       albumTraversals,
+      accountSwitches,
       onLoginState: (state) => { loginState = state },
       onDirectory: (next) => { directory = next },
       onBackupID: (id) => { backupID = id },
@@ -80,7 +83,7 @@ export async function installLoopbackFixture(page: Page, options: { readonly dis
       onSavedQueries: (next) => { savedQueries = next }
     })
   })
-  return { requests, controls, accountDeletions, savedAccounts, accountSyncs, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, credentialValidations, proxyRemovals, resourceDownloads, albumTraversals }
+  return { requests, controls, accountDeletions, savedAccounts, accountSyncs, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, credentialValidations, proxyRemovals, resourceDownloads, albumTraversals, accountSwitches }
 }
 
 export async function expectOnlyLoopbackRequests(page: Page) {
@@ -113,6 +116,7 @@ interface State {
   readonly proxyRemovals: unknown[]
   readonly resourceDownloads: unknown[]
   readonly albumTraversals: unknown[]
+  readonly accountSwitches: string[]
   readonly onLoginState: (state: string) => void
   readonly onDirectory: (directory: { readonly token: string; readonly label: string }) => void
   readonly onBackupID: (id: string) => void
@@ -131,6 +135,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/status') return json(route, { csrfToken })
   if (url.pathname === '/api/v1/runtime') return json(route, { version: 'e2e-sanitized', profileId: 'fixture-profile', session: state.loginState === 'authenticated' ? 'authenticated' : 'unauthenticated' })
   if (url.pathname === '/api/v1/session') return json(route, { state: state.loginState, accountId: state.loginState === 'authenticated' ? 'account-fixture' : undefined, accountName: state.loginState === 'authenticated' ? 'Fixture Account' : undefined })
+  if (url.pathname === '/api/v1/session/accounts') return json(route, { available: true, accounts: [{ id: 'account-fixture', name: 'Fixture Account' }, { id: 'account-fixture-2', name: 'Second Fixture Account' }] })
   if (url.pathname === '/api/v1/storage') return json(route, storage())
   if (url.pathname === '/api/v1/events/snapshot') return json(route, { runtime: { version: 'e2e-sanitized', profileId: 'fixture-profile' }, session: { state: state.loginState }, storage: storage(), checkedAt: now })
 
@@ -138,6 +143,10 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/login/poll') { state.onLoginState('scanned'); return json(route, { state: 'scanned', accountCount: 1 }) }
   if (url.pathname === '/api/v1/login/complete') { state.onLoginState('authenticated'); return json(route, { state: 'authenticated', accountId: 'account-fixture', accountName: 'Fixture Account' }) }
   if (url.pathname === '/api/v1/session/logout') { state.onLoginState('unauthenticated'); return route.fulfill({ status: 204, body: '' }) }
+  if (url.pathname === '/api/v1/session/accounts/account-fixture-2/switch' && method === 'POST') {
+    state.accountSwitches.push('account-fixture-2')
+    return json(route, { state: 'authenticated', accountId: 'account-fixture-2', accountName: 'Second Fixture Account' })
+  }
 
   if (url.pathname === '/api/v1/accounts' && method === 'DELETE') {
     if (body?.confirm !== 'delete-accounts:account-fixture') return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Confirmation required' } }) })

@@ -11,12 +11,12 @@ import {
   getJobPage,
   getRuntimeStatus,
   getSavedQueryPage,
-  getSessionStatus,
+  getSessionStatus, getSwitchableAccounts,
   getStorageStatus,
   getWorkspaceSnapshot,
   authorizeDefaultExportDirectory, beginLogin, completeLogin, controlJob, createExportDirectory, deleteAccounts, ingestURL, logout, openExportOutput, pollLogin, saveAccount, searchAccounts, startExport, syncAccount, updateAccount, verifyExport,
   addProxy, applyGarbageCollection, commitRestore, createBackup, createDiagnosticBundle, getCredentials, getDiagnostics, getIntegrity, getPreferences, getProxies, importAccountManifest, importCredential, patchPreferences, planGarbageCollection, prepareRestore, removeCredential, removeProxy, setProxyEnabled, testProxy, uploadAccountManifest, uploadCredentialFile, uploadRestoreArchive, validateCredential, verifyBackup,
-  deleteSavedQuery, downloadArticles, saveSavedQuery, traverseAlbum, traverseAlbums,
+  deleteSavedQuery, downloadArticles, saveSavedQuery, switchAccount, traverseAlbum, traverseAlbums,
   type AccountInput,
   type AccountSyncMode,
   type AlbumPageParams,
@@ -32,6 +32,7 @@ import {
 export const queryKeys = {
   runtime: ['runtime'] as const,
   session: ['session'] as const,
+  switchableAccounts: ['session', 'accounts'] as const,
   storage: ['storage'] as const,
   snapshot: ['snapshot'] as const,
   accounts: (params: PageParams) => ['accounts', params] as const,
@@ -59,6 +60,10 @@ export function useRuntimeStatus() {
 
 export function useSessionStatus() {
   return useQuery({ queryKey: queryKeys.session, queryFn: ({ signal }) => getSessionStatus(signal), ...snapshotPolling })
+}
+
+export function useSwitchableAccounts(enabled: boolean) {
+  return useQuery({ queryKey: queryKeys.switchableAccounts, queryFn: ({ signal }) => getSwitchableAccounts(signal), enabled, ...snapshotPolling })
 }
 
 export function useStorageStatus() {
@@ -142,6 +147,7 @@ export function useWorkspaceMutations() {
     beginLogin: useMutation({ mutationFn: beginLogin }),
     pollLogin: useMutation({ mutationFn: pollLogin }),
     completeLogin: useMutation({ mutationFn: completeLogin, onSuccess: refresh }),
+    switchAccount: useMutation({ mutationFn: switchAccount, onSuccess: refresh }),
     logout: useMutation({ mutationFn: logout, onSuccess: refreshAfterLogout }),
     saveAccount: useMutation({ mutationFn: (input: AccountInput) => saveAccount(input), onSuccess: refresh }),
     updateAccount: useMutation({ mutationFn: ({ id, input }: { id: string; input: AccountInput }) => updateAccount(id, input), onSuccess: refresh }),
