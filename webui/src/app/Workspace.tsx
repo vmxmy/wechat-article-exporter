@@ -1,7 +1,7 @@
 import { AppShell } from '@astryxdesign/core/AppShell'
 import { Button } from '@astryxdesign/core/Button'
 import { MobileNav } from '@astryxdesign/core/MobileNav'
-import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
+import { SideNav, SideNavHeading, SideNavItem } from '@astryxdesign/core/SideNav'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Component, lazy, Suspense, useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import { type Locale, type MessageCatalog, useMessages } from '../i18n'
@@ -83,19 +83,29 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
 
   const connection = getConnectionState(runtime.isSuccess, runtime.isError, messages)
   const currentPage = getNavigationItem(path)
-  const navigationSections = (closeAfterNavigation = false) => navigationGroups.map((group) => (
-    <SideNavSection key={group} title={messages.navigation[group]}>
-      {navigationItems.filter((item) => item.group === group).map((item) => (
-        <SideNavItem
-          key={item.href}
-          label={messages.navigation[item.key]}
-          href={item.href}
-          isSelected={path === item.href}
-          onClick={closeAfterNavigation ? () => setMobileNavigationOpen(false) : undefined}
-        />
-      ))}
-    </SideNavSection>
-  ))
+  const navigationSections = (closeAfterNavigation = false) => navigationGroups.map((group) => {
+    const items = navigationItems.filter((item) => item.group === group)
+    const groupSelected = items.some((item) => path === item.href)
+    return (
+      <SideNavItem
+        key={group}
+        label={messages.navigation[group]}
+        icon={<NavigationGroupIcon group={group} />}
+        isSelected={groupSelected}
+        collapsible={{ defaultIsCollapsed: false }}
+      >
+        {items.map((item) => (
+          <SideNavItem
+            key={item.href}
+            label={messages.navigation[item.key]}
+            href={item.href}
+            isSelected={path === item.href}
+            onClick={closeAfterNavigation ? () => setMobileNavigationOpen(false) : undefined}
+          />
+        ))}
+      </SideNavItem>
+    )
+  })
 
   return (
     <AppShell
@@ -166,6 +176,16 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
       </div>
     </AppShell>
   )
+}
+
+function NavigationGroupIcon({ group }: { readonly group: typeof navigationGroups[number] }) {
+  const path = {
+    home: <><path d="M3.5 10.5 12 3l8.5 7.5" /><path d="M5.5 9.5v10h13v-10M9.5 19.5v-6h5v6" /></>,
+    content: <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></>,
+    work: <><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7" /><rect x="3.5" y="7" width="17" height="12.5" rx="2" /><path d="M3.5 12h17M10 12v2h4v-2" /></>,
+    system: <><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.1M12 19.1v2.1M21.2 12h-2.1M4.9 12H2.8M18.5 5.5 17 7M7 17l-1.5 1.5M18.5 18.5 17 17M7 7 5.5 5.5" /></>
+  }[group]
+  return <svg className="workspace-nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{path}</svg>
 }
 
 function renderPage(path: string, locale: Locale, messages: MessageCatalog) {

@@ -61,6 +61,8 @@
     box-shadow: inset -1px 0 var(--workspace-ring);
   }
 
+  .workspace-nav-group-icon { width: 1rem; height: 1rem; }
+
   .workspace-header, .page-heading, .table-toolbar, .pagination {
     display: flex;
     align-items: center;
