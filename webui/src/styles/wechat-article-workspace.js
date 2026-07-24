@@ -103,8 +103,9 @@ export const wechatArticleWorkspaceTheme = {
     "--radius-page": "42px",
     "--radius-chat": "42px",
     "--radius-full": "9999px",
-    "--font-family-body": "\"ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif\"",
-    "--font-family-heading": "\"ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif\""
+    "--font-family-body": "\"Avenir Next, Segoe UI, -apple-system, BlinkMacSystemFont, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans SC, sans-serif\"",
+    "--font-family-heading": "\"Avenir Next, Segoe UI, -apple-system, BlinkMacSystemFont, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans SC, sans-serif\"",
+    "--font-family-code": "\"SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace\""
   },
 
 };

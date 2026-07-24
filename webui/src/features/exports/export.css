@@ -6,7 +6,7 @@
 .export-stage-nav {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--spacing-2);
+  gap: 1px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -17,7 +17,12 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--spacing-2);
   align-items: center;
+  padding: var(--spacing-2);
+  background: color-mix(in srgb, var(--color-background-muted) 78%, transparent);
 }
+
+.export-stage-nav li:first-child { border-radius: var(--radius-element) 0 0 var(--radius-element); }
+.export-stage-nav li:last-child { border-radius: 0 var(--radius-element) var(--radius-element) 0; }
 
 .export-stage-nav .astryx-button {
   justify-content: flex-start;
@@ -45,9 +50,10 @@
   display: grid;
   gap: var(--spacing-3);
   padding: var(--spacing-3);
-  border: 1px solid var(--color-border);
+  border: 0;
   border-radius: var(--radius-inner);
   background: var(--color-background-muted);
+  box-shadow: 0 0 0 1px var(--workspace-ring);
 }
 
 .export-scope-summary p,
@@ -79,9 +85,10 @@
   gap: var(--spacing-2);
   margin: 0;
   padding: var(--spacing-3);
-  border: 1px solid var(--color-border);
+  border: 0;
   border-radius: var(--radius-inner);
   background: var(--color-background-muted);
+  box-shadow: 0 0 0 1px var(--workspace-ring);
 }
 
 .export-notice p {
@@ -107,17 +114,22 @@
 @media (max-width: 45rem) {
   .export-stage-nav {
     grid-template-columns: 1fr;
+    gap: var(--spacing-1);
   }
+
+  .export-stage-nav li,
+  .export-stage-nav li:first-child,
+  .export-stage-nav li:last-child { border-radius: var(--radius-element); }
 
   .export-stage-primary {
     position: sticky;
     bottom: 0;
     z-index: 9;
     padding: var(--spacing-3);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-container);
+    border: 0;
+    border-radius: var(--radius-element);
     background: var(--color-background-surface);
-    box-shadow: var(--shadow-overlay);
+    box-shadow: var(--workspace-shadow-raised);
     justify-content: stretch;
   }
 

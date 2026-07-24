@@ -88,8 +88,9 @@
   display: grid;
   gap: var(--spacing-2);
   padding: var(--spacing-3);
-  border-inline-start: 3px solid var(--color-text-danger);
-  background: var(--color-background-muted);
+  border: 1px solid color-mix(in srgb, var(--color-text-danger) 30%, var(--color-border));
+  border-radius: var(--radius-inner);
+  background: color-mix(in srgb, var(--color-text-danger) 6%, var(--color-background-muted));
 }
 
 .jobs-attention-list {

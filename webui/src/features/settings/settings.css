@@ -24,9 +24,8 @@
   margin: 0;
   color: var(--color-text-secondary);
   font-size: var(--text-body-small-size);
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: .04em;
 }
 
 .settings-secondary-nav ul {
@@ -40,7 +39,8 @@
 .settings-secondary-nav-link {
   display: block;
   padding: var(--spacing-2) var(--spacing-3);
-  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  border-radius: var(--radius-element);
   color: var(--color-text-secondary);
   font-weight: 600;
   text-decoration: none;
@@ -54,7 +54,9 @@
 
 .settings-secondary-nav-link[aria-current="page"] {
   color: var(--color-text-primary);
-  background: var(--color-background-surface-selected);
+  border-color: var(--workspace-ring-strong);
+  background: var(--workspace-accent-wash);
+  box-shadow: 0 2px 8px -6px var(--color-shadow);
 }
 
 .settings-content {
@@ -183,9 +185,10 @@
 .settings-trust-explanation {
   margin: 0;
   padding: var(--spacing-3);
-  border-inline-start: 3px solid var(--color-accent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
+  border-radius: var(--radius-inner);
   color: var(--color-text-secondary);
-  background: var(--color-background-muted);
+  background: var(--workspace-accent-wash);
 }
 
 .settings-trust-explanation strong { color: var(--color-text-primary); }
@@ -196,9 +199,10 @@
 
 .settings-summary {
   padding: var(--spacing-3);
-  border: 1px solid var(--color-border);
+  border: 0;
   border-radius: var(--radius-inner);
   background: var(--color-background-muted);
+  box-shadow: 0 0 0 1px var(--workspace-ring);
 }
 
 .settings-summary dl {
@@ -215,9 +219,9 @@
 .settings-danger-zone {
   width: min(100%, 58rem);
   padding: var(--spacing-5);
-  border: 1px solid var(--color-border-emphasized);
-  border-radius: var(--radius-container);
-  background: var(--color-background-muted);
+  border: 1px solid color-mix(in srgb, var(--color-text-danger) 28%, var(--color-border));
+  border-radius: var(--radius-element);
+  background: color-mix(in srgb, var(--color-text-danger) 4%, var(--color-background-muted));
 }
 
 .settings-danger-zone > header { display: grid; gap: var(--spacing-2); }

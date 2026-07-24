@@ -52,8 +52,7 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
   useEffect(() => {
     let firstFrame = 0
     let secondFrame = 0
-    const focusMain = (event: MouseEvent) => {
-      if (!(event.target instanceof Element) || !event.target.closest('[data-testid="skip-to-content"]')) return
+    const moveFocusToMain = () => {
       const main = document.getElementById('astryx-app-shell-main')
       if (!main) return
       main.tabIndex = -1
@@ -63,11 +62,22 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
         secondFrame = window.requestAnimationFrame(() => main.focus())
       })
     }
+    const focusMain = (event: MouseEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('[data-testid="skip-to-content"], a[href="#astryx-app-shell-main"]')) return
+      moveFocusToMain()
+    }
+    const focusMainFromKeyboard = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter') return
+      if (!(event.target instanceof Element) || !event.target.closest('[data-testid="skip-to-content"], a[href="#astryx-app-shell-main"]')) return
+      moveFocusToMain()
+    }
     document.addEventListener('click', focusMain)
+    document.addEventListener('keydown', focusMainFromKeyboard)
     return () => {
       window.cancelAnimationFrame(firstFrame)
       window.cancelAnimationFrame(secondFrame)
       document.removeEventListener('click', focusMain)
+      document.removeEventListener('keydown', focusMainFromKeyboard)
     }
   }, [])
 
@@ -89,6 +99,7 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
 
   return (
     <AppShell
+      className="workspace-shell"
       height="fill"
       variant="surface"
       contentPadding={4}
@@ -113,6 +124,7 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
       }}
       sideNav={
         <SideNav
+          className="workspace-side-nav"
           collapsible
           header={
             <SideNavHeading
@@ -128,10 +140,9 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
         </SideNav>
       }
     >
-      <header className="workspace-header">
+      <header className="workspace-header workspace-command-rail">
         <div className="connection-state" role="status" aria-live="polite">
           <StatusDot variant={connection.variant} label={connection.label} isPulsing={runtime.isFetching} />
-          <span>{connection.label}</span>
         </div>
         <div className="header-actions">
           <span className="workspace-local-note">{messages.product.localOnly}</span>

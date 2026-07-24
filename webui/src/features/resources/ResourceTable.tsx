@@ -89,7 +89,7 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
           <p className="lede">{messages.description}</p>
         </div>
       </header>
-      <div className="column-controls" aria-label={messages.visibleColumns}>
+      <div className="column-controls resource-column-controls" aria-label={messages.visibleColumns}>
         {visibleColumns.map((column) => (
           <CheckboxInput key={column.id} label={columnLabel(column)} value={column.getIsVisible()} onChange={() => column.toggleVisibility()} />
         ))}
