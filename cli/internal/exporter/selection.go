@@ -16,6 +16,14 @@ import (
 
 const SelectionManifestVersion = 1
 
+// MaximumAlbumSelectionIDs bounds the caller-controlled batch fan-out before
+// the export job is admitted.
+const MaximumAlbumSelectionIDs = 50
+
+// MaximumResolvedArticleIDs keeps one export job bounded after any dynamic
+// selection has been resolved against the local library.
+const MaximumResolvedArticleIDs = 500
+
 var ErrInvalidSelection = errors.New("invalid export selection")
 
 type SelectionSource interface {
@@ -55,7 +63,7 @@ func BuildSelectionManifest(
 	if err != nil {
 		return SelectionManifest{}, err
 	}
-	if err := validateArticleIDs(articleIDs); err != nil {
+	if err := validateResolvedArticleIDs(articleIDs); err != nil {
 		return SelectionManifest{}, err
 	}
 	filterSummary, err := canonicalJSON(resolvedSelection)
@@ -155,6 +163,13 @@ func validateSelectionShape(selection domain.ExportSelection) error {
 		if strings.TrimSpace(string(selection.AlbumID)) == "" || selectionHasUnexpectedFields(selection, "album") {
 			return fmt.Errorf("album selection requires only albumId: %w", ErrInvalidSelection)
 		}
+	case domain.ExportSelectionAlbumIDs:
+		if selectionHasUnexpectedFields(selection, "album_ids") {
+			return fmt.Errorf("album ID selection requires only albumIds: %w", ErrInvalidSelection)
+		}
+		if err := validateAlbumIDs(selection.AlbumIDs); err != nil {
+			return err
+		}
 	case domain.ExportSelectionSavedQuery:
 		if strings.TrimSpace(selection.SavedQueryID) == "" || selectionHasUnexpectedFields(selection, "saved_query_resolved") {
 			return fmt.Errorf("saved query selection requires savedQueryId and may include its frozen query: %w", ErrInvalidSelection)
@@ -196,12 +211,13 @@ func normalizeRequestedSelection(request domain.ExportRequest) (domain.ExportSel
 	selection := request.Selection
 	selection.URLs = append([]string(nil), selection.URLs...)
 	selection.ArticleIDs = append([]domain.ArticleID(nil), selection.ArticleIDs...)
+	selection.AlbumIDs = append([]domain.AlbumID(nil), selection.AlbumIDs...)
 	return selection, nil
 }
 
 func selectionHasValues(selection domain.ExportSelection) bool {
 	return len(selection.URLs) > 0 || selection.AccountID != "" || selection.AlbumID != "" ||
-		selection.SavedQueryID != "" || len(selection.ArticleIDs) > 0 || articleQueryHasValues(selection.Query)
+		selection.SavedQueryID != "" || len(selection.ArticleIDs) > 0 || len(selection.AlbumIDs) > 0 || articleQueryHasValues(selection.Query)
 }
 
 func articleQueryHasValues(query domain.ArticleQuery) bool {
@@ -254,6 +270,29 @@ func resolveSelection(
 		query := normalizeSelectionQuery(domain.ArticleQuery{AlbumID: selection.AlbumID})
 		ids, err := querySelectionIDs(ctx, source, query)
 		return ids, selection, err
+	case domain.ExportSelectionAlbumIDs:
+		if err := validateSelectionShape(selection); err != nil {
+			return nil, selection, err
+		}
+		ids := make([]domain.ArticleID, 0)
+		seen := make(map[domain.ArticleID]struct{})
+		for _, albumID := range selection.AlbumIDs {
+			albumIDs, err := querySelectionIDs(ctx, source, normalizeSelectionQuery(domain.ArticleQuery{AlbumID: albumID}))
+			if err != nil {
+				return nil, selection, err
+			}
+			for _, articleID := range albumIDs {
+				if _, duplicate := seen[articleID]; duplicate {
+					continue
+				}
+				seen[articleID] = struct{}{}
+				ids = append(ids, articleID)
+				if len(ids) > MaximumResolvedArticleIDs {
+					return nil, selection, resolvedArticleLimitError()
+				}
+			}
+		}
+		return ids, selection, nil
 	case domain.ExportSelectionSavedQuery:
 		if source == nil {
 			if err := validateSelectionShape(selection); err != nil {
@@ -305,6 +344,9 @@ func selectionHasUnexpectedFields(selection domain.ExportSelection, allowed stri
 	if allowed != "album" && selection.AlbumID != "" {
 		return true
 	}
+	if allowed != "album_ids" && len(selection.AlbumIDs) > 0 {
+		return true
+	}
 	if allowed != "saved_query" && allowed != "saved_query_resolved" && selection.SavedQueryID != "" {
 		return true
 	}
@@ -337,6 +379,33 @@ func querySelectionIDs(ctx context.Context, source SelectionSource, query domain
 	return append([]domain.ArticleID(nil), ids...), nil
 }
 
+func validateAlbumIDs(ids []domain.AlbumID) error {
+	if len(ids) == 0 || len(ids) > MaximumAlbumSelectionIDs {
+		return fmt.Errorf("album ID selection must contain between 1 and %d IDs: %w", MaximumAlbumSelectionIDs, ErrInvalidSelection)
+	}
+	seen := make(map[domain.AlbumID]struct{}, len(ids))
+	for index, id := range ids {
+		if strings.TrimSpace(string(id)) == "" {
+			return fmt.Errorf("album ID %d is empty: %w", index, ErrInvalidSelection)
+		}
+		if _, exists := seen[id]; exists {
+			return fmt.Errorf("duplicate album ID %q: %w", id, ErrInvalidSelection)
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
+}
+
+func validateResolvedArticleIDs(ids []domain.ArticleID) error {
+	if len(ids) == 0 {
+		return fmt.Errorf("selection resolved to no articles: %w", ErrInvalidSelection)
+	}
+	if len(ids) > MaximumResolvedArticleIDs {
+		return resolvedArticleLimitError()
+	}
+	return validateArticleIDs(ids)
+}
+
 func validateArticleIDs(ids []domain.ArticleID) error {
 	if len(ids) == 0 {
 		return fmt.Errorf("selection resolved to no articles: %w", ErrInvalidSelection)
@@ -352,6 +421,10 @@ func validateArticleIDs(ids []domain.ArticleID) error {
 		seen[id] = struct{}{}
 	}
 	return nil
+}
+
+func resolvedArticleLimitError() error {
+	return fmt.Errorf("selection resolves to more than %d articles: %w", MaximumResolvedArticleIDs, ErrInvalidSelection)
 }
 
 func cloneExportOptions(options domain.ExportOptions) (domain.ExportOptions, error) {

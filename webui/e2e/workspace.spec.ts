@@ -152,26 +152,42 @@ test('advanced article query and export handoff preserve typed local selections'
   await expectOnlyLoopbackRequests(page)
 })
 
-test('selected album export handoff queues an opaque album selection', async ({ page }) => {
+test('selected albums export handoff queues opaque stable album IDs', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/albums')
-  const exportButton = page.getByRole('button', { name: 'Export selected album' })
+  const exportButton = page.getByRole('button', { name: 'Export selected albums' })
   await expect(exportButton).toBeDisabled()
   await page.getByRole('checkbox', { name: 'Select album-fixture-1' }).check()
   await expect(exportButton).toBeEnabled()
+  await page.getByRole('button', { name: 'Next page' }).click()
+  await page.getByRole('checkbox', { name: 'Select album-fixture-2' }).check()
   await exportButton.click()
   await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
-  await expect(page.getByRole('status').filter({ hasText: 'Selection: Album album-fixture-1' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Selection: 2 selected albums' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Album IDs' })).toHaveValue('album-fixture-1\nalbum-fixture-2')
   await page.getByRole('button', { name: 'Authorize default directory' }).click()
   const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
   await page.getByRole('button', { name: 'Queue export' }).click()
   await jobHandoff
   await expect.poll(() => fixture.exports.length).toBe(1)
-  expect(JSON.parse(fixture.exports[0])).toMatchObject({ selection: { kind: 'album', albumId: 'album-fixture-1' } })
+  expect(JSON.parse(fixture.exports[0])).toMatchObject({ selection: { kind: 'album_ids', albumIds: ['album-fixture-1', 'album-fixture-2'] } })
   await expectOnlyLoopbackRequests(page)
 })
 
-test('album selections persist across server pages but retain one-album workflow boundaries', async ({ page }) => {
+test('album ID export input rejects a selection larger than the local bound', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  const albumIds = Array.from({ length: 51 }, (_, index) => `album-fixture-${index + 1}`)
+  await page.addInitScript((selection) => {
+    window.sessionStorage.setItem('wechat-article.export-handoff.v1', JSON.stringify({ selection, label: 'oversized albums' }))
+  }, { kind: 'album_ids', albumIds })
+  await page.goto('/exports')
+  await page.getByRole('button', { name: 'Authorize default directory' }).click()
+  await expect(page.getByRole('button', { name: 'Queue export' })).toBeDisabled()
+  await expect.poll(() => fixture.exports).toHaveLength(0)
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('album selections persist across server pages while traversal remains one-album-only', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.goto('/albums')
 
@@ -184,7 +200,7 @@ test('album selections persist across server pages but retain one-album workflow
   await expect(page.getByText('2 selected', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Traverse selected album' })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Traverse and batch download' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Export selected album' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Export selected albums' })).toBeEnabled()
   await expectOnlyLoopbackRequests(page)
 })
 

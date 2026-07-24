@@ -92,10 +92,10 @@ export const en = {
     create: 'Create directory',
     selectionTitle: '2. Select articles and format',
     selection: {
-      title: 'Export selection', accountId: 'Account ID', albumId: 'Album ID', account: 'Export account', album: 'Export album',
+      title: 'Export selection', accountId: 'Account ID', albumId: 'Album ID', albumIds: 'Album IDs', albumIdsHint: 'One to 50 stable local album IDs, one per line or comma-separated.', account: 'Export account', album: 'Export album',
       savedQuery: 'Saved query', savedQueryPlaceholder: 'Select a saved query', matchingQuery: 'Matching article query (JSON)', matching: 'Export matching query',
       active: (label: string) => `Selection: ${label}`, explicit: (count: number) => `${count} explicit article ID${count === 1 ? '' : 's'}`,
-      accountLabel: (id: string) => `Account ${id}`, albumLabel: (id: string) => `Album ${id}`, savedQueryLabel: (name: string) => `Saved query ${name}`, matchingLabel: 'Current matching filter'
+      accountLabel: (id: string) => `Account ${id}`, albumLabel: (id: string) => `Album ${id}`, albumsLabel: (count: number) => `${count} selected albums`, savedQueryLabel: (name: string) => `Saved query ${name}`, matchingLabel: 'Current matching filter'
     },
     articleIds: 'Article IDs',
     articleIdsHint: 'Enter one stable article ID per line or separate IDs with commas.',
@@ -125,7 +125,7 @@ export const en = {
     start: 'Queue export',
     queued: (jobId: string) => `Export queued. Job ID: ${jobId}`,
     queuedHint: 'The export continues as a local persistent job. Check its state below or in Jobs.',
-    invalidSelection: 'Enter at least one article ID before queueing the export.',
+    invalidSelection: 'Select a valid export selection before queueing the export.',
     invalidDirectory: 'Authorize or create an export directory first.',
     actionFailed: 'The export action could not be completed. Your form values were kept.',
     recordsTitle: 'Export records',
@@ -258,7 +258,7 @@ export const en = {
       loading: 'Loading local album page…', unavailable: 'The local albums API is not available yet.', empty: 'No albums match this query.', retry: 'Retry', previous: 'Previous page', next: 'Next page', page: (current: number, total: number) => `Page ${current} of ${total}`, pagination: 'Album pagination', selected: 'selected', selectAll: 'Select all rows on this page', selectRow: (row: string) => `Select ${row}`, visibleColumns: 'Visible album columns',
       columns: { name: 'Album', articles: 'Articles', paid: 'Paid', description: 'Description' },
       filters: { title: 'Album filters', description: 'Filters are applied on the local server before each bounded page is returned.', accountId: 'Account ID', keyword: 'Album keyword' },
-      actions: { title: 'Album actions', description: 'Traversal resumes through the shared persistent album job. Batch download queues article downloads after traversal commits.', order: 'Traversal order', forward: 'Forward', reverse: 'Reverse', traverse: 'Traverse selected album', download: 'Traverse and batch download', export: 'Export selected album', selectOne: 'Select one saved album with an owning account first.', queued: (id: string) => `Album job ${id} was queued.`, failed: 'The album action could not be queued.' }
+      actions: { title: 'Album actions', description: 'Traversal resumes through the shared persistent album job. Batch download queues article downloads after traversal commits. Export accepts one or more saved albums.', order: 'Traversal order', forward: 'Forward', reverse: 'Reverse', traverse: 'Traverse selected album', download: 'Traverse and batch download', export: 'Export selected albums', selectOne: 'Select one saved album with an owning account first.', queued: (id: string) => `Album job ${id} was queued.`, failed: 'The album action could not be queued.' }
     },
     jobs: {
       title: 'Jobs',

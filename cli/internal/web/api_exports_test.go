@@ -110,6 +110,15 @@ func TestExportAPIUsesOpaqueCapabilitiesAndFacadeOnly(t *testing.T) {
 		t.Fatalf("start format options = %#v", service.start.Options.FormatOptions)
 	}
 
+	response = mutate("/api/v1/exports/start", `{"directoryToken":"dir_child","selection":{"kind":"album_ids","albumIds":["album-1","album-2"]},"format":"markdown","confirm":"start-export:dir_child"}`)
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("album batch start status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	response.Body.Close()
+	if service.start.Selection.Kind != domain.ExportSelectionAlbumIDs || !reflect.DeepEqual(service.start.Selection.AlbumIDs, []domain.AlbumID{"album-1", "album-2"}) {
+		t.Fatalf("album batch start selection = %#v", service.start.Selection)
+	}
+
 	for _, path := range []string{"/api/v1/exports", "/api/v1/exports/export-1", "/api/v1/exports/export-1/manifest"} {
 		response = get(t, client, base+path)
 		if response.StatusCode != http.StatusOK {

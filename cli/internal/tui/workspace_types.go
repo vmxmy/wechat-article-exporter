@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
@@ -190,9 +189,12 @@ type PageQuery struct {
 type SelectionState map[Area][]string
 
 func (selection SelectionState) Has(area Area, id string) bool {
-	values := selection[area]
-	index := sort.SearchStrings(values, id)
-	return index < len(values) && values[index] == id
+	for _, value := range selection[area] {
+		if value == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (selection SelectionState) Toggle(area Area, id string) {
@@ -201,15 +203,13 @@ func (selection SelectionState) Toggle(area Area, id string) {
 		return
 	}
 	values := append([]string(nil), selection[area]...)
-	index := sort.SearchStrings(values, id)
-	if index < len(values) && values[index] == id {
-		values = append(values[:index], values[index+1:]...)
-	} else {
-		values = append(values, "")
-		copy(values[index+1:], values[index:])
-		values[index] = id
+	for index, value := range values {
+		if value == id {
+			selection[area] = append(values[:index], values[index+1:]...)
+			return
+		}
 	}
-	selection[area] = values
+	selection[area] = append(values, id)
 }
 
 func (selection SelectionState) Clear(area Area) { delete(selection, area) }
@@ -332,7 +332,6 @@ func (state *WorkspaceState) normalize(defaultPageSize int) {
 		state.Queries.Exports.Offset = 0
 	}
 	for area, values := range state.Selection {
-		sort.Strings(values)
 		state.Selection[area] = compactStrings(values)
 	}
 }
@@ -340,7 +339,17 @@ func (state *WorkspaceState) normalize(defaultPageSize int) {
 func compactStrings(values []string) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
-		if value == "" || len(result) > 0 && result[len(result)-1] == value {
+		if value == "" {
+			continue
+		}
+		duplicate := false
+		for _, existing := range result {
+			if existing == value {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
 			continue
 		}
 		result = append(result, value)

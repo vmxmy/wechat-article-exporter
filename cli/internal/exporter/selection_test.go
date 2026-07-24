@@ -2,6 +2,8 @@ package exporter
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -181,6 +183,7 @@ func TestBuildSelectionManifestAcceptsEverySelectionSource(t *testing.T) {
 		queries: map[string][]domain.ArticleID{
 			"account-a||||published_desc":    {"account-2", "account-1"},
 			"|album-a|||published_desc":      {"album-2", "album-1"},
+			"|album-b|||published_desc":      {"album-3", "album-1"},
 			"||release|ready|title":          {"saved-2", "saved-1"},
 			"||release|ready|published_desc": {"matching-2", "matching-1"},
 		},
@@ -197,6 +200,8 @@ func TestBuildSelectionManifestAcceptsEverySelectionSource(t *testing.T) {
 			want: []domain.ArticleID{"account-2", "account-1"}},
 		{name: "album", selection: domain.ExportSelection{Kind: domain.ExportSelectionAlbum, AlbumID: "album-a"},
 			want: []domain.ArticleID{"album-2", "album-1"}},
+		{name: "albums", selection: domain.ExportSelection{Kind: domain.ExportSelectionAlbumIDs, AlbumIDs: []domain.AlbumID{"album-a", "album-b"}},
+			want: []domain.ArticleID{"album-2", "album-1", "album-3"}},
 		{name: "saved query", selection: domain.ExportSelection{Kind: domain.ExportSelectionSavedQuery, SavedQueryID: "unread"},
 			want: []domain.ArticleID{"saved-2", "saved-1"}},
 		{name: "all matching", selection: domain.ExportSelection{Kind: domain.ExportSelectionAllMatching,
@@ -219,6 +224,49 @@ func TestBuildSelectionManifestAcceptsEverySelectionSource(t *testing.T) {
 				t.Fatalf("validate built manifest: %v", err)
 			}
 		})
+	}
+}
+
+func TestBuildSelectionManifestBoundsAndValidatesAlbumIDs(t *testing.T) {
+	source := &fakeSelectionSource{queries: map[string][]domain.ArticleID{
+		"|album-a|||published_desc": {"article-a"},
+	}}
+	valid := domain.ExportRequest{Format: "markdown", Selection: domain.ExportSelection{
+		Kind: domain.ExportSelectionAlbumIDs, AlbumIDs: []domain.AlbumID{"album-a"},
+	}}
+	if _, err := BuildSelectionManifest(context.Background(), source, valid, time.Now()); err != nil {
+		t.Fatalf("valid album IDs: %v", err)
+	}
+
+	tooMany := make([]domain.AlbumID, MaximumAlbumSelectionIDs+1)
+	for index := range tooMany {
+		tooMany[index] = domain.AlbumID("album-" + string(rune('a'+index)))
+	}
+	for _, selection := range []domain.ExportSelection{
+		{Kind: domain.ExportSelectionAlbumIDs},
+		{Kind: domain.ExportSelectionAlbumIDs, AlbumIDs: []domain.AlbumID{"album-a", "album-a"}},
+		{Kind: domain.ExportSelectionAlbumIDs, AlbumIDs: tooMany},
+		{Kind: domain.ExportSelectionAlbumIDs, AlbumIDs: []domain.AlbumID{"album-a"}, AlbumID: "album-b"},
+	} {
+		if _, err := BuildSelectionManifest(context.Background(), source, domain.ExportRequest{Format: "markdown", Selection: selection}, time.Now()); err == nil {
+			t.Fatalf("invalid album selection accepted: %#v", selection)
+		}
+	}
+}
+
+func TestBuildSelectionManifestRejectsResolvedArticleLimit(t *testing.T) {
+	ids := make([]domain.ArticleID, MaximumResolvedArticleIDs+1)
+	for index := range ids {
+		ids[index] = domain.ArticleID(fmt.Sprintf("article-%d", index))
+	}
+	source := &fakeSelectionSource{queries: map[string][]domain.ArticleID{
+		"|album-a|||published_desc": ids,
+	}}
+	_, err := BuildSelectionManifest(context.Background(), source, domain.ExportRequest{Format: "markdown", Selection: domain.ExportSelection{
+		Kind: domain.ExportSelectionAlbumIDs, AlbumIDs: []domain.AlbumID{"album-a"},
+	}}, time.Now())
+	if !errors.Is(err, ErrInvalidSelection) || !strings.Contains(err.Error(), "more than") {
+		t.Fatalf("limit error = %v", err)
 	}
 }
 

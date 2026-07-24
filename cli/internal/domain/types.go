@@ -275,6 +275,7 @@ const (
 	ExportSelectionURLs        ExportSelectionKind = "urls"
 	ExportSelectionAccount     ExportSelectionKind = "account"
 	ExportSelectionAlbum       ExportSelectionKind = "album"
+	ExportSelectionAlbumIDs    ExportSelectionKind = "album_ids"
 	ExportSelectionSavedQuery  ExportSelectionKind = "saved_query"
 	ExportSelectionExplicitIDs ExportSelectionKind = "explicit_ids"
 	ExportSelectionAllMatching ExportSelectionKind = "all_matching"
@@ -285,6 +286,7 @@ type ExportSelection struct {
 	URLs         []string            `json:"urls,omitempty"`
 	AccountID    AccountID           `json:"accountId,omitempty"`
 	AlbumID      AlbumID             `json:"albumId,omitempty"`
+	AlbumIDs     []AlbumID           `json:"albumIds,omitempty"`
 	SavedQueryID string              `json:"savedQueryId,omitempty"`
 	ArticleIDs   []ArticleID         `json:"articleIds,omitempty"`
 	Query        ArticleQuery        `json:"query,omitempty"`

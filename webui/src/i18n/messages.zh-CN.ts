@@ -92,10 +92,10 @@ export const zhCN = {
     create: '创建目录',
     selectionTitle: '2. 选择文章与格式',
     selection: {
-      title: '导出范围', accountId: '账号 ID', albumId: '专辑 ID', account: '导出账号全部文章', album: '导出专辑全部文章',
+      title: '导出范围', accountId: '账号 ID', albumId: '专辑 ID', albumIds: '专辑 ID 列表', albumIdsHint: '输入 1 至 50 个稳定本地专辑 ID，每行一个或以逗号分隔。', account: '导出账号全部文章', album: '导出专辑全部文章',
       savedQuery: '已保存查询', savedQueryPlaceholder: '选择已保存查询', matchingQuery: '匹配文章查询（JSON）', matching: '导出匹配查询',
       active: (label: string) => `当前范围：${label}`, explicit: (count: number) => `${count} 个明确文章 ID`,
-      accountLabel: (id: string) => `账号 ${id}`, albumLabel: (id: string) => `专辑 ${id}`, savedQueryLabel: (name: string) => `已保存查询 ${name}`, matchingLabel: '当前匹配筛选条件'
+      accountLabel: (id: string) => `账号 ${id}`, albumLabel: (id: string) => `专辑 ${id}`, albumsLabel: (count: number) => `已选 ${count} 个专辑`, savedQueryLabel: (name: string) => `已保存查询 ${name}`, matchingLabel: '当前匹配筛选条件'
     },
     articleIds: '文章 ID',
     articleIdsHint: '每行输入一个稳定文章 ID，或用逗号分隔。',
@@ -125,7 +125,7 @@ export const zhCN = {
     start: '加入导出队列',
     queued: (jobId: string) => `导出已加入队列。任务 ID：${jobId}`,
     queuedHint: '导出会作为本地持久任务继续执行。请在下方或“任务”中查看状态。',
-    invalidSelection: '加入队列前，请至少输入一个文章 ID。',
+    invalidSelection: '加入队列前，请选择有效的导出范围。',
     invalidDirectory: '请先授权或创建导出目录。',
     actionFailed: '无法完成导出操作，已保留表单内容。',
     recordsTitle: '导出记录',

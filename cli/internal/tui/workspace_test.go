@@ -419,7 +419,7 @@ func TestWorkspaceNoColorUnicodeFallbackStateRoundTripAndNonTTYGuard(t *testing.
 		t.Fatal(err)
 	}
 	decoded, err := ParseWorkspaceState(encoded)
-	if err != nil || decoded.Area != AreaArticles || !reflect.DeepEqual(decoded.Selection[AreaArticles], []string{"article-a", "article-b"}) {
+	if err != nil || decoded.Area != AreaArticles || !reflect.DeepEqual(decoded.Selection[AreaArticles], []string{"article-b", "article-a"}) {
 		t.Fatalf("decoded=%#v error=%v", decoded, err)
 	}
 	view := model.View()
@@ -929,6 +929,25 @@ func TestWorkspaceExportAreaNeverUsesExportIDsAsArticleSelection(t *testing.T) {
 	}
 	if actions := model.actionsForArea(); actions[0].Kind != string(OperationExportConfig) {
 		t.Fatalf("first export action=%#v", actions[0])
+	}
+}
+
+func TestWorkspaceAlbumExportStartsOneSelectionForAllSelectedAlbums(t *testing.T) {
+	app := newFakeWorkspaceApplication()
+	model := loadedWorkspace(t, app, &fakeWorkspaceExtensions{})
+	model.state.Area = AreaAlbums
+	model.state.Selection.Toggle(AreaAlbums, "album-b")
+	model.state.Selection.Toggle(AreaAlbums, "album-a")
+
+	next, command := model.executeActionWithIDs("album_export", nil)
+	model = next.(Model)
+	model = updateWorkspace(t, model, runCommand(t, command))
+	if len(app.exports) != 1 {
+		t.Fatalf("exports=%#v", app.exports)
+	}
+	selection := app.exports[0].Selection
+	if selection.Kind != domain.ExportSelectionAlbumIDs || !reflect.DeepEqual(selection.AlbumIDs, []domain.AlbumID{"album-b", "album-a"}) {
+		t.Fatalf("album export selection=%#v", selection)
 	}
 }
 

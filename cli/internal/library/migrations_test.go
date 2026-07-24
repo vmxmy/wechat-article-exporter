@@ -418,6 +418,7 @@ func assertCurrentMigrationState(t *testing.T, database *sql.DB) {
 	assertNamedSchemaObject(t, database, "index", "reply_checkpoints_pending_idx")
 	assertNamedSchemaObject(t, database, "index", "exports_profile_job_idx")
 	assertNamedSchemaObject(t, database, "index", "scheduler_permits_profile_expiry_idx")
+	assertNamedSchemaObject(t, database, "index", "article_albums_album_ordinal_idx")
 }
 
 func assertMigrationSentinel(t *testing.T, database *sql.DB, sourceVersion int) {

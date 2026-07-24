@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 8
+	CurrentSchemaVersion = 9
 	MinimumSchemaVersion = 1
 )
 

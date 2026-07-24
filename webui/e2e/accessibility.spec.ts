@@ -55,7 +55,7 @@ test('article and album export handoffs use SPA navigation and focus the export 
 
   await page.goto('/albums')
   await page.getByRole('checkbox', { name: 'Select album-fixture-1' }).check()
-  await page.getByRole('button', { name: 'Export selected album' }).click()
+  await page.getByRole('button', { name: 'Export selected albums' }).click()
   await expect(page).toHaveURL(/\/exports$/)
   await expect(page.getByRole('heading', { name: 'Export articles', level: 1 })).toBeFocused()
   await expect(page.getByRole('main')).toHaveCount(1)

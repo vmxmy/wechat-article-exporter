@@ -992,7 +992,10 @@ func (model Model) executeActionWithIDs(action string, confirmedIDs []string) (t
 			selection.ArticleIDs = append(selection.ArticleIDs, domain.ArticleID(id))
 		}
 		if action == "album_export" && len(ids) > 0 {
-			selection = domain.ExportSelection{Kind: domain.ExportSelectionAlbum, AlbumID: domain.AlbumID(ids[0])}
+			selection = domain.ExportSelection{Kind: domain.ExportSelectionAlbumIDs, AlbumIDs: make([]domain.AlbumID, len(ids))}
+			for index, id := range ids {
+				selection.AlbumIDs[index] = domain.AlbumID(id)
+			}
 		}
 		return model, model.beginCommand(func(ctx context.Context) tea.Msg {
 			job, err := model.options.Application.StartExport(ctx, domain.ExportRequest{Selection: selection, Format: "markdown"})

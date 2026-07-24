@@ -92,3 +92,38 @@ func TestSaveAlbumPageLinksExistingCanonicalArticle(t *testing.T) {
 		t.Fatalf("album article ID = %q, want existing canonical article %q", articleID, provisional.ID)
 	}
 }
+
+func TestQueryArticleIDsPreservesAlbumOrdinalOrder(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	ctx := context.Background()
+	account, err := database.SaveAccount(ctx, domain.Account{FakeID: "fixture-a", Name: "Fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, album := range []AlbumPageCommit{
+		{Album: domain.Album{ID: "album-a", AccountID: account.ID, UpstreamID: "upstream-a", Name: "A"}, Articles: []AlbumArticleCommit{
+			{Ordinal: 2, Article: domain.Article{ID: "article-b", AccountID: account.ID, Aid: "aid-b", Title: "B", CanonicalURL: "https://mp.weixin.qq.com/s/b"}},
+			{Ordinal: 1, Article: domain.Article{ID: "article-a", AccountID: account.ID, Aid: "aid-a", Title: "A", CanonicalURL: "https://mp.weixin.qq.com/s/a"}},
+		}},
+		{Album: domain.Album{ID: "album-b", AccountID: account.ID, UpstreamID: "upstream-b", Name: "B"}, Articles: []AlbumArticleCommit{
+			{Ordinal: 1, Article: domain.Article{ID: "article-c", AccountID: account.ID, Aid: "aid-c", Title: "C", CanonicalURL: "https://mp.weixin.qq.com/s/c"}},
+			{Ordinal: 2, Article: domain.Article{ID: "article-a", AccountID: account.ID, Aid: "aid-a", Title: "A", CanonicalURL: "https://mp.weixin.qq.com/s/a"}},
+		}},
+	} {
+		if _, err := database.SaveAlbumPage(ctx, album); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct {
+		album domain.AlbumID
+		want  []domain.ArticleID
+	}{
+		{album: "album-a", want: []domain.ArticleID{"article-a", "article-b"}},
+		{album: "album-b", want: []domain.ArticleID{"article-c", "article-a"}},
+	} {
+		ids, err := database.QueryArticleIDs(ctx, domain.ArticleQuery{AlbumID: test.album})
+		if err != nil || !reflect.DeepEqual(ids, test.want) {
+			t.Fatalf("QueryArticleIDs(%q) = %#v, %v; want %#v", test.album, ids, err, test.want)
+		}
+	}
+}

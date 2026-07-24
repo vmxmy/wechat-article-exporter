@@ -255,6 +255,7 @@ export type ExportSelection =
   | { readonly kind: 'explicit_ids'; readonly articleIds: readonly string[] }
   | { readonly kind: 'account'; readonly accountId: string }
   | { readonly kind: 'album'; readonly albumId: string }
+  | { readonly kind: 'album_ids'; readonly albumIds: readonly string[] }
   | { readonly kind: 'saved_query'; readonly savedQueryId: string; readonly query?: ArticleQuery }
   | { readonly kind: 'all_matching'; readonly query: ArticleQuery }
 

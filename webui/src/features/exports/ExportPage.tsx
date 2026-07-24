@@ -10,6 +10,7 @@ import { handoffCreatedJob } from '../../lib/jobHandoff'
 import { useExportManifest, useExportPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 
 const pageSize = 25
+const maximumAlbumIDs = 50
 const formats: readonly ExportFormat[] = ['markdown', 'html', 'text', 'json', 'xlsx', 'docx', 'pdf']
 
 interface ExportPageProps {
@@ -27,6 +28,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   const [selectionLabel, setSelectionLabel] = useState(initialHandoff?.label ?? '')
   const [accountID, setAccountID] = useState('')
   const [albumID, setAlbumID] = useState('')
+  const [albumIDs, setAlbumIDs] = useState(() => initialHandoff?.selection.kind === 'album_ids' ? initialHandoff.selection.albumIds.join('\n') : '')
   const [savedQueryID, setSavedQueryID] = useState('')
   const [matchingQueryText, setMatchingQueryText] = useState('{}')
   const [format, setFormat] = useState<ExportFormat>('markdown')
@@ -57,6 +59,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
 
   useEffect(() => {
     if (selection?.kind === 'explicit_ids') setArticleIDs(selection.articleIds.join('\n'))
+    if (selection?.kind === 'album_ids') setAlbumIDs(selection.albumIds.join('\n'))
   }, [selection])
 
   useEffect(() => {
@@ -98,7 +101,9 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   function queueExport() {
     if (!directory) return setNotice(copy.invalidDirectory)
     const resolvedSelection = selection?.kind === 'explicit_ids' ? { kind: 'explicit_ids' as const, articleIds: ids } : selection
-    if (!resolvedSelection || (resolvedSelection.kind === 'explicit_ids' && resolvedSelection.articleIds.length === 0)) return setNotice(copy.invalidSelection)
+    if (!resolvedSelection ||
+      (resolvedSelection.kind === 'explicit_ids' && resolvedSelection.articleIds.length === 0) ||
+      (resolvedSelection.kind === 'album_ids' && (resolvedSelection.albumIds.length === 0 || resolvedSelection.albumIds.length > maximumAlbumIDs))) return setNotice(copy.invalidSelection)
     const maximum = Number(maximumNameBytes)
     mutations.startExport.mutate({
       directoryToken: directory.token,
@@ -137,6 +142,14 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
     const value = albumID.trim()
     setSelection(value ? { kind: 'album', albumId: value } : undefined)
     setSelectionLabel(value ? copy.selection.albumLabel(value) : '')
+  }
+
+  function selectAlbums(value: string) {
+    setAlbumIDs(value)
+    const ids = parseArticleIDs(value)
+    const isValid = ids.length > 0 && ids.length <= maximumAlbumIDs
+    setSelection(isValid ? { kind: 'album_ids', albumIds: ids } : undefined)
+    setSelectionLabel(isValid ? copy.selection.albumsLabel(ids.length) : '')
   }
 
   function selectSavedQuery(value: string) {
@@ -188,6 +201,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
           <fieldset className="export-options"><legend>{copy.selection.title}</legend>
             <label className="export-textarea-label">{copy.articleIds}<textarea value={articleIDs} onChange={(event) => selectExplicitIDs(event.target.value)} aria-describedby="article-ids-help" rows={4} /></label><p id="article-ids-help" className="field-hint">{copy.articleIdsHint}</p>
             <div className="export-field-grid"><TextInput label={copy.selection.accountId} value={accountID} onChange={setAccountID} /><Button label={copy.selection.account} variant="secondary" isDisabled={!accountID.trim()} onClick={selectAccount} /><TextInput label={copy.selection.albumId} value={albumID} onChange={setAlbumID} /><Button label={copy.selection.album} variant="secondary" isDisabled={!albumID.trim()} onClick={selectAlbum} /></div>
+            <label className="export-textarea-label">{copy.selection.albumIds}<textarea value={albumIDs} onChange={(event) => selectAlbums(event.target.value)} aria-describedby="album-ids-help" rows={4} /></label><p id="album-ids-help" className="field-hint">{copy.selection.albumIdsHint}</p>
             <label>{copy.selection.savedQuery}<select value={savedQueryID} onChange={(event) => selectSavedQuery(event.target.value)}><option value="">{copy.selection.savedQueryPlaceholder}</option>{savedQueries.data?.data.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
             <label className="export-textarea-label">{copy.selection.matchingQuery}<textarea value={matchingQueryText} onChange={(event) => setMatchingQueryText(event.target.value)} rows={4} /></label><Button label={copy.selection.matching} variant="secondary" onClick={selectMatchingQuery} />
             {selection ? <p className="field-hint" role="status">{copy.selection.active(selectionLabel)}</p> : null}

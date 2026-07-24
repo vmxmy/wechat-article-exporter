@@ -691,15 +691,18 @@ func (extensions *workspaceExtensions) startExport(ctx context.Context, request 
 		return tui.OperationResult{}, errors.New("export format and output directory are required")
 	}
 	selection := domain.ExportSelection{Kind: domain.ExportSelectionExplicitIDs}
-	for _, id := range request.IDs {
-		if request.Area == tui.AreaAlbums {
-			selection = domain.ExportSelection{Kind: domain.ExportSelectionAlbum, AlbumID: domain.AlbumID(id)}
-			break
+	if request.Area == tui.AreaAlbums {
+		selection = domain.ExportSelection{Kind: domain.ExportSelectionAlbumIDs, AlbumIDs: make([]domain.AlbumID, len(request.IDs))}
+		for index, id := range request.IDs {
+			selection.AlbumIDs[index] = domain.AlbumID(id)
 		}
-		selection.ArticleIDs = append(selection.ArticleIDs, domain.ArticleID(id))
+	} else {
+		for _, id := range request.IDs {
+			selection.ArticleIDs = append(selection.ArticleIDs, domain.ArticleID(id))
+		}
 	}
-	if len(selection.ArticleIDs) == 0 && selection.AlbumID == "" {
-		return tui.OperationResult{}, errors.New("select one or more articles or an album before starting an export")
+	if len(selection.ArticleIDs) == 0 && len(selection.AlbumIDs) == 0 {
+		return tui.OperationResult{}, errors.New("select one or more articles or albums before starting an export")
 	}
 	active, err := extensions.active()
 	if err != nil {
@@ -770,7 +773,7 @@ func (extensions *workspaceExtensions) exportConfiguration(ctx context.Context) 
 		"maximum name bytes": fmt.Sprint(preferences.MaximumNameBytes), "collision policy": preferences.CollisionPolicy,
 		"Excel content": fmt.Sprint(preferences.ExcelIncludeContent), "JSON content": fmt.Sprint(preferences.JSONIncludeContent),
 		"JSON comments": fmt.Sprint(preferences.JSONIncludeComments), "HTML comments": fmt.Sprint(preferences.HTMLIncludeComments),
-	}, Message: "Select articles or an album before starting an export. Cobra exposes explicit format/output flags for automation."}, nil
+	}, Message: "Select articles or albums before starting an export. Cobra exposes explicit format/output flags for automation."}, nil
 }
 
 func (extensions *workspaceExtensions) verifyExport(ctx context.Context, ids []string) (tui.OperationResult, error) {

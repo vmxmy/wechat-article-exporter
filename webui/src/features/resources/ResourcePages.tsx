@@ -101,8 +101,14 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
     mutations.traverseAlbum.mutate({ albumId: album.id, accountId: album.accountId, order, download }, { onSuccess: (job) => setNotice(messages.resources.albums.actions.queued(job.id)), onError: () => setNotice(messages.resources.albums.actions.failed) })
   }
   const handoffExport = () => {
-    if (!album?.accountId) return
-    saveExportHandoff({ selection: { kind: 'album', albumId: album.id }, label: messages.exports.selection.albumLabel(album.id) })
+    if (selected.length === 0) return
+    const selection = selected.length === 1
+      ? { kind: 'album' as const, albumId: selected[0] }
+      : { kind: 'album_ids' as const, albumIds: selected }
+    const label = selected.length === 1
+      ? messages.exports.selection.albumLabel(selected[0])
+      : messages.exports.selection.albumsLabel(selected.length)
+    saveExportHandoff({ selection, label })
     navigateTo('/exports')
   }
   const selectionScope = `${accountId}\u0000${keyword}`
@@ -120,7 +126,7 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
     <section className="unavailable-actions" aria-labelledby="album-actions-title">
       <div><h2 id="album-actions-title">{messages.resources.albums.actions.title}</h2><p>{messages.resources.albums.actions.description}</p></div>
       <label>{messages.resources.albums.actions.order}<select aria-label={messages.resources.albums.actions.order} value={order} onChange={(event) => setOrder(event.target.value as AlbumTraversalOrder)}><option value="forward">{messages.resources.albums.actions.forward}</option><option value="reverse">{messages.resources.albums.actions.reverse}</option></select></label>
-      <div className="action-button-group"><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending} isDisabled={!album?.accountId} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending} isDisabled={!album?.accountId} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" isDisabled={!album?.accountId} onClick={handoffExport} /></div>
+      <div className="action-button-group"><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending} isDisabled={!album?.accountId} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending} isDisabled={!album?.accountId} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" isDisabled={selected.length === 0} onClick={handoffExport} /></div>
       {notice ? <p role="status">{notice}</p> : null}
     </section>
   </>
