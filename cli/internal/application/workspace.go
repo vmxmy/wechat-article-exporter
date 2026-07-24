@@ -811,15 +811,24 @@ func (workspace *Workspace) ArticleCommentReplies(ctx context.Context, id domain
 }
 
 func workspaceCommentPageInput(id domain.ArticleID, page WorkspacePageRequest) (domain.ArticleID, WorkspacePageRequest, error) {
-	id = domain.ArticleID(strings.TrimSpace(string(id)))
-	if !validWorkspaceOpaqueID(string(id)) {
+	rawID := string(id)
+	trimmedID := strings.TrimSpace(rawID)
+	if rawID != trimmedID || !validWorkspaceArticleID(trimmedID) {
 		return "", WorkspacePageRequest{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "article identifier is invalid"}
 	}
+	id = domain.ArticleID(trimmedID)
 	page, err := page.normalize()
 	if err != nil {
 		return "", WorkspacePageRequest{}, err
 	}
 	return id, page, nil
+}
+
+func validWorkspaceArticleID(value string) bool {
+	if strings.HasPrefix(value, "article:") {
+		return validWorkspaceHexID(value[len("article:"):])
+	}
+	return validWorkspaceOpaqueID(value)
 }
 
 func validWorkspaceOpaqueID(value string) bool {
@@ -828,6 +837,19 @@ func validWorkspaceOpaqueID(value string) bool {
 	}
 	for _, character := range value {
 		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '-' || character == '_' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validWorkspaceHexID(value string) bool {
+	if value == "" || len(value)+len("article:") > 256 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'f' || character >= 'A' && character <= 'F' || character >= '0' && character <= '9' {
 			continue
 		}
 		return false

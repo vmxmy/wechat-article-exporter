@@ -278,12 +278,17 @@ reads only locally stored replies for one locally stored comment. Neither
 route contacts WeChat, resumes a download, accesses credentials, or exposes
 raw request/provenance state.
 
-Both identifiers are strict opaque values: 1–256 ASCII letters, digits, `.`,
-`_`, or `-`. Invalid identifiers are `400 invalid_argument`; malformed route
-shapes remain `404 not_found`. Both routes use the bounded pagination rules in
-§3 and deterministic ascending stored timestamp then opaque-ID order. They
-require the authenticated local browser session and validated loopback Host;
-GET reads do not require Origin or CSRF proof.
+`articleId` accepts the established local article identifier grammar: either a
+1–256-character ASCII opaque ID made only of letters, digits, `.`, `_`, or
+`-`, or the canonical persistent form `article:<hex>` (non-empty hexadecimal
+suffix; the complete identifier is at most 256 bytes). `commentId` remains the
+strict opaque form only: 1–256 ASCII letters, digits, `.`, `_`, or `-`. No
+identifier may contain a slash, whitespace, or any other character outside
+its stated grammar. Invalid identifiers are `400 invalid_argument`; malformed
+route shapes remain `404 not_found`. Both routes use the bounded pagination
+rules in §3 and deterministic ascending stored timestamp then opaque-ID order.
+They require the authenticated local browser session and validated loopback
+Host; GET reads do not require Origin or CSRF proof.
 
 The comments route uses the single-resource envelope (§2.1). It returns
 `articleId`, a bounded `comments` page, and a `pendingReplies` count. Each

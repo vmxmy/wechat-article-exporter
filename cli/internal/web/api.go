@@ -114,24 +114,32 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 				server.apiError(writer, http.StatusNotFound, "not_found", "workspace resource was not found")
 				return
 			}
-			if !validArticleID(articleID) {
-				server.apiError(writer, http.StatusBadRequest, "invalid_argument", "article identifier is invalid")
-				return
-			}
 			switch endpoint {
 			case "detail":
+				if !validArticleID(articleID) {
+					server.apiError(writer, http.StatusBadRequest, "invalid_argument", "article identifier is invalid")
+					return
+				}
 				server.articleDetail(writer, request, domain.ArticleID(articleID))
 				return
 			case "resources":
+				if !validArticleID(articleID) {
+					server.apiError(writer, http.StatusBadRequest, "invalid_argument", "article identifier is invalid")
+					return
+				}
 				server.articleResources(writer, request, domain.ArticleID(articleID))
 				return
 			case "comments":
+				if !validCommentArticleID(articleID) {
+					server.apiError(writer, http.StatusBadRequest, "invalid_argument", "article identifier is invalid")
+					return
+				}
 				server.articleComments(writer, request, domain.ArticleID(articleID))
 				return
 			}
 			commentID, replyEndpoint, hasReplyEndpoint := strings.Cut(strings.TrimPrefix(endpoint, "comments/"), "/")
 			if strings.HasPrefix(endpoint, "comments/") && hasReplyEndpoint && replyEndpoint == "replies" {
-				if !validCommentID(commentID) {
+				if !validCommentArticleID(articleID) || !validCommentID(commentID) {
 					server.apiError(writer, http.StatusBadRequest, "invalid_argument", "comment identifier is invalid")
 					return
 				}
@@ -304,6 +312,13 @@ func (server *Server) articleCommentReplies(writer http.ResponseWriter, request 
 }
 
 func validArticleID(value string) bool { return validLocalOpaqueID(value) }
+
+func validCommentArticleID(value string) bool {
+	if strings.HasPrefix(value, "article:") {
+		return validHexID(value[len("article:"):])
+	}
+	return validLocalOpaqueID(value)
+}
 func validCommentID(value string) bool { return validLocalOpaqueID(value) }
 
 func validLocalOpaqueID(value string) bool {
@@ -312,6 +327,19 @@ func validLocalOpaqueID(value string) bool {
 	}
 	for _, character := range value {
 		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '-' || character == '_' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validHexID(value string) bool {
+	if value == "" || len(value)+len("article:") > 256 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'f' || character >= 'A' && character <= 'F' || character >= '0' && character <= '9' {
 			continue
 		}
 		return false
