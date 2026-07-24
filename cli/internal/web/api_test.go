@@ -22,7 +22,7 @@ func TestReadAPIProvidesVersionedBoundedWorkspaceData(t *testing.T) {
 		runtime:  domain.RuntimeStatus{Version: "fixture", Profile: "fixture-profile", Paths: domain.RuntimePaths{Data: "/private/profile"}, Storage: domain.StorageStatus{Articles: 2}},
 		session:  wechat.Session{State: wechat.SessionAuthenticated, AccountID: "account-1", AccountName: "Fixture"},
 		accounts: domain.Page[domain.Account]{Items: []domain.Account{{ID: "account-1", Name: "Fixture"}}, Total: 1},
-		articles: domain.Page[domain.Article]{Items: []domain.Article{{ID: "article-1", Title: "Fixture", CanonicalURL: "https://example.test/article"}}, Total: 1},
+		articles: domain.Page[domain.Article]{Items: []domain.Article{{ID: "article-1", AccountID: "account-1", Title: "Fixture", CanonicalURL: "https://example.test/article"}}, Total: 1},
 		albums:   domain.Page[domain.Album]{Items: []domain.Album{{ID: "album-1", Name: "Album"}}, Total: 1},
 		jobs:     domain.Page[domain.Job]{Items: []domain.Job{{ID: "11111111-1111-1111-1111-111111111111", Kind: "sync", State: domain.JobRunning}}, Total: 1},
 		saved:    []domain.SavedArticleQuery{{Name: "recent"}},
@@ -52,8 +52,13 @@ func TestReadAPIProvidesVersionedBoundedWorkspaceData(t *testing.T) {
 	if app.accountQuery.Limit != 100 || app.articleQuery.Limit != application.WorkspaceDefaultPageLimit || app.articleQuery.Deleted == nil || *app.articleQuery.Deleted || len(app.articleQuery.MessageTypes) != 2 || len(app.articleQuery.Sorts) != 1 || app.albumQuery != (domain.AlbumQuery{AccountID: "account-1", Keyword: "album", Limit: 20}) {
 		t.Fatalf("queries not parsed/bounded: account=%#v article=%#v album=%#v", app.accountQuery, app.articleQuery, app.albumQuery)
 	}
-	response := get(t, client, base+"/api/v1/runtime")
+	response := get(t, client, base+"/api/v1/articles")
 	body := readResponse(t, response)
+	if !strings.Contains(body, `"accountName":"Fixture"`) || strings.Contains(body, `"accountId":"account-1"`) {
+		t.Fatalf("article list did not project readable account name: %s", body)
+	}
+	response = get(t, client, base+"/api/v1/runtime")
+	body = readResponse(t, response)
 	if strings.Contains(body, "/private/profile") {
 		t.Fatalf("runtime response leaked absolute path: %s", body)
 	}
@@ -1022,6 +1027,17 @@ func (app *apiApplication) QueryAccounts(_ context.Context, query domain.Account
 	page := app.accounts
 	page.Offset, page.Limit = query.Offset, query.Limit
 	return page, app.accountsErr
+}
+func (app *apiApplication) AccountNames(_ context.Context, ids []domain.AccountID) (map[domain.AccountID]string, error) {
+	names := make(map[domain.AccountID]string)
+	for _, id := range ids {
+		for _, account := range app.accounts.Items {
+			if account.ID == id {
+				names[id] = account.Name
+			}
+		}
+	}
+	return names, nil
 }
 func (app *apiApplication) SearchAccounts(_ context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
 	app.searchQuery = query

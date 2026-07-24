@@ -88,8 +88,9 @@ func TestCrossAdapterQueriesShareAccountArticleAndJobOutcomes(t *testing.T) {
 		if got := getPage[domain.Account](t, client, base+"/api/v1/accounts?limit=50"); !reflect.DeepEqual(got, wantAccounts) {
 			t.Fatalf("GET accounts = %#v, want %#v", got, wantAccounts)
 		}
-		if got := getPage[domain.Article](t, client, base+"/api/v1/articles?limit=50"); !reflect.DeepEqual(got, wantArticles) {
-			t.Fatalf("GET articles = %#v, want %#v", got, wantArticles)
+		articlePage := getPage[application.WorkspaceArticle](t, client, base+"/api/v1/articles?limit=50")
+		if articlePage.Total != wantArticles.Total || articlePage.Offset != wantArticles.Offset || articlePage.Limit != wantArticles.Limit || len(articlePage.Items) != len(wantArticles.Items) || articlePage.Items[0].ID != wantArticles.Items[0].ID || articlePage.Items[0].Title != wantArticles.Items[0].Title {
+			t.Fatalf("GET articles = %#v, want page for %#v", articlePage, wantArticles)
 		}
 		if got := getPage[domain.Job](t, client, base+"/api/v1/jobs?limit=50"); !reflect.DeepEqual(got, wantJobs) {
 			t.Fatalf("GET jobs = %#v, want %#v", got, wantJobs)
@@ -181,6 +182,17 @@ type fixtureLibrary struct {
 func (library *fixtureLibrary) QueryAccounts(_ context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
 	library.accountQuery = query
 	return library.accounts, nil
+}
+func (library *fixtureLibrary) AccountNames(_ context.Context, ids []domain.AccountID) (map[domain.AccountID]string, error) {
+	names := make(map[domain.AccountID]string)
+	for _, id := range ids {
+		for _, account := range library.accounts.Items {
+			if account.ID == id {
+				names[id] = account.Name
+			}
+		}
+	}
+	return names, nil
 }
 func (library *fixtureLibrary) QueryArticles(_ context.Context, query domain.ArticleQuery) (domain.Page[domain.Article], error) {
 	library.articleQuery = query

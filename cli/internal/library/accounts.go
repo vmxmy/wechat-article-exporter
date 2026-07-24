@@ -89,6 +89,45 @@ FROM accounts WHERE profile_id=? AND fakeid=?`,
 		database.profileID, strings.TrimSpace(fakeID)))
 }
 
+// AccountNames resolves saved account display names in one bounded local query.
+// Missing IDs are deliberately omitted so presentation adapters can render an
+// unavailable name without revealing an internal stable identifier.
+func (database *Database) AccountNames(ctx context.Context, ids []domain.AccountID) (map[domain.AccountID]string, error) {
+	unique := make(map[domain.AccountID]struct{}, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			unique[id] = struct{}{}
+		}
+	}
+	if len(unique) == 0 {
+		return map[domain.AccountID]string{}, nil
+	}
+	placeholders := make([]string, 0, len(unique))
+	arguments := make([]any, 0, len(unique)+1)
+	arguments = append(arguments, database.profileID)
+	for id := range unique {
+		placeholders = append(placeholders, "?")
+		arguments = append(arguments, id)
+	}
+	rows, err := database.db.QueryContext(ctx, `SELECT id, nickname FROM accounts WHERE profile_id=? AND id IN (`+strings.Join(placeholders, ",")+`)`, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := make(map[domain.AccountID]string, len(unique))
+	for rows.Next() {
+		var id domain.AccountID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		if name = strings.TrimSpace(name); name != "" {
+			names[id] = name
+		}
+	}
+	return names, rows.Err()
+}
+
 func (database *Database) ExportAccounts(ctx context.Context, query domain.AccountQuery) (domain.AccountManifest, error) {
 	query.Offset = 0
 	query.Limit = 500

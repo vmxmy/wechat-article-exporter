@@ -64,6 +64,16 @@ test('article selections persist across server pages and hand off all selected s
   await expectOnlyLoopbackRequests(page)
 })
 
+test('article table presents account names rather than internal account IDs', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/articles')
+
+  const table = page.getByRole('table')
+  await expect(table.getByRole('cell', { name: 'Fixture Account', exact: true }).first()).toBeVisible()
+  await expect(table).not.toContainText('account-fixture')
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('discovery candidates populate the explicit account save form and choose a synchronization mode', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/accounts')

@@ -226,6 +226,20 @@ type WorkspaceArticleQuery struct {
 	Page            WorkspacePageRequest `json:"page"`
 }
 
+// WorkspaceArticle is the browser-safe, human-readable article list DTO.
+// Stable IDs remain internal to local query and action contracts; the list
+// projects the owning account as a display name rather than exposing it.
+type WorkspaceArticle struct {
+	ID          domain.ArticleID `json:"id"`
+	Title       string           `json:"title"`
+	AccountName string           `json:"accountName,omitempty"`
+	Author      string           `json:"author,omitempty"`
+	PublishedAt time.Time        `json:"publishedAt,omitempty"`
+	State       string           `json:"state,omitempty"`
+	HasContent  bool             `json:"hasContent"`
+	HasComments bool             `json:"hasComments"`
+}
+
 type WorkspaceAlbumQuery struct {
 	AccountID string               `json:"accountId,omitempty"`
 	Keyword   string               `json:"keyword,omitempty"`
@@ -381,7 +395,7 @@ type WorkspaceReader interface {
 	Runtime(context.Context) (WorkspaceRuntime, error)
 	Session(context.Context) (WorkspaceSession, error)
 	Accounts(context.Context, WorkspaceAccountQuery) (WorkspacePage[domain.Account], error)
-	Articles(context.Context, WorkspaceArticleQuery) (WorkspacePage[domain.Article], error)
+	Articles(context.Context, WorkspaceArticleQuery) (WorkspacePage[WorkspaceArticle], error)
 	Albums(context.Context, WorkspaceAlbumQuery) (WorkspacePage[domain.Album], error)
 	SavedArticleQueries(context.Context, WorkspacePageRequest) (WorkspacePage[domain.SavedArticleQuery], error)
 	Jobs(context.Context, WorkspaceJobQuery) (WorkspacePage[WorkspaceJob], error)
@@ -476,10 +490,10 @@ func (workspace *Workspace) Accounts(ctx context.Context, input WorkspaceAccount
 	return workspacePage(result), workspaceError(err)
 }
 
-func (workspace *Workspace) Articles(ctx context.Context, input WorkspaceArticleQuery) (WorkspacePage[domain.Article], error) {
+func (workspace *Workspace) Articles(ctx context.Context, input WorkspaceArticleQuery) (WorkspacePage[WorkspaceArticle], error) {
 	page, err := input.Page.normalize()
 	if err != nil {
-		return WorkspacePage[domain.Article]{}, err
+		return WorkspacePage[WorkspaceArticle]{}, err
 	}
 	result, err := workspace.application.QueryArticles(ctx, domain.ArticleQuery{
 		AccountID: domain.AccountID(input.AccountID), AlbumID: domain.AlbumID(input.AlbumID), Keyword: strings.TrimSpace(input.Keyword),
@@ -491,7 +505,39 @@ func (workspace *Workspace) Articles(ctx context.Context, input WorkspaceArticle
 		MediaSecondsMin: input.MediaSecondsMin, MediaSecondsMax: input.MediaSecondsMax, Sort: input.Sort,
 		Sorts: append([]domain.ArticleSort(nil), input.Sorts...), Offset: page.Offset, Limit: page.Limit,
 	})
-	return workspacePage(result), workspaceError(err)
+	if err != nil {
+		return WorkspacePage[WorkspaceArticle]{}, workspaceError(err)
+	}
+	return workspaceArticles(ctx, workspace.application, result)
+}
+
+func workspaceArticles(ctx context.Context, application Application, page domain.Page[domain.Article]) (WorkspacePage[WorkspaceArticle], error) {
+	accountIDs := make([]domain.AccountID, 0, len(page.Items))
+	for _, article := range page.Items {
+		if article.AccountID != "" {
+			accountIDs = append(accountIDs, article.AccountID)
+		}
+	}
+	accountNames := map[domain.AccountID]string{}
+	if len(accountIDs) > 0 {
+		accounts, ok := application.(interface {
+			AccountNames(context.Context, []domain.AccountID) (map[domain.AccountID]string, error)
+		})
+		if !ok {
+			return WorkspacePage[WorkspaceArticle]{}, workspaceError(fmt.Errorf("article account names: %w", ErrUnavailable))
+		}
+		resolved, err := accounts.AccountNames(ctx, accountIDs)
+		if err != nil {
+			return WorkspacePage[WorkspaceArticle]{}, workspaceError(err)
+		}
+		accountNames = resolved
+	}
+	items := make([]WorkspaceArticle, 0, len(page.Items))
+	for _, article := range page.Items {
+		items = append(items, WorkspaceArticle{ID: article.ID, Title: article.Title, AccountName: strings.TrimSpace(accountNames[article.AccountID]),
+			Author: article.Author, PublishedAt: article.PublishedAt, State: article.State, HasContent: article.HasContent, HasComments: article.HasComments})
+	}
+	return WorkspacePage[WorkspaceArticle]{Items: items, Total: page.Total, Offset: page.Offset, Limit: page.Limit}, nil
 }
 
 func (workspace *Workspace) Albums(ctx context.Context, input WorkspaceAlbumQuery) (WorkspacePage[domain.Album], error) {

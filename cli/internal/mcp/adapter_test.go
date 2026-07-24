@@ -499,6 +499,9 @@ func (*fakeApplication) GetAccountByFakeID(context.Context, string) (domain.Acco
 func (*fakeApplication) QueryAccounts(context.Context, domain.AccountQuery) (domain.Page[domain.Account], error) {
 	return domain.Page[domain.Account]{}, nil
 }
+func (*fakeApplication) AccountNames(context.Context, []domain.AccountID) (map[domain.AccountID]string, error) {
+	return map[domain.AccountID]string{}, nil
+}
 func (*fakeApplication) ExportAccounts(context.Context, domain.AccountQuery) (domain.AccountManifest, error) {
 	return domain.AccountManifest{}, nil
 }

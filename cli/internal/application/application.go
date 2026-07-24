@@ -327,6 +327,16 @@ func (service *Service) GetAccountByFakeID(ctx context.Context, fakeID string) (
 	return service.accounts.GetAccountByFakeID(ctx, fakeID)
 }
 
+func (service *Service) AccountNames(ctx context.Context, ids []domain.AccountID) (map[domain.AccountID]string, error) {
+	accounts, ok := service.library.(interface {
+		AccountNames(context.Context, []domain.AccountID) (map[domain.AccountID]string, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("account names: %w", ErrUnavailable)
+	}
+	return accounts.AccountNames(ctx, ids)
+}
+
 func (service *Service) GetArticle(ctx context.Context, id domain.ArticleID) (domain.Article, error) {
 	articles, ok := service.library.(interface {
 		GetArticle(context.Context, domain.ArticleID) (domain.Article, error)

@@ -104,6 +104,29 @@ func TestSaveAccountMergesWithoutOverwritingRicherLocalMetadata(t *testing.T) {
 	}
 }
 
+func TestAccountNamesResolvesOnlyRequestedProfileScopedNames(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	ctx := context.Background()
+	first, err := database.SaveAccount(ctx, domain.Account{FakeID: "fixture-a", Name: " First account "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := database.SaveAccount(ctx, domain.Account{FakeID: "fixture-b", Name: "Second account"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := database.AccountNames(ctx, []domain.AccountID{first.ID, first.ID, "missing", second.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 2 || names[first.ID] != "First account" || names[second.ID] != "Second account" {
+		t.Fatalf("account names = %#v", names)
+	}
+	if _, ok := names["missing"]; ok {
+		t.Fatalf("missing account leaked into name projection: %#v", names)
+	}
+}
+
 func TestUpdateAccountReplacesEditableMetadataAndPreservesSyncState(t *testing.T) {
 	database := openTestDatabase(t, "profile-a")
 	ctx := context.Background()

@@ -84,7 +84,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
       )
     },
     { accessorKey: 'title', header: messages.articles.columns.title },
-    { accessorKey: 'accountId', header: messages.articles.columns.account, cell: ({ getValue }) => getValue<string | undefined>() ?? '—' },
+    { accessorKey: 'accountName', header: messages.articles.columns.account, enableSorting: false, cell: ({ getValue }) => getValue<string | undefined>()?.trim() || '—' },
     {
       accessorKey: 'publishedAt',
       header: messages.articles.columns.published,

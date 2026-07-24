@@ -1219,6 +1219,9 @@ func (app *fakeWorkspaceApplication) QueryAccounts(_ context.Context, query doma
 		{ID: "account-b", FakeID: "fake-b", Name: "Second account", ArticleCount: 4},
 	}, Total: 2, Offset: query.Offset, Limit: query.Limit}, nil
 }
+func (*fakeWorkspaceApplication) AccountNames(context.Context, []domain.AccountID) (map[domain.AccountID]string, error) {
+	return map[domain.AccountID]string{}, nil
+}
 func (*fakeWorkspaceApplication) ExportAccounts(context.Context, domain.AccountQuery) (domain.AccountManifest, error) {
 	return domain.AccountManifest{}, nil
 }

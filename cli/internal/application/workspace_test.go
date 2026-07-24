@@ -26,6 +26,9 @@ type workspaceLibrary struct {
 	accountQuery    domain.AccountQuery
 	articleQuery    domain.ArticleQuery
 	albumQuery      domain.AlbumQuery
+	accountByID     map[domain.AccountID]domain.Account
+	accountNameGets int
+	accountNamesErr error
 	accountsError   error
 	availability    library.ArticleResourceAvailability
 	availabilityErr error
@@ -43,6 +46,44 @@ type workspaceLibrary struct {
 	repliesComment  string
 	repliesOffset   int
 	repliesLimit    int
+}
+
+func (library *workspaceLibrary) AccountNames(_ context.Context, ids []domain.AccountID) (map[domain.AccountID]string, error) {
+	library.accountNameGets++
+	if library.accountNamesErr != nil {
+		return nil, library.accountNamesErr
+	}
+	names := make(map[domain.AccountID]string)
+	for _, id := range ids {
+		if account, ok := library.accountByID[id]; ok {
+			names[id] = account.Name
+		}
+	}
+	return names, nil
+}
+
+func (*workspaceLibrary) SaveAccount(context.Context, domain.Account) (domain.Account, error) {
+	return domain.Account{}, nil
+}
+
+func (*workspaceLibrary) UpdateAccount(context.Context, domain.Account) (domain.Account, error) {
+	return domain.Account{}, nil
+}
+
+func (*workspaceLibrary) GetAccountByFakeID(context.Context, string) (domain.Account, error) {
+	return domain.Account{}, sql.ErrNoRows
+}
+
+func (*workspaceLibrary) ExportAccounts(context.Context, domain.AccountQuery) (domain.AccountManifest, error) {
+	return domain.AccountManifest{}, nil
+}
+
+func (*workspaceLibrary) ImportAccounts(context.Context, domain.AccountManifest) (domain.AccountImportReport, error) {
+	return domain.AccountImportReport{}, nil
+}
+
+func (*workspaceLibrary) DeleteAccounts(context.Context, []domain.AccountID) (domain.AccountDeleteReport, error) {
+	return domain.AccountDeleteReport{}, nil
 }
 
 func (library *workspaceLibrary) GetArticle(_ context.Context, id domain.ArticleID) (domain.Article, error) {
@@ -154,11 +195,12 @@ func (manager *workspaceJobManager) Lease(context.Context, domain.JobID) (librar
 func TestWorkspaceReadFacadeUsesApplicationAndReturnsSafeDTOs(t *testing.T) {
 	now := time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
 	library := &workspaceLibrary{
-		accounts: domain.Page[domain.Account]{Items: []domain.Account{{ID: "account-1", Name: "Fixture"}}, Total: 1, Offset: 3, Limit: 20},
-		articles: domain.Page[domain.Article]{Items: []domain.Article{{ID: "article-1", Title: "Fixture article"}}, Total: 1, Offset: 0, Limit: 20},
-		albums:   domain.Page[domain.Album]{Items: []domain.Album{{ID: "album-1", Name: "Fixture album"}}, Total: 1, Offset: 0, Limit: 20},
-		storage:  domain.StorageStatus{DatabaseAvailable: true, ObjectStoreReady: true, Articles: 1},
-		saved:    []domain.SavedArticleQuery{{Name: "recent"}},
+		accounts:    domain.Page[domain.Account]{Items: []domain.Account{{ID: "account-1", Name: "Fixture"}}, Total: 1, Offset: 3, Limit: 20},
+		articles:    domain.Page[domain.Article]{Items: []domain.Article{{ID: "article-1", AccountID: "account-1", Title: "Fixture article"}}, Total: 1, Offset: 0, Limit: 20},
+		accountByID: map[domain.AccountID]domain.Account{"account-1": {ID: "account-1", Name: "Fixture"}},
+		albums:      domain.Page[domain.Album]{Items: []domain.Album{{ID: "album-1", Name: "Fixture album"}}, Total: 1, Offset: 0, Limit: 20},
+		storage:     domain.StorageStatus{DatabaseAvailable: true, ObjectStoreReady: true, Articles: 1},
+		saved:       []domain.SavedArticleQuery{{Name: "recent"}},
 	}
 	manager := &workspaceJobManager{page: domain.Page[domain.Job]{Items: []domain.Job{{ID: "job-1", Kind: "export"}}, Total: 1, Limit: 20}}
 	service := New(Options{
@@ -194,10 +236,13 @@ func TestWorkspaceReadFacadeUsesApplicationAndReturnsSafeDTOs(t *testing.T) {
 		t.Fatalf("account query = %#v", library.accountQuery)
 	}
 
-	_, err = workspace.Articles(context.Background(), WorkspaceArticleQuery{AccountID: "account-1", Keyword: " article ",
+	articles, err := workspace.Articles(context.Background(), WorkspaceArticleQuery{AccountID: "account-1", Keyword: " article ",
 		Sorts: []domain.ArticleSort{{Field: "published", Direction: domain.SortDescending}}, Page: WorkspacePageRequest{Limit: 20}})
 	if err != nil || library.articleQuery.AccountID != "account-1" || library.articleQuery.Keyword != "article" || library.articleQuery.Limit != 20 {
 		t.Fatalf("Articles() error=%v query=%#v", err, library.articleQuery)
+	}
+	if len(articles.Items) != 1 || articles.Items[0].AccountName != "Fixture" {
+		t.Fatalf("Articles() account projection = %#v", articles)
 	}
 
 	_, err = workspace.Albums(context.Background(), WorkspaceAlbumQuery{AccountID: "account-1", Page: WorkspacePageRequest{Limit: 20}})
@@ -213,6 +258,43 @@ func TestWorkspaceReadFacadeUsesApplicationAndReturnsSafeDTOs(t *testing.T) {
 	jobsPage, err := workspace.Jobs(context.Background(), WorkspaceJobQuery{Kind: " export ", States: []domain.JobState{domain.JobRunning}, Page: WorkspacePageRequest{Limit: 20}})
 	if err != nil || jobsPage.Total != 1 || manager.query.Kind != "export" || !reflect.DeepEqual(manager.query.States, []domain.JobState{domain.JobRunning}) {
 		t.Fatalf("Jobs() = %#v, query=%#v, err=%v", jobsPage, manager.query, err)
+	}
+}
+
+func TestWorkspaceArticlesProjectsAccountNamesWithoutExposingMissingIDs(t *testing.T) {
+	library := &workspaceLibrary{
+		articles: domain.Page[domain.Article]{Items: []domain.Article{
+			{ID: "article-1", AccountID: "account-1", Title: "First"},
+			{ID: "article-2", AccountID: "account-1", Title: "Second"},
+			{ID: "article-3", AccountID: "account-missing", Title: "Third"},
+		}},
+		accountByID: map[domain.AccountID]domain.Account{"account-1": {ID: "account-1", Name: "Readable account"}},
+	}
+	workspace := NewWorkspace(New(Options{Runtime: runtimeenv.Dependencies{Profile: "fixture"}, Library: library, Jobs: &workspaceJobManager{}}))
+
+	articles, err := workspace.Articles(context.Background(), WorkspaceArticleQuery{Page: WorkspacePageRequest{Limit: 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{articles.Items[0].AccountName, articles.Items[1].AccountName, articles.Items[2].AccountName}; !reflect.DeepEqual(got, []string{"Readable account", "Readable account", ""}) {
+		t.Fatalf("article account names = %#v", got)
+	}
+	if library.accountNameGets != 1 {
+		t.Fatalf("account name lookups = %d", library.accountNameGets)
+	}
+}
+
+func TestWorkspaceArticlesPropagatesAccountNameLookupFailure(t *testing.T) {
+	library := &workspaceLibrary{
+		articles:        domain.Page[domain.Article]{Items: []domain.Article{{ID: "article-1", AccountID: "account-1", Title: "First"}}},
+		accountNamesErr: context.Canceled,
+	}
+	workspace := NewWorkspace(New(Options{Runtime: runtimeenv.Dependencies{Profile: "fixture"}, Library: library, Jobs: &workspaceJobManager{}}))
+
+	_, err := workspace.Articles(context.Background(), WorkspaceArticleQuery{Page: WorkspacePageRequest{Limit: 20}})
+	var workspaceErr *WorkspaceError
+	if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorCancelled {
+		t.Fatalf("Articles() error = %v", err)
 	}
 }
 

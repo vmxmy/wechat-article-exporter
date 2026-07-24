@@ -1105,6 +1105,9 @@ func (fixedApplication) DeleteAccounts(context.Context, []domain.AccountID) (dom
 func (fixedApplication) QueryAccounts(context.Context, domain.AccountQuery) (domain.Page[domain.Account], error) {
 	return domain.Page[domain.Account]{}, nil
 }
+func (fixedApplication) AccountNames(context.Context, []domain.AccountID) (map[domain.AccountID]string, error) {
+	return map[domain.AccountID]string{}, nil
+}
 func (fixedApplication) QueryArticles(context.Context, domain.ArticleQuery) (domain.Page[domain.Article], error) {
 	return domain.Page[domain.Article]{}, nil
 }
