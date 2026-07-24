@@ -60,6 +60,24 @@ describe('browser API client', () => {
     )
   })
 
+  it('preserves pagination while unwrapping a versioned page envelope', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      apiVersion: 'v1',
+      data: [{ id: 'account-1', name: 'Fixture' }],
+      pagination: { page: 1, pageSize: 25, total: 1 },
+      items: [{ id: 'account-1', name: 'Fixture' }],
+      offset: 0,
+      limit: 25,
+      total: 1
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getAccountPage({ page: 1, pageSize: 25 })).resolves.toEqual({
+      data: [{ id: 'account-1', name: 'Fixture' }],
+      pagination: { page: 1, pageSize: 25, total: 1 }
+    })
+  })
+
   it('requests a server-filtered album page without loading the full collection', async () => {
     fetchMock.mockResolvedValue(jsonResponse({
       items: [{ id: 'album-1', accountId: 'account / fixture', name: 'Fixture album', articleCount: 2 }],

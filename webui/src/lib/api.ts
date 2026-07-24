@@ -805,7 +805,9 @@ export function consumeArticleQueryHandoff(): ArticleQuery | undefined {
 }
 
 function normalizePage<T>(response: PaginatedResponse<T> | WorkspacePageResponse<T>): PaginatedResponse<T> {
-  if ('data' in response) return response
+  if ('data' in response) {
+    return { data: response.data, pagination: response.pagination }
+  }
   return {
     data: response.items,
     pagination: {
@@ -843,6 +845,10 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   if (response.status === 204) return undefined as T
 
   const body = await response.json() as T | ApiEnvelope<T>
+  // Page responses use the same versioned envelope as single-resource
+  // responses, but their pagination metadata deliberately stays alongside
+  // the data array. Keep that shape intact so normalizePage can read both.
+  if (isPagedApiEnvelope(body)) return body as T
   return isApiEnvelope(body) ? body.data : body
 }
 
@@ -857,6 +863,14 @@ async function mutate<T>(resource: string, method: 'POST' | 'PATCH' | 'DELETE', 
 
 function isApiEnvelope<T>(value: T | ApiEnvelope<T>): value is ApiEnvelope<T> {
   return typeof value === 'object' && value !== null && 'data' in value && 'apiVersion' in value
+}
+
+function isPagedApiEnvelope(value: unknown): value is ApiEnvelope<readonly unknown[]> & PaginatedResponse<unknown> {
+  if (!isApiEnvelope(value)) return false
+  const page = value as ApiEnvelope<readonly unknown[]> & { readonly pagination?: Partial<Pagination> }
+  if (!Array.isArray(page.data) || typeof page.pagination !== 'object' || page.pagination === null) return false
+  const pagination = page.pagination
+  return typeof pagination.page === 'number' && typeof pagination.pageSize === 'number' && typeof pagination.total === 'number'
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
