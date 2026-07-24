@@ -92,9 +92,20 @@ func TestExportListAPIUsesAuthenticatedSafePagedWorkspaceDTO(t *testing.T) {
 		Total: 7, Offset: 6, Limit: 3,
 	}}
 	server, client := startExportAPIServer(t, application.NewWorkspaceExports(nil, records))
+	unauthenticated := &http.Client{}
+	unauthenticatedBase := strings.TrimSuffix(strings.Split(server.URL(), "?")[0], "/")
+	response := get(t, unauthenticated, unauthenticatedBase+"/api/v1/exports")
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated list status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "authentication_required")
+	if len(records.requests) != 0 {
+		t.Fatalf("unauthenticated list reached export service: %#v", records.requests)
+	}
+
 	base := authorizeAPI(t, client, server.URL())
 
-	response := get(t, client, base+"/api/v1/exports?offset=6&limit=3")
+	response = get(t, client, base+"/api/v1/exports?offset=6&limit=3")
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("list status=%d body=%s", response.StatusCode, readResponse(t, response))
 	}
