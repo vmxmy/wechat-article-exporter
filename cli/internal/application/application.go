@@ -85,6 +85,7 @@ type DownloadJobs interface {
 // that create a follow-on download. The caller supplies the stable identity of
 // its durable parent item; presentation adapters never accept this key.
 type IdempotentDownloadJobs interface {
+	GetByIdempotency(context.Context, string) (domain.Job, bool, error)
 	StartWithIdempotency(context.Context, domain.DownloadRequest, string) (domain.Job, error)
 }
 

@@ -188,30 +188,123 @@ func (store *JobStore) CreateOrGetWithItems(ctx context.Context, spec jobs.Spec,
 	if strings.TrimSpace(spec.IdempotencyKey) == "" {
 		return domain.Job{}, false, errors.New("idempotency key is required")
 	}
-	var created domain.Job
+	var job domain.Job
 	var existed bool
 	err := store.withAdmission(ctx, func() error {
-		return store.database.WithTx(ctx, func(transaction *sql.Tx) error {
-			profile := spec.Profile
-			if profile == "" {
-				profile = store.database.profileID
-			}
-			var existing string
-			err := transaction.QueryRowContext(ctx, `SELECT id FROM jobs WHERE profile_id=? AND kind=? AND idempotency_key=?`,
-				profile, spec.Kind, spec.IdempotencyKey).Scan(&existing)
-			if err == nil {
-				created, err = scanJobRow(transaction.QueryRowContext(ctx, `SELECT id, kind, state, profile_id, created_at, updated_at FROM jobs WHERE id=?`, existing))
-				existed = true
-				return err
-			}
-			if !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
-			created, err = store.createWithItemsTx(ctx, transaction, spec, itemKeys)
-			return err
-		})
+		var err error
+		job, existed, err = store.createOrGetWithItems(ctx, spec, itemKeys)
+		return err
 	})
-	return created, existed, err
+	return job, existed, err
+}
+
+const createOrGetAttempts = 3
+
+func (store *JobStore) createOrGetWithItems(ctx context.Context, spec jobs.Spec, itemKeys []string) (domain.Job, bool, error) {
+	profile := spec.Profile
+	if profile == "" {
+		profile = store.database.profileID
+	}
+	var contentionErr error
+	for attempt := 0; attempt < createOrGetAttempts; attempt++ {
+		job, created, err := store.createWithItemsIfAbsent(ctx, spec, itemKeys)
+		if err == nil && created {
+			return job, false, nil
+		}
+		if err != nil && !isSQLiteContention(err) {
+			return domain.Job{}, false, err
+		}
+		if err != nil {
+			contentionErr = err
+		}
+
+		// The contender may have committed after this call began. Re-read using
+		// a new, bounded transaction rather than the stale snapshot that lost
+		// the insert race.
+		existing, found, lookupErr := store.GetByIdempotency(ctx, profile, spec.Kind, spec.IdempotencyKey)
+		if lookupErr == nil && found {
+			return existing, true, nil
+		}
+		if lookupErr != nil && !isSQLiteContention(lookupErr) {
+			return domain.Job{}, false, lookupErr
+		}
+		if lookupErr != nil {
+			contentionErr = lookupErr
+		}
+	}
+	if contentionErr != nil {
+		return domain.Job{}, false, fmt.Errorf("create or get job after %d attempts: %w", createOrGetAttempts, contentionErr)
+	}
+	return domain.Job{}, false, errors.New("create or get job did not create or find a job")
+}
+
+func (store *JobStore) createWithItemsIfAbsent(ctx context.Context, spec jobs.Spec, itemKeys []string) (domain.Job, bool, error) {
+	var job domain.Job
+	var created bool
+	err := store.database.WithTx(ctx, func(transaction *sql.Tx) error {
+		profile := spec.Profile
+		if profile == "" {
+			profile = store.database.profileID
+		}
+		payload, err := marshalRedacted(spec.Payload)
+		if err != nil {
+			return err
+		}
+		now := store.now()
+		job = domain.Job{ID: domain.JobID(uuid.NewString()), Kind: spec.Kind, Profile: profile, State: domain.JobQueued, CreatedAt: now, UpdatedAt: now}
+		result, err := transaction.ExecContext(ctx, `INSERT INTO jobs(
+id, profile_id, kind, state, idempotency_key, payload_json, created_at, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(profile_id, kind, idempotency_key) DO NOTHING`,
+			job.ID, profile, job.Kind, job.State, spec.IdempotencyKey, string(payload), now.UnixMilli(), now.UnixMilli())
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		created = rows == 1
+		if !created {
+			return nil
+		}
+		return insertMissingJobItems(ctx, transaction, job.ID, itemKeys, now)
+	})
+	return job, created, err
+}
+
+// GetByIdempotency scopes retrieval to the same profile and kind as creation.
+func (store *JobStore) GetByIdempotency(ctx context.Context, profile domain.ProfileID, kind, key string) (domain.Job, bool, error) {
+	if store == nil || store.database == nil {
+		return domain.Job{}, false, errors.New("job store is unavailable")
+	}
+	if profile == "" {
+		profile = store.database.profileID
+	}
+	if strings.TrimSpace(kind) == "" || strings.TrimSpace(key) == "" {
+		return domain.Job{}, false, errors.New("job kind and idempotency key are required")
+	}
+	var job domain.Job
+	err := store.database.WithTx(ctx, func(transaction *sql.Tx) error {
+		var err error
+		job, err = scanJobRow(transaction.QueryRowContext(ctx, `SELECT id, kind, state, profile_id, created_at, updated_at
+FROM jobs WHERE profile_id=? AND kind=? AND idempotency_key=?`, profile, kind, key))
+		return err
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Job{}, false, nil
+	}
+	if err != nil {
+		return domain.Job{}, false, err
+	}
+	return job, true, nil
+}
+
+func isSQLiteContention(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database is locked") || strings.Contains(message, "database is busy") || strings.Contains(message, "busy snapshot")
 }
 
 // CreateWithItemsAndObjects atomically makes object metadata reachable from

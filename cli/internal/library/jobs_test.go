@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1154,6 +1155,57 @@ func TestJobStoreCreateOrGetWithItemsDoesNotExpandExistingIntent(t *testing.T) {
 		keys[item.Key] = true
 	}
 	if err != nil || len(items) != 2 || !keys["a"] || !keys["b"] || keys["c"] {
+		t.Fatalf("items=%#v err=%v", items, err)
+	}
+}
+
+func TestJobStoreCreateOrGetWithItemsConcurrentSameKeyReturnsOneJob(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	const callers = 16
+	start := make(chan struct{})
+	type result struct {
+		job     domain.Job
+		existed bool
+		err     error
+	}
+	results := make(chan result, callers)
+	var group sync.WaitGroup
+	for index := 0; index < callers; index++ {
+		group.Add(1)
+		go func(index int) {
+			defer group.Done()
+			<-start
+			job, existed, err := store.CreateOrGetWithItems(context.Background(), jobs.Spec{
+				Kind: "download", Profile: "profile-a", IdempotencyKey: "concurrent-fixed-targets",
+			}, []string{"item-a", "item-b", "caller-" + strconv.Itoa(index)})
+			results <- result{job: job, existed: existed, err: err}
+		}(index)
+	}
+	close(start)
+	group.Wait()
+	close(results)
+	var first domain.JobID
+	created := 0
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("CreateOrGetWithItems() error: %v", result.err)
+		}
+		if first == "" {
+			first = result.job.ID
+		}
+		if result.job.ID != first {
+			t.Fatalf("job IDs differ: first=%s got=%s", first, result.job.ID)
+		}
+		if !result.existed {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("created callers=%d, want 1", created)
+	}
+	items, err := store.ListItems(context.Background(), first)
+	if err != nil || len(items) != 3 {
 		t.Fatalf("items=%#v err=%v", items, err)
 	}
 }

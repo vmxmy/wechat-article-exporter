@@ -380,17 +380,26 @@ func (runtime *localSyncRuntime) executeMultiAlbum(ctx context.Context, item job
 	}
 	downloadJob := domain.Job{ID: state.DownloadJobID}
 	if downloadJob.ID == "" {
-		articleIDs, err := runtime.multiAlbumDownloadArticleIDs(ctx, envelope)
-		if err != nil {
-			return err
-		}
 		idempotent, ok := runtime.downloads.(application.IdempotentDownloadJobs)
 		if !ok {
 			return fmt.Errorf("queue album article downloads: %w", application.ErrUnavailable)
 		}
-		downloadJob, err = idempotent.StartWithIdempotency(ctx, domain.DownloadRequest{ArticleIDs: articleIDs}, multiAlbumDownloadKey(item))
+		key := multiAlbumDownloadKey(item)
+		var found bool
+		var err error
+		downloadJob, found, err = idempotent.GetByIdempotency(ctx, key)
 		if err != nil {
 			return err
+		}
+		if !found {
+			articleIDs, err := runtime.multiAlbumDownloadArticleIDs(ctx, envelope)
+			if err != nil {
+				return err
+			}
+			downloadJob, err = idempotent.StartWithIdempotency(ctx, domain.DownloadRequest{ArticleIDs: articleIDs}, key)
+			if err != nil {
+				return err
+			}
 		}
 		state.DownloadJobID = downloadJob.ID
 		if err := checkpoint(state); err != nil {

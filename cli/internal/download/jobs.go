@@ -20,6 +20,7 @@ type PersistentJobStore interface {
 	jobs.EngineStore
 	CreateWithItems(context.Context, jobs.Spec, []string) (domain.Job, error)
 	CreateOrGetWithItems(context.Context, jobs.Spec, []string) (domain.Job, bool, error)
+	GetByIdempotency(context.Context, domain.ProfileID, string, string) (domain.Job, bool, error)
 	RecoverStale(context.Context) (int64, error)
 }
 
@@ -90,6 +91,16 @@ func (service JobService) Start(ctx context.Context, request JobRequest) (domain
 		return job, err
 	}
 	return service.Store.CreateWithItems(ctx, spec, keys)
+}
+
+// GetByIdempotency returns an existing job in the request's profile and kind.
+// Parent handoffs use it before resolving mutable selections so a retry keeps
+// the already-durable child intent intact.
+func (service JobService) GetByIdempotency(ctx context.Context, profile domain.ProfileID, kind JobKind, key string) (domain.Job, bool, error) {
+	if service.Store == nil {
+		return domain.Job{}, false, errors.New("persistent download job store is required")
+	}
+	return service.Store.GetByIdempotency(ctx, profile, string(kind), key)
 }
 
 // Run attaches a job executor. Completed items are omitted by the persistent

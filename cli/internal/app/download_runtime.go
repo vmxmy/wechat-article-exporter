@@ -288,6 +288,13 @@ func (runtime *localDownloadRuntime) StartWithIdempotency(ctx context.Context, r
 	return runtime.start(ctx, request, key)
 }
 
+func (runtime *localDownloadRuntime) GetByIdempotency(ctx context.Context, key string) (domain.Job, bool, error) {
+	if runtime == nil {
+		return domain.Job{}, false, fmt.Errorf("download runtime: %w", application.ErrUnavailable)
+	}
+	return runtime.service.GetByIdempotency(ctx, runtime.profile, download.JobArticle, strings.TrimSpace(key))
+}
+
 func (runtime *localDownloadRuntime) start(ctx context.Context, request domain.DownloadRequest, idempotencyKey string) (domain.Job, error) {
 	if runtime == nil || runtime.library == nil {
 		return domain.Job{}, fmt.Errorf("download runtime: %w", application.ErrUnavailable)
