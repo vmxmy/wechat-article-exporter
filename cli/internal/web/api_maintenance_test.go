@@ -311,6 +311,44 @@ func TestMaintenanceAPIRejectsMalformedCredentialAndProxyInputsWithSafeEnvelope(
 	}
 }
 
+func TestMaintenanceAPIPatchesExportPreferencesDefaults(t *testing.T) {
+	preferences := &webPreferencesMaintenance{preferences: application.Preferences{Export: application.ExportPreferences{
+		CollisionPolicy:     "overwrite",
+		ExcelIncludeContent: true,
+		JSONIncludeContent:  false,
+		JSONIncludeComments: true,
+		HTMLIncludeComments: false,
+	}}}
+	server, client := startMaintenanceServer(t, application.NewMaintenance(application.MaintenanceOptions{Preferences: preferences}), nil)
+	base := authorizeAPI(t, client, server.URL())
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+
+	response := doMaintenance(t, client, maintenanceRequest(t, http.MethodPatch, base+"/api/v1/settings/preferences", `{"export":{"collisionPolicy":"overwrite","excelIncludeContent":true,"jsonIncludeContent":false,"jsonIncludeComments":true,"htmlIncludeComments":false}}`, csrf))
+	body := readResponse(t, response)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("preferences patch status=%d body=%s", response.StatusCode, body)
+	}
+	var envelope struct {
+		APIVersion string                        `json:"apiVersion"`
+		Data       application.Preferences       `json:"data"`
+		Export     application.ExportPreferences `json:"export"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode preferences patch response: %v body=%s", err, body)
+	}
+	if envelope.APIVersion != apiVersion || envelope.Data.Export != preferences.preferences.Export || envelope.Export != preferences.preferences.Export {
+		t.Fatalf("preferences patch response=%#v", envelope)
+	}
+
+	patch := preferences.patch.Export
+	if patch == nil || patch.CollisionPolicy == nil || patch.ExcelIncludeContent == nil || patch.JSONIncludeContent == nil || patch.JSONIncludeComments == nil || patch.HTMLIncludeComments == nil {
+		t.Fatalf("export patch lost fields: %#v", preferences.patch)
+	}
+	if *patch.CollisionPolicy != "overwrite" || !*patch.ExcelIncludeContent || *patch.JSONIncludeContent || !*patch.JSONIncludeComments || *patch.HTMLIncludeComments {
+		t.Fatalf("export patch=%#v", patch)
+	}
+}
+
 func startMaintenanceServer(t *testing.T, maintenance *application.MaintenanceService, storage *application.MaintenanceStorageService) (*Server, *http.Client) {
 	t.Helper()
 	server, err := New(Options{Application: &apiApplication{}, Maintenance: maintenance, StorageMaintenance: storage})
@@ -407,12 +445,16 @@ func (fake *webProxyMaintenance) TestProxy(_ context.Context, id string) (applic
 	return fake.probe, nil
 }
 
-type webPreferencesMaintenance struct{ preferences application.Preferences }
+type webPreferencesMaintenance struct {
+	preferences application.Preferences
+	patch       application.PreferencesPatch
+}
 
 func (fake *webPreferencesMaintenance) Preferences(context.Context) (application.Preferences, error) {
 	return fake.preferences, nil
 }
-func (fake *webPreferencesMaintenance) PatchPreferences(context.Context, application.PreferencesPatch) (application.Preferences, error) {
+func (fake *webPreferencesMaintenance) PatchPreferences(_ context.Context, patch application.PreferencesPatch) (application.Preferences, error) {
+	fake.patch = patch
 	return fake.preferences, nil
 }
 
