@@ -71,6 +71,101 @@ func TestAccountManifestAPIStreamsExportAndImportsOneBoundedStagedUpload(t *test
 	}
 }
 
+func TestAccountManifestReadAPIIsAuthenticatedGETOnlyAndStreamsBareManifest(t *testing.T) {
+	app := &accountManifestApplication{manifest: domain.AccountManifest{
+		SchemaVersion: 1,
+		Accounts: []domain.Account{{
+			ID:        "account-1",
+			FakeID:    "fixture",
+			Name:      "Fixture",
+			AvatarURL: "https://example.invalid/avatar.png",
+		}},
+	}}
+	server, client := startAccountManifestServer(t, app, 1024)
+	base := strings.TrimSuffix(strings.Split(server.URL(), "?")[0], "/")
+
+	unauthenticated := newTestClient(t)
+	response, err := unauthenticated.Get(base + "/api/v1/accounts/manifest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated export status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "authentication_required")
+	if app.exportCalls != 0 {
+		t.Fatalf("unauthenticated export called application %d times", app.exportCalls)
+	}
+
+	base = authorizeAPI(t, client, server.URL())
+	request := requestWith(t, http.MethodPost, base+"/api/v1/accounts/manifest", strings.NewReader(`{}`), map[string]string{"Content-Type": "application/json"})
+	response, err = client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusMethodNotAllowed || response.Header.Get("Allow") != http.MethodGet {
+		t.Fatalf("POST manifest status=%d allow=%q body=%s", response.StatusCode, response.Header.Get("Allow"), readResponse(t, response))
+	}
+	assertAPIError(t, response, "method_not_allowed")
+	if app.exportCalls != 0 {
+		t.Fatalf("POST manifest called application %d times", app.exportCalls)
+	}
+
+	response, err = client.Get(base + "/api/v1/accounts/manifest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("authenticated export status=%d headers=%v body=%s", response.StatusCode, response.Header, readResponse(t, response))
+	}
+	for key, want := range map[string]string{
+		"Content-Type":            "application/json; charset=utf-8",
+		"Content-Disposition":     "attachment; filename=wechat-article-accounts-manifest.json",
+		"X-Content-Type-Options":  "nosniff",
+		"Cache-Control":           "no-store, max-age=0",
+		"Pragma":                  "no-cache",
+		"Content-Security-Policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'",
+		"Referrer-Policy":         "no-referrer",
+		"X-Frame-Options":         "DENY",
+		"Permissions-Policy":      "camera=(), geolocation=(), microphone=()",
+	} {
+		if got := response.Header.Get(key); got != want {
+			response.Body.Close()
+			t.Fatalf("%s = %q; want %q", key, got, want)
+		}
+	}
+	var manifest domain.AccountManifest
+	if err := json.NewDecoder(response.Body).Decode(&manifest); err != nil {
+		response.Body.Close()
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if manifest.SchemaVersion != 1 || len(manifest.Accounts) != 1 || manifest.Accounts[0].ID != "account-1" || manifest.Accounts[0].AvatarURL != "https://example.invalid/avatar.png" {
+		t.Fatalf("manifest = %#v", manifest)
+	}
+	if app.exportCalls != 1 || app.exportQuery != (domain.AccountQuery{}) {
+		t.Fatalf("export calls=%d query=%#v; want one unfiltered export", app.exportCalls, app.exportQuery)
+	}
+}
+
+func TestAccountManifestReadAPIReportsUnavailable(t *testing.T) {
+	app := &accountManifestApplication{exportErr: application.ErrUnavailable}
+	server, client := startAccountManifestServer(t, app, 1024)
+	base := authorizeAPI(t, client, server.URL())
+
+	response, err := client.Get(base + "/api/v1/accounts/manifest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unavailable export status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "unavailable")
+	if app.exportCalls != 1 || app.exportQuery != (domain.AccountQuery{}) {
+		t.Fatalf("export calls=%d query=%#v; want one unfiltered attempted export", app.exportCalls, app.exportQuery)
+	}
+}
+
 func TestAccountManifestAPIRejectsCrossOriginExtraPartsAndOversizedUploads(t *testing.T) {
 	app := &accountManifestApplication{}
 	server, client := startAccountManifestServer(t, app, 4)
@@ -155,12 +250,17 @@ func accountManifestMultipartRequestWithParts(t *testing.T, target, csrf, origin
 
 type accountManifestApplication struct {
 	testApplication
-	manifest domain.AccountManifest
-	imported domain.AccountManifest
+	manifest    domain.AccountManifest
+	imported    domain.AccountManifest
+	exportCalls int
+	exportQuery domain.AccountQuery
+	exportErr   error
 }
 
-func (app *accountManifestApplication) ExportAccounts(context.Context, domain.AccountQuery) (domain.AccountManifest, error) {
-	return app.manifest, nil
+func (app *accountManifestApplication) ExportAccounts(_ context.Context, query domain.AccountQuery) (domain.AccountManifest, error) {
+	app.exportCalls++
+	app.exportQuery = query
+	return app.manifest, app.exportErr
 }
 func (app *accountManifestApplication) ImportAccounts(_ context.Context, manifest domain.AccountManifest) (domain.AccountImportReport, error) {
 	app.imported = manifest

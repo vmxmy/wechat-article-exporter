@@ -22,7 +22,7 @@ presence or absence of at least one asserting test per cell.
 | `GET /session` | ✓ | ✓ | – | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData` |
 | `GET /session/accounts` | ✓ | ✓ (`200` + safe switchable-account DTO) | – (no query params) | ✓ (identity-only DTO excludes upstream payload, session credentials, resource locations, and local storage references) | `TestSessionAccountSwitchingAPIUsesSafeWorkspaceDTOs` |
 | `GET /accounts` | ✓ | ✓ | ✓ (`sort=name` unsupported param) | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData`, `TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries` |
-| `GET /accounts/manifest` | (shared with control auth) | – | – | – | none found; see Manifest control family below for the export/import path |
+| `GET /accounts/manifest` | ✓ (`401 authentication_required`; export is not invoked) | ✓ (`200` bare `AccountManifest` JSON, unfiltered export, exact download/no-store/security headers) | – (no query parameters) | Account manifest schema fields—including account ID and avatar URL—are intentional compatibility data, not redaction failures | `TestAccountManifestReadAPIIsAuthenticatedGETOnlyAndStreamsBareManifest`, `TestAccountManifestReadAPIReportsUnavailable` (`503 unavailable`) |
 | `GET /accounts/search` | ✓ (shared middleware) | ✓ | – | – | `TestAccountCRUDAndSearchUseAuthenticatedWorkspaceFacade` |
 | `GET /articles` | ✓ | ✓ | ✓ (`limit=101`, `wat=1`, `deleted=maybe`, `state` repeated, `sort`+`direction` conflict, `readMin>readMax`, bad `publishedFrom`, unsafe `sort` field) | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData`, `TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries`, `TestReadAPIAdaptsExistingBrowserClientDTO` |
 | `GET /articles/preview` | ✓ | ✓ | ✓ (missing `articleId`) | – | `TestArticlePreviewUsesSafeWorkspaceHandoff` |
@@ -67,7 +67,7 @@ presence or absence of at least one asserting test per cell.
 | `GET /maintenance/backups/{id}` (artifact) | ✓ | ✓ (single-use opaque handle) | – | ✓ | `TestBackupArtifactAPIStreamsSingleUseOpaqueHandle` |
 | `POST /maintenance/gc/plan`, `/apply` | ✓ | ✓ | ✓ (bounded input/confirmation) | – | `TestMaintenanceAPIStrictMutationProtectionBoundedInputAndConfirmation` |
 | `GET /maintenance/diagnostics`, `POST /maintenance/diagnostic-bundles`, `GET .../{id}` | ✓ (fail-closed without wired service) | ✓ (opaque handle) | – | – | `TestDiagnosticBundleAPIRequiresMutationProtectionAndStreamsOpaqueHandle`, `TestDiagnosticBundleAPIFailsClosedWithoutService` |
-| `POST /accounts/manifest/upload`, `/import`, `GET /accounts/manifest` | ✓ | ✓ (export/import round trip) | ✓ (cross-origin, extra multipart parts, oversized upload) | – | `TestAccountManifestAPIStreamsExportAndImportsOneBoundedStagedUpload`, `TestAccountManifestAPIRejectsCrossOriginExtraPartsAndOversizedUploads` |
+| `POST /accounts/manifest/upload`, `/import` | ✓ | ✓ (upload/import round trip) | ✓ (cross-origin, extra multipart parts, oversized upload) | – | `TestAccountManifestAPIStreamsExportAndImportsOneBoundedStagedUpload`, `TestAccountManifestAPIRejectsCrossOriginExtraPartsAndOversizedUploads` |
 | `POST /maintenance/restore/upload`, `/prepare`, `/commit` | ✓ | ✓ (prepare/commit success shuts server down) | ✓ (multipart protection, independent upload limit, failure path) | – | `TestRestoreAPIMultipartProtectionAndExactlyOneArchive`, `TestRestoreAPIEnforcesIndependentUploadLimit`, `TestRestoreAPIPrepareIsBoundAndCommitShutsDownOnlyOnSuccess`, `TestRestoreAPIFailureDoesNotShutdown` |
 | Cross-cutting multipart filename boundary (shared by credential/manifest/restore uploads) | – | ✓ | ✓ (unsafe/encoded/benign filenames) | ✓ | `TestMultipartUploadsRejectUnsafeFilenamesBeforeStagingOrMutation`, `TestMultipartUploadsRejectEncodedUnsafeRawFilenames`, `TestMultipartUploadsAcceptBenignSingleFileNames` |
 
@@ -92,10 +92,6 @@ presence or absence of at least one asserting test per cell.
 
 ## Known gaps (do not claim these are covered)
 
-- `GET /accounts/manifest` (read path) has no test found that specifically
-  targets the bare read route in isolation; its control-plane siblings
-  (`/accounts/manifest/upload`, `/accounts/manifest/import`) are directly
-  tested.
 - No test in this package directly asserts the exact `error.code` value for
   every code in the §4 vocabulary of
   `docs/release/browser-api-contract.md`; several codes (`unavailable`,

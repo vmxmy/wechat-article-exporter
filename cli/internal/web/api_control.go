@@ -15,6 +15,12 @@ import (
 // application-owned Workspace facade; handlers never receive profile runtime,
 // filesystem, database, cookie, or secret-store capabilities.
 func (server *Server) apiControl(writer http.ResponseWriter, request *http.Request) bool {
+	// The manifest export is a GET-only read route. Keep its exact path in the
+	// read dispatcher so it cannot be mistaken for an /accounts/{id} PATCH
+	// request below.
+	if request.URL.Path == "/api/v1/accounts/manifest" {
+		return false
+	}
 	if request.Method == http.MethodGet {
 		return false
 	}
