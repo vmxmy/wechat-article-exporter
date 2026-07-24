@@ -108,12 +108,12 @@ func TestWebCommandDoesNotLeakBootstrapURLWhenBrowserOpenFails(t *testing.T) {
 	if !strings.HasPrefix(workspaceURL, "http://127.0.0.1:") || strings.Contains(workspaceURL, retiredProjectDomain) {
 		t.Fatalf("workspace URL = %q; want random IPv4 loopback URL only", workspaceURL)
 	}
-	if output := stderr.String(); strings.Contains(output, workspaceURL) || strings.Contains(output, privatePath) || strings.Contains(output, "?token=") {
-		t.Fatalf("browser launch failure leaked bootstrap URL or local path to stderr: %q", output)
-	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("web command cancellation = %v", err)
+	}
+	if output := stderr.String(); strings.Contains(output, workspaceURL) || strings.Contains(output, privatePath) || strings.Contains(output, "?token=") {
+		t.Fatalf("browser launch failure leaked bootstrap URL or local path to stderr: %q", output)
 	}
 }
 
