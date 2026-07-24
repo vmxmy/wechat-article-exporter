@@ -19,6 +19,7 @@ import (
 type PersistentJobStore interface {
 	jobs.EngineStore
 	CreateWithItems(context.Context, jobs.Spec, []string) (domain.Job, error)
+	CreateOrGetWithItems(context.Context, jobs.Spec, []string) (domain.Job, bool, error)
 	RecoverStale(context.Context) (int64, error)
 }
 
@@ -75,7 +76,7 @@ func (service JobService) Start(ctx context.Context, request JobRequest) (domain
 	for _, item := range items {
 		keys = append(keys, item.key)
 	}
-	return service.Store.CreateWithItems(ctx, jobs.Spec{
+	spec := jobs.Spec{
 		Kind:           string(request.Kind),
 		Profile:        request.Profile,
 		IdempotencyKey: strings.TrimSpace(request.IdempotencyKey),
@@ -83,7 +84,12 @@ func (service JobService) Start(ctx context.Context, request JobRequest) (domain
 			"kind":      request.Kind,
 			"itemCount": len(keys),
 		},
-	}, keys)
+	}
+	if spec.IdempotencyKey != "" {
+		job, _, err := service.Store.CreateOrGetWithItems(ctx, spec, keys)
+		return job, err
+	}
+	return service.Store.CreateWithItems(ctx, spec, keys)
 }
 
 // Run attaches a job executor. Completed items are omitted by the persistent

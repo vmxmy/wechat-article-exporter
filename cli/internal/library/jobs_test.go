@@ -1136,6 +1136,28 @@ func TestJobCreationAddsMissingTargetsWithoutDuplicatingCompletedItems(t *testin
 	}
 }
 
+func TestJobStoreCreateOrGetWithItemsDoesNotExpandExistingIntent(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	ctx := context.Background()
+	first, existed, err := store.CreateOrGetWithItems(ctx, jobs.Spec{Kind: "download", IdempotencyKey: "fixed-targets"}, []string{"a", "b"})
+	if err != nil || existed {
+		t.Fatalf("first=%#v existed=%t err=%v", first, existed, err)
+	}
+	second, existed, err := store.CreateOrGetWithItems(ctx, jobs.Spec{Kind: "download", IdempotencyKey: "fixed-targets"}, []string{"b", "c", "a"})
+	if err != nil || !existed || first.ID != second.ID {
+		t.Fatalf("first=%#v second=%#v existed=%t err=%v", first, second, existed, err)
+	}
+	items, err := store.ListItems(ctx, first.ID)
+	keys := map[string]bool{}
+	for _, item := range items {
+		keys[item.Key] = true
+	}
+	if err != nil || len(items) != 2 || !keys["a"] || !keys["b"] || keys["c"] {
+		t.Fatalf("items=%#v err=%v", items, err)
+	}
+}
+
 func itemStates(items []JobItem) map[string]domain.JobState {
 	states := make(map[string]domain.JobState, len(items))
 	for _, item := range items {

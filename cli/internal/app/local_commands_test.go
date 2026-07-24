@@ -1999,12 +1999,119 @@ func TestLocalSyncRuntimeTraversesMultipleAlbumsAsOneJobAndQueuesOneDownload(t *
 	if err != nil || final.State != domain.JobCompleted {
 		t.Fatalf("final=%#v err=%v", final, err)
 	}
-	if !reflect.DeepEqual(source.albumIDs, []string{"upstream-second", "upstream-first"}) || len(downloads.requests) != 1 || !reflect.DeepEqual(downloads.requests[0].ArticleIDs, []domain.ArticleID{"article-second", "article-first"}) || !reflect.DeepEqual(starter.jobs, []domain.Job{downloads.job}) {
+	if !reflect.DeepEqual(source.albumIDs, []string{"upstream-second", "upstream-first"}) || len(downloads.requests) != 1 || len(downloads.keys) != 1 || downloads.keys[0] == "" || !reflect.DeepEqual(downloads.requests[0].ArticleIDs, []domain.ArticleID{"article-second", "article-first"}) || !reflect.DeepEqual(starter.jobs, []domain.Job{downloads.job}) {
 		t.Fatalf("albumIDs=%#v downloads=%#v started=%#v", source.albumIDs, downloads.requests, starter.jobs)
 	}
 	items, err := runtime.store.ListItems(context.Background(), job.ID)
 	if err != nil || len(items) != 1 || !strings.Contains(string(items[0].Checkpoint), "download-multi") {
 		t.Fatalf("items=%#v err=%v", items, err)
+	}
+}
+
+func TestLocalSyncRuntimeMultiAlbumDownloadLimitsUniqueResolvedArticles(t *testing.T) {
+	database := openAppTestDatabase(t)
+	account, err := database.SaveAccount(context.Background(), domain.Account{FakeID: "fake-cap", Name: "Cap"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &localSyncRuntime{library: database}
+	for _, total := range []int{500, 501} {
+		t.Run(fmt.Sprintf("%d unique articles", total), func(t *testing.T) {
+			albumID := domain.AlbumID(fmt.Sprintf("album-cap-%d", total))
+			articles := make([]library.AlbumArticleCommit, 0, total)
+			for index := 0; index < total; index++ {
+				articles = append(articles, library.AlbumArticleCommit{Ordinal: index, Article: domain.Article{
+					ID: domain.ArticleID(fmt.Sprintf("article-cap-%d-%03d", total, index)), AccountID: account.ID,
+					Aid: fmt.Sprintf("aid-%d-%03d", total, index), Title: "Article", CanonicalURL: fmt.Sprintf("https://mp.weixin.qq.com/s/cap-%d-%03d", total, index),
+				}})
+			}
+			if _, err := database.SaveAlbumPage(context.Background(), library.AlbumPageCommit{Album: domain.Album{ID: albumID, AccountID: account.ID, UpstreamID: string(albumID), Name: "Cap"}, Articles: articles}); err != nil {
+				t.Fatal(err)
+			}
+			ids, err := runtime.multiAlbumDownloadArticleIDs(context.Background(), multiAlbumSyncJobItem{Albums: []multiAlbumSyncTarget{{LocalAlbumID: albumID}}})
+			if total == 500 && (err != nil || len(ids) != total) {
+				t.Fatalf("ids=%d err=%v", len(ids), err)
+			}
+			if total == 501 && (err == nil || !strings.Contains(err.Error(), "exceeds 500 unique articles")) {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
+func TestLocalSyncRuntimeMultiAlbumDownloadDedupesBeforeLimit(t *testing.T) {
+	database := openAppTestDatabase(t)
+	account, err := database.SaveAccount(context.Background(), domain.Account{FakeID: "fake-dedupe", Name: "Dedupe"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	articles := make([]library.AlbumArticleCommit, 0, 500)
+	for index := 0; index < 500; index++ {
+		articles = append(articles, library.AlbumArticleCommit{Ordinal: index, Article: domain.Article{
+			ID: domain.ArticleID(fmt.Sprintf("article-dedupe-%03d", index)), AccountID: account.ID,
+			Aid: fmt.Sprintf("aid-dedupe-%03d", index), Title: "Article", CanonicalURL: fmt.Sprintf("https://mp.weixin.qq.com/s/dedupe-%03d", index),
+		}})
+	}
+	for _, albumID := range []domain.AlbumID{"album-dedupe-a", "album-dedupe-b"} {
+		if _, err := database.SaveAlbumPage(context.Background(), library.AlbumPageCommit{Album: domain.Album{ID: albumID, AccountID: account.ID, UpstreamID: string(albumID), Name: "Dedupe"}, Articles: articles}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runtime := &localSyncRuntime{library: database}
+	ids, err := runtime.multiAlbumDownloadArticleIDs(context.Background(), multiAlbumSyncJobItem{Albums: []multiAlbumSyncTarget{{LocalAlbumID: "album-dedupe-a"}, {LocalAlbumID: "album-dedupe-b"}}})
+	if err != nil || len(ids) != 500 {
+		t.Fatalf("ids=%d err=%v", len(ids), err)
+	}
+}
+
+func TestLocalSyncRuntimeMultiAlbumDownloadHandoffRetriesUseOneStableChildJob(t *testing.T) {
+	database := openAppTestDatabase(t)
+	account, err := database.SaveAccount(context.Background(), domain.Account{FakeID: "fake-handoff", Name: "Handoff"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.SaveAlbumPage(context.Background(), library.AlbumPageCommit{Album: domain.Album{ID: "album-handoff", AccountID: account.ID, UpstreamID: "upstream-handoff", Name: "Handoff"}, Articles: []library.AlbumArticleCommit{{Article: domain.Article{ID: "article-handoff", AccountID: account.ID, Aid: "aid-handoff", Title: "Handoff", CanonicalURL: "https://mp.weixin.qq.com/s/handoff"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	downloads := &idempotentRecordingDownloadJobs{job: domain.Job{ID: "download-handoff", Kind: "article_download", State: domain.JobQueued}}
+	starter := &flakyJobStarter{err: errors.New("launcher unavailable")}
+	runtime := &localSyncRuntime{library: database, downloads: downloads, starter: starter}
+	envelope := multiAlbumSyncJobItem{Version: 2, Download: true, Albums: []multiAlbumSyncTarget{{LocalAlbumID: "album-handoff"}}}
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completedTraversal, err := json.Marshal(multiAlbumSyncCheckpoint{Current: 1, Albums: []domain.AlbumCheckpoint{{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := jobs.Item{JobID: "parent-job", ID: "parent-item", Key: string(encoded), Checkpoint: completedTraversal}
+	checkpoint := func(any) error { return errors.New("checkpoint unavailable") }
+	if err := runtime.executeMultiAlbum(context.Background(), item, checkpoint); err == nil || !strings.Contains(err.Error(), "checkpoint unavailable") {
+		t.Fatalf("first handoff error=%v", err)
+	}
+	var persisted multiAlbumSyncCheckpoint
+	if err := runtime.executeMultiAlbum(context.Background(), item, func(value any) error {
+		persisted = value.(multiAlbumSyncCheckpoint)
+		return nil
+	}); err == nil || !strings.Contains(err.Error(), "launcher unavailable") {
+		t.Fatalf("launcher error=%v", err)
+	}
+	if downloads.created != 1 || len(downloads.keys) != 2 || downloads.keys[0] != downloads.keys[1] || persisted.DownloadJobID != "download-handoff" || len(starter.jobs) != 0 {
+		t.Fatalf("created=%d keys=%#v checkpoint=%#v launches=%#v", downloads.created, downloads.keys, persisted, starter.jobs)
+	}
+
+	persistedJSON, err := json.Marshal(persisted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Checkpoint = persistedJSON
+	starter.err = nil
+	if err := runtime.executeMultiAlbum(context.Background(), item, func(any) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if downloads.created != 1 || len(starter.jobs) != 1 {
+		t.Fatalf("created=%d launches=%#v", downloads.created, starter.jobs)
 	}
 }
 
@@ -2031,11 +2138,18 @@ func (source *appAlbumPageSource) ListAlbumArticles(_ context.Context, request w
 type recordingDownloadJobs struct {
 	requests []domain.DownloadRequest
 	job      domain.Job
+	keys     []string
+	err      error
 }
 
 func (runtime *recordingDownloadJobs) Start(_ context.Context, request domain.DownloadRequest) (domain.Job, error) {
 	runtime.requests = append(runtime.requests, request)
-	return runtime.job, nil
+	return runtime.job, runtime.err
+}
+func (runtime *recordingDownloadJobs) StartWithIdempotency(_ context.Context, request domain.DownloadRequest, key string) (domain.Job, error) {
+	runtime.requests = append(runtime.requests, request)
+	runtime.keys = append(runtime.keys, key)
+	return runtime.job, runtime.err
 }
 func (*recordingDownloadJobs) Run(context.Context, domain.JobID) (domain.Job, error) {
 	return domain.Job{}, nil
@@ -2045,6 +2159,42 @@ func (*recordingDownloadJobs) Recover(context.Context) (int64, error) { return 0
 type recordingJobStarter struct{ jobs []domain.Job }
 
 func (starter *recordingJobStarter) Start(_ context.Context, job domain.Job) error {
+	starter.jobs = append(starter.jobs, job)
+	return nil
+}
+
+type idempotentRecordingDownloadJobs struct {
+	job     domain.Job
+	keys    []string
+	created int
+}
+
+func (jobs *idempotentRecordingDownloadJobs) Start(context.Context, domain.DownloadRequest) (domain.Job, error) {
+	return domain.Job{}, errors.New("unexpected non-idempotent download start")
+}
+
+func (jobs *idempotentRecordingDownloadJobs) StartWithIdempotency(_ context.Context, _ domain.DownloadRequest, key string) (domain.Job, error) {
+	jobs.keys = append(jobs.keys, key)
+	if len(jobs.keys) == 1 {
+		jobs.created++
+	}
+	return jobs.job, nil
+}
+
+func (*idempotentRecordingDownloadJobs) Run(context.Context, domain.JobID) (domain.Job, error) {
+	return domain.Job{}, nil
+}
+func (*idempotentRecordingDownloadJobs) Recover(context.Context) (int64, error) { return 0, nil }
+
+type flakyJobStarter struct {
+	err  error
+	jobs []domain.Job
+}
+
+func (starter *flakyJobStarter) Start(_ context.Context, job domain.Job) error {
+	if starter.err != nil {
+		return starter.err
+	}
 	starter.jobs = append(starter.jobs, job)
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,28 @@ func TestPersistentArticleJobPersistsIntentBeforeNetworkAndCommits(t *testing.T)
 	}
 	if client.calls != 1 {
 		t.Fatalf("completed item fetched twice: %d", client.calls)
+	}
+}
+
+func TestPersistentArticleJobIdempotencyDoesNotExpandExistingTargets(t *testing.T) {
+	database, _ := openPersistentDownloadDB(t)
+	seedPersistentArticle(t, database, "article-a")
+	seedPersistentArticle(t, database, "article-b")
+	store := library.NewJobStore(database)
+	service := JobService{Store: store}
+	first, err := service.Start(context.Background(), JobRequest{Kind: JobArticle, IdempotencyKey: "parent-item",
+		Articles: []ArticleRequest{{ArticleID: "article-a", URL: "https://mp.weixin.qq.com/s/a"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.Start(context.Background(), JobRequest{Kind: JobArticle, IdempotencyKey: "parent-item",
+		Articles: []ArticleRequest{{ArticleID: "article-b", URL: "https://mp.weixin.qq.com/s/b"}}})
+	if err != nil || first.ID != second.ID {
+		t.Fatalf("first=%#v second=%#v err=%v", first, second, err)
+	}
+	items, err := store.ListItems(context.Background(), first.ID)
+	if err != nil || len(items) != 1 || !strings.Contains(items[0].Key, "article-a") {
+		t.Fatalf("items=%#v err=%v", items, err)
 	}
 }
 

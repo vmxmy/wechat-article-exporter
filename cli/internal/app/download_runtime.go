@@ -281,6 +281,14 @@ func downloadSchedulerLimits(limit int) jobs.Limits {
 }
 
 func (runtime *localDownloadRuntime) Start(ctx context.Context, request domain.DownloadRequest) (domain.Job, error) {
+	return runtime.start(ctx, request, "")
+}
+
+func (runtime *localDownloadRuntime) StartWithIdempotency(ctx context.Context, request domain.DownloadRequest, key string) (domain.Job, error) {
+	return runtime.start(ctx, request, key)
+}
+
+func (runtime *localDownloadRuntime) start(ctx context.Context, request domain.DownloadRequest, idempotencyKey string) (domain.Job, error) {
 	if runtime == nil || runtime.library == nil {
 		return domain.Job{}, fmt.Errorf("download runtime: %w", application.ErrUnavailable)
 	}
@@ -297,7 +305,7 @@ func (runtime *localDownloadRuntime) Start(ctx context.Context, request domain.D
 	} else if kind == "paid" {
 		kind = download.JobPaid
 	}
-	jobRequest := download.JobRequest{Kind: kind, Profile: runtime.profile}
+	jobRequest := download.JobRequest{Kind: kind, Profile: runtime.profile, IdempotencyKey: strings.TrimSpace(idempotencyKey)}
 	articles, err := runtime.resolveArticles(ctx, request)
 	if err != nil {
 		return domain.Job{}, err
@@ -413,3 +421,4 @@ func (runtime *localDownloadRuntime) Recover(ctx context.Context) (int64, error)
 }
 
 var _ application.DownloadJobs = (*localDownloadRuntime)(nil)
+var _ application.IdempotentDownloadJobs = (*localDownloadRuntime)(nil)

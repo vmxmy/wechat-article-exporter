@@ -180,6 +180,40 @@ func (store *JobStore) CreateWithItems(ctx context.Context, spec jobs.Spec, item
 	return created, err
 }
 
+// CreateOrGetWithItems creates a job and its items atomically, or returns the
+// existing job for an idempotency key without changing that job's item set.
+// This is used for durable parent-to-child handoffs: retries must resume the
+// original child intent rather than append a newly resolved selection.
+func (store *JobStore) CreateOrGetWithItems(ctx context.Context, spec jobs.Spec, itemKeys []string) (domain.Job, bool, error) {
+	if strings.TrimSpace(spec.IdempotencyKey) == "" {
+		return domain.Job{}, false, errors.New("idempotency key is required")
+	}
+	var created domain.Job
+	var existed bool
+	err := store.withAdmission(ctx, func() error {
+		return store.database.WithTx(ctx, func(transaction *sql.Tx) error {
+			profile := spec.Profile
+			if profile == "" {
+				profile = store.database.profileID
+			}
+			var existing string
+			err := transaction.QueryRowContext(ctx, `SELECT id FROM jobs WHERE profile_id=? AND kind=? AND idempotency_key=?`,
+				profile, spec.Kind, spec.IdempotencyKey).Scan(&existing)
+			if err == nil {
+				created, err = scanJobRow(transaction.QueryRowContext(ctx, `SELECT id, kind, state, profile_id, created_at, updated_at FROM jobs WHERE id=?`, existing))
+				existed = true
+				return err
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			created, err = store.createWithItemsTx(ctx, transaction, spec, itemKeys)
+			return err
+		})
+	})
+	return created, existed, err
+}
+
 // CreateWithItemsAndObjects atomically makes object metadata reachable from
 // durable job-item pins. Callers may write immutable object bytes before this
 // transaction; garbage collection cannot collect an object before both its

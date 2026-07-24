@@ -56,6 +56,8 @@ type multiAlbumSyncCheckpoint struct {
 	DownloadJobID domain.JobID             `json:"downloadJobId,omitempty"`
 }
 
+const maxMultiAlbumDownloadArticles = 500
+
 func newLocalSyncRuntime(runtime *ProfileRuntime, clock runtimeenv.Clock, schedulers ...*jobs.Scheduler) *localSyncRuntime {
 	if runtime == nil || runtime.Library == nil || runtime.Jobs == nil || runtime.WeChat == nil {
 		return nil
@@ -373,37 +375,60 @@ func (runtime *localSyncRuntime) executeMultiAlbum(ctx context.Context, item job
 	if !envelope.Download {
 		return nil
 	}
-	if state.DownloadJobID != "" {
-		return nil
-	}
 	if runtime.library == nil || runtime.downloads == nil {
 		return fmt.Errorf("queue album article downloads: %w", application.ErrUnavailable)
 	}
-	articleIDs := make([]domain.ArticleID, 0)
-	seen := make(map[domain.ArticleID]struct{})
-	for _, target := range envelope.Albums {
-		ids, err := runtime.library.QueryArticleIDs(ctx, domain.ArticleQuery{AlbumID: target.LocalAlbumID})
+	downloadJob := domain.Job{ID: state.DownloadJobID}
+	if downloadJob.ID == "" {
+		articleIDs, err := runtime.multiAlbumDownloadArticleIDs(ctx, envelope)
 		if err != nil {
 			return err
 		}
-		for _, id := range ids {
-			if _, exists := seen[id]; !exists {
-				seen[id] = struct{}{}
-				articleIDs = append(articleIDs, id)
-			}
+		idempotent, ok := runtime.downloads.(application.IdempotentDownloadJobs)
+		if !ok {
+			return fmt.Errorf("queue album article downloads: %w", application.ErrUnavailable)
 		}
-	}
-	downloadJob, err := runtime.downloads.Start(ctx, domain.DownloadRequest{ArticleIDs: articleIDs})
-	if err != nil {
-		return err
+		downloadJob, err = idempotent.StartWithIdempotency(ctx, domain.DownloadRequest{ArticleIDs: articleIDs}, multiAlbumDownloadKey(item))
+		if err != nil {
+			return err
+		}
+		state.DownloadJobID = downloadJob.ID
+		if err := checkpoint(state); err != nil {
+			return err
+		}
 	}
 	if runtime.starter != nil {
 		if err := runtime.starter.Start(ctx, downloadJob); err != nil {
 			return fmt.Errorf("launch album download job %s: %w", downloadJob.ID, err)
 		}
 	}
-	state.DownloadJobID = downloadJob.ID
-	return checkpoint(state)
+	return nil
+}
+
+func (runtime *localSyncRuntime) multiAlbumDownloadArticleIDs(ctx context.Context, envelope multiAlbumSyncJobItem) ([]domain.ArticleID, error) {
+	articleIDs := make([]domain.ArticleID, 0)
+	seen := make(map[domain.ArticleID]struct{})
+	for _, target := range envelope.Albums {
+		ids, err := runtime.library.QueryArticleIDs(ctx, domain.ArticleQuery{AlbumID: target.LocalAlbumID})
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			articleIDs = append(articleIDs, id)
+			if len(articleIDs) > maxMultiAlbumDownloadArticles {
+				return nil, fmt.Errorf("multi-album traversal download exceeds %d unique articles", maxMultiAlbumDownloadArticles)
+			}
+		}
+	}
+	return articleIDs, nil
+}
+
+func multiAlbumDownloadKey(item jobs.Item) string {
+	return "album-sync-download:" + string(item.JobID) + ":" + item.ID
 }
 
 func (runtime *localSyncRuntime) Recover(ctx context.Context) (int64, error) {

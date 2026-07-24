@@ -81,6 +81,13 @@ type DownloadJobs interface {
 	Recover(context.Context) (int64, error)
 }
 
+// IdempotentDownloadJobs is the internal handoff seam for durable parent jobs
+// that create a follow-on download. The caller supplies the stable identity of
+// its durable parent item; presentation adapters never accept this key.
+type IdempotentDownloadJobs interface {
+	StartWithIdempotency(context.Context, domain.DownloadRequest, string) (domain.Job, error)
+}
+
 type SyncJobs interface {
 	Start(context.Context, domain.SynchronizeAccountRequest) (domain.Job, error)
 	Run(context.Context, domain.JobID) (domain.Job, error)
