@@ -397,6 +397,40 @@ test('sanitized export flow authorizes a directory, downloads an artifact, opens
   await expectOnlyLoopbackRequests(page)
 })
 
+test('every supported export format queues only its allowed local options', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  const cases = [
+    { format: 'markdown', options: { metadata: true, comments: false } },
+    { format: 'html', options: { comments: false, htmlResourcePolicy: 'best-effort' } },
+    { format: 'text', options: { metadata: true, comments: false } },
+    { format: 'json', options: { content: true, metadata: true, comments: false } },
+    { format: 'xlsx', options: { content: true } },
+    { format: 'docx', options: { comments: false } },
+    { format: 'pdf', options: { comments: false } }
+  ] as const
+
+  for (const [index, testCase] of cases.entries()) {
+    await page.goto('/exports')
+    await page.getByRole('button', { name: 'Authorize default directory' }).click()
+    await setExportArticleIDs(page, 'article-fixture-1')
+    await page.getByRole('combobox', { name: 'Format' }).selectOption(testCase.format)
+    await expect(page.getByRole('button', { name: 'Queue export' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Queue export' }).click()
+    await expect(page).toHaveURL(/\/jobs\?job=job-export-fixture$/)
+    await expect.poll(() => fixture.exports).toHaveLength(index + 1)
+
+    const request = JSON.parse(fixture.exports[index])
+    expect(request).toMatchObject({
+      directoryToken: 'dir-sanitized',
+      format: testCase.format,
+      options: { formatOptions: testCase.options }
+    })
+    expect(request.options.formatOptions).toEqual(testCase.options)
+  }
+
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('import job creation navigates directly to the selected task', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.route('**/api/v1/ingest/url', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(createdJob('job-import-fixture', 'import')) }))
@@ -411,6 +445,19 @@ test('import job creation navigates directly to the selected task', async ({ pag
 
 function createdJob(id: string, kind: string) {
   return { id, kind, state: 'queued', profile: 'fixture-profile', createdAt: '2026-07-24T09:30:00.000Z', updatedAt: '2026-07-24T09:30:00.000Z', counts: { completed: 0, total: 1 } }
+}
+
+async function setExportArticleIDs(page: import('@playwright/test').Page, value: string) {
+  const articleIDs = page.getByRole('textbox', { name: 'Article IDs' })
+  await articleIDs.evaluate((element, nextValue) => {
+    const textarea = element as HTMLTextAreaElement
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    if (!setValue) throw new Error('textarea value setter is unavailable')
+    setValue.call(textarea, nextValue)
+    textarea.dispatchEvent(new InputEvent('input', { bubbles: true, data: nextValue, inputType: 'insertText' }))
+    textarea.dispatchEvent(new Event('change', { bubbles: true }))
+  }, value)
+  await expect(articleIDs).toHaveValue(value)
 }
 
 test('sanitized settings and storage maintenance flows do not reveal secrets', async ({ page }) => {
