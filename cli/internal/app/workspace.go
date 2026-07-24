@@ -21,7 +21,6 @@ import (
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/network"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/processor"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/profiles"
-	syncrunner "github.com/wechat-article/wechat-article-exporter/cli/internal/sync"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/tui"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
@@ -610,25 +609,10 @@ func (extensions *workspaceExtensions) albumTraverse(ctx context.Context, reques
 	if len(request.IDs) == 0 {
 		return tui.OperationResult{}, errors.New("select an album first")
 	}
+	if len(request.IDs) > 50 {
+		return tui.OperationResult{}, errors.New("select no more than 50 albums")
+	}
 	active, err := extensions.active()
-	if err != nil {
-		return tui.OperationResult{}, err
-	}
-	page, err := active.Library.QueryAlbums(ctx, domain.AlbumQuery{Limit: 500})
-	if err != nil {
-		return tui.OperationResult{}, err
-	}
-	var album domain.Album
-	for _, candidate := range page.Items {
-		if string(candidate.ID) == request.IDs[0] {
-			album = candidate
-			break
-		}
-	}
-	if album.ID == "" {
-		return tui.OperationResult{}, sql.ErrNoRows
-	}
-	account, err := active.Library.GetAccount(ctx, album.AccountID)
 	if err != nil {
 		return tui.OperationResult{}, err
 	}
@@ -641,9 +625,11 @@ func (extensions *workspaceExtensions) albumTraverse(ctx context.Context, reques
 		order = "forward"
 	}
 	downloadAfter := request.Parameters["mode"] == "download"
-	job, err := runtime.StartAlbum(ctx, syncrunner.AlbumSyncRequest{
-		FakeID: account.FakeID, AlbumID: album.UpstreamID, Order: wechat.AlbumOrder(order), PageSize: 20, PageDelay: 5 * time.Second,
-	}, downloadAfter)
+	albumIDs := make([]domain.AlbumID, len(request.IDs))
+	for index, id := range request.IDs {
+		albumIDs[index] = domain.AlbumID(id)
+	}
+	job, err := runtime.StartAlbumsByIDWithOrder(ctx, albumIDs, wechat.AlbumOrder(order), downloadAfter)
 	if err != nil {
 		return tui.OperationResult{}, err
 	}
@@ -655,7 +641,7 @@ func (extensions *workspaceExtensions) albumTraverse(ctx context.Context, reques
 		}
 	}
 	return tui.OperationResult{Title: "Album traversal queued", Fields: map[string]string{
-		"job": string(job.ID), "album": album.Name, "order": order, "download after traversal": fmt.Sprint(downloadAfter),
+		"job": string(job.ID), "albums": fmt.Sprint(len(albumIDs)), "order": order, "download after traversal": fmt.Sprint(downloadAfter),
 	}}, nil
 }
 

@@ -366,6 +366,14 @@ FROM albums WHERE profile_id=? AND account_id=? AND id=?`, database.profileID, a
 	return item, err
 }
 
+func (database *Database) GetAlbum(ctx context.Context, albumID domain.AlbumID) (domain.Album, error) {
+	var item domain.Album
+	err := database.db.QueryRowContext(ctx, `SELECT id, COALESCE(account_id, ''), upstream_id, title,
+description, article_count, is_paid FROM albums WHERE profile_id=? AND id=?`, database.profileID, albumID).Scan(
+		&item.ID, &item.AccountID, &item.UpstreamID, &item.Name, &item.Description, &item.ArticleCount, &item.Paid)
+	return item, err
+}
+
 func (database *Database) StorageStatus(ctx context.Context) (domain.StorageStatus, error) {
 	status := domain.StorageStatus{DatabaseAvailable: true}
 	if database.objectsReady != nil {

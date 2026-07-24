@@ -86,6 +86,8 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 		server.articleDownloadKind(writer, request, "comments")
 	case "/api/v1/articles/resources":
 		server.articleDownloadKind(writer, request, "resources")
+	case "/api/v1/albums/traverse":
+		server.albumsTraverse(writer, request)
 	default:
 		if server.exportControl(writer, request) {
 			return true
@@ -399,6 +401,29 @@ func (server *Server) albumTraverse(writer http.ResponseWriter, request *http.Re
 	}
 	job, err := server.workspace.SynchronizeAlbum(request.Context(), application.WorkspaceAlbumTraversalRequest{
 		AccountID: input.AccountID, AlbumID: albumID, Order: input.Order, Download: input.Download,
+	})
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusAccepted, job)
+}
+
+func (server *Server) albumsTraverse(writer http.ResponseWriter, request *http.Request) {
+	if !server.apiMutation(writer, request, http.MethodPost) {
+		return
+	}
+	var input struct {
+		AlbumIDs []domain.AlbumID  `json:"albumIds"`
+		Order    wechat.AlbumOrder `json:"order"`
+		Download bool              `json:"download"`
+	}
+	if err := decodeControl(request, &input); err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	job, err := server.workspace.SynchronizeAlbum(request.Context(), application.WorkspaceAlbumTraversalRequest{
+		AlbumIDs: input.AlbumIDs, Order: input.Order, Download: input.Download,
 	})
 	if err != nil {
 		server.workspaceError(writer, err)

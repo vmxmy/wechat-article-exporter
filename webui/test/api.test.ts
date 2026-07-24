@@ -13,6 +13,7 @@ import {
   getRuntimeStatus,
   logout,
   syncAccount,
+  traverseAlbums,
   validateCredential
 } from '../src/lib/api'
 
@@ -71,6 +72,18 @@ describe('browser API client', () => {
       pagination: { page: 2, pageSize: 25, total: 1 }
     })
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/albums?offset=25&limit=25&accountId=account+%2F+fixture&keyword=fixture+%26+album', expect.any(Object))
+  })
+
+  it('queues one bounded multi-album traversal without exposing account or host data', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { id: 'job-albums', kind: 'album_sync' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(traverseAlbums(['album-2', 'album-1'], 'reverse', true)).resolves.toMatchObject({ id: 'job-albums' })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/albums/traverse', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ albumIds: ['album-2', 'album-1'], order: 'reverse', download: true })
+    }))
   })
 
   it('loads a resource summary without requesting resource URLs, digests, or paths', async () => {

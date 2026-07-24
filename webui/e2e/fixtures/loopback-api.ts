@@ -172,7 +172,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
       : [{ id: 'album-fixture-1', accountId: 'account-fixture', name: 'Sanitized album', articleCount: 2, paid: false, description: 'Sanitized album description' }]
     return page(route, albums, 26)
   }
-  if (url.pathname === '/api/v1/albums/album-fixture-1/traverse' && method === 'POST') { state.albumTraversals.push(body); return json(route, { id: 'job-album-fixture', kind: 'album_sync', state: 'queued', createdAt: now, updatedAt: now }) }
+  if ((url.pathname === '/api/v1/albums/album-fixture-1/traverse' || url.pathname === '/api/v1/albums/traverse') && method === 'POST') { state.albumTraversals.push(body); return json(route, { id: 'job-album-fixture', kind: 'album_sync', state: 'queued', createdAt: now, updatedAt: now }) }
   if (url.pathname === '/api/v1/saved-queries' && method === 'GET') return page(route, state.savedQueries)
   if (url.pathname === '/api/v1/saved-queries' && method === 'POST') {
     const name = String(body?.name || '').trim()

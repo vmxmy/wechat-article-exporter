@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/cookiejar"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -359,6 +360,38 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 	}
 }
 
+func TestAPIAlbumBatchTraversalQueuesOneBoundedDurableOperation(t *testing.T) {
+	app := &apiApplication{job: domain.Job{ID: "11111111-1111-1111-1111-111111111111", Kind: "album_sync", State: domain.JobQueued}}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+	request := requestWith(t, http.MethodPost, base+"/api/v1/albums/traverse", strings.NewReader(`{"albumIds":["album-2","album-1"],"order":"reverse","download":true}`), map[string]string{"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf})
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertStableJobResponse(t, response, "/api/v1/albums/traverse", string(app.job.ID))
+	if !reflect.DeepEqual(app.multiAlbumRequest, []domain.AlbumID{"album-2", "album-1"}) || !app.albumBatch {
+		t.Fatalf("multi album request=%#v download=%t", app.multiAlbumRequest, app.albumBatch)
+	}
+	for _, body := range []string{
+		`{"albumIds":[]}`, `{"albumIds":["album-1","album-1"]}`, `{"albumIds":["album-1"],"accountId":"account-1"}`,
+	} {
+		request = requestWith(t, http.MethodPost, base+"/api/v1/albums/traverse", strings.NewReader(body), map[string]string{"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf})
+		response, err = client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("body=%s status=%d response=%s", body, response.StatusCode, readResponse(t, response))
+		}
+		response.Body.Close()
+	}
+}
+
 func assertStableJobResponse(t *testing.T, response *http.Response, path, wantID string) {
 	t.Helper()
 	var envelope struct {
@@ -703,6 +736,7 @@ type apiApplication struct {
 	syncRequest          domain.SynchronizeAccountRequest
 	downloadRequests     []domain.DownloadRequest
 	albumRequest         application.WorkspaceAlbumTraversalRequest
+	multiAlbumRequest    []domain.AlbumID
 	albumBatch           bool
 	loggedOut            bool
 	savedName            string
@@ -765,6 +799,11 @@ func (app *apiApplication) SynchronizeAlbumWithOrder(_ context.Context, accountI
 func (app *apiApplication) SynchronizeAlbumWithOrderAndDownload(_ context.Context, accountID domain.AccountID, albumID domain.AlbumID, order wechat.AlbumOrder) (domain.Job, error) {
 	app.albumRequest = application.WorkspaceAlbumTraversalRequest{AccountID: accountID, AlbumID: albumID, Order: order, Download: true}
 	app.albumBatch = true
+	return app.job, nil
+}
+func (app *apiApplication) SynchronizeAlbumsWithOrder(_ context.Context, albumIDs []domain.AlbumID, _ wechat.AlbumOrder, download bool) (domain.Job, error) {
+	app.multiAlbumRequest = append([]domain.AlbumID(nil), albumIDs...)
+	app.albumBatch = download
 	return app.job, nil
 }
 func (app *apiApplication) PauseJob(context.Context, domain.JobID) (domain.Job, error) {

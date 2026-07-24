@@ -97,8 +97,12 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
   ], [messages])
   const album = selected.length === 1 ? query.data?.data.find((item) => item.id === selected[0]) : undefined
   const traverse = (download: boolean) => {
-    if (!album?.accountId) return setNotice(messages.resources.albums.actions.selectOne)
-    mutations.traverseAlbum.mutate({ albumId: album.id, accountId: album.accountId, order, download }, { onSuccess: (job) => setNotice(messages.resources.albums.actions.queued(job.id)), onError: () => setNotice(messages.resources.albums.actions.failed) })
+    if (selected.length === 0) return setNotice(messages.resources.albums.actions.selectAtLeastOne)
+    if (selected.length === 1 && album?.accountId) {
+      mutations.traverseAlbum.mutate({ albumId: album.id, accountId: album.accountId, order, download }, { onSuccess: (job) => setNotice(messages.resources.albums.actions.queued(job.id)), onError: () => setNotice(messages.resources.albums.actions.failed) })
+      return
+    }
+    mutations.traverseAlbums.mutate({ albumIds: selected, order, download }, { onSuccess: (job) => setNotice(messages.resources.albums.actions.queued(job.id)), onError: () => setNotice(messages.resources.albums.actions.failed) })
   }
   const handoffExport = () => {
     if (selected.length === 0) return
@@ -126,7 +130,7 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
     <section className="unavailable-actions" aria-labelledby="album-actions-title">
       <div><h2 id="album-actions-title">{messages.resources.albums.actions.title}</h2><p>{messages.resources.albums.actions.description}</p></div>
       <label>{messages.resources.albums.actions.order}<select aria-label={messages.resources.albums.actions.order} value={order} onChange={(event) => setOrder(event.target.value as AlbumTraversalOrder)}><option value="forward">{messages.resources.albums.actions.forward}</option><option value="reverse">{messages.resources.albums.actions.reverse}</option></select></label>
-      <div className="action-button-group"><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending} isDisabled={!album?.accountId} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending} isDisabled={!album?.accountId} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" isDisabled={selected.length === 0} onClick={handoffExport} /></div>
+      <div className="action-button-group"><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} isDisabled={selected.length === 0} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} isDisabled={selected.length === 0} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" isDisabled={selected.length === 0} onClick={handoffExport} /></div>
       {notice ? <p role="status">{notice}</p> : null}
     </section>
   </>

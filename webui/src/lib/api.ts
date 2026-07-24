@@ -519,6 +519,9 @@ export async function deleteSavedQuery(name: string, confirmation: string): Prom
 export async function traverseAlbum(albumId: string, accountId: string, order: AlbumTraversalOrder, download: boolean): Promise<JobRecord> {
   return mutate<JobRecord>(`albums/${encodeURIComponent(albumId)}/traverse`, 'POST', { accountId, order, download })
 }
+export async function traverseAlbums(albumIds: readonly string[], order: AlbumTraversalOrder, download: boolean): Promise<JobRecord> {
+  return mutate<JobRecord>('albums/traverse', 'POST', { albumIds, order, download })
+}
 export type ConfirmedJobControlAction = Exclude<JobControlAction, 'resume'>
 
 export async function controlJob(id: string, action: 'resume'): Promise<JobRecord>

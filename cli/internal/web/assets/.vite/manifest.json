@@ -6,8 +6,8 @@
       "_react-IsLpfBRF.js"
     ]
   },
-  "_jobHandoff-DgxA36rf.js": {
-    "file": "assets/jobHandoff-DgxA36rf.js",
+  "_jobHandoff-CeMHes-8.js": {
+    "file": "assets/jobHandoff-CeMHes-8.js",
     "name": "jobHandoff",
     "imports": [
       "index.html"
@@ -25,7 +25,7 @@
     ]
   },
   "index.html": {
-    "file": "assets/index-D5s9CWnY.js",
+    "file": "assets/index-0xweojGs.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -50,7 +50,7 @@
     ]
   },
   "src/features/articles/ArticleTable.tsx": {
-    "file": "assets/ArticleTable-DBLpVlbo.js",
+    "file": "assets/ArticleTable-CwrRIzLD.js",
     "name": "ArticleTable",
     "src": "src/features/articles/ArticleTable.tsx",
     "isDynamicEntry": true,
@@ -62,7 +62,7 @@
     ]
   },
   "src/features/exports/ExportPage.tsx": {
-    "file": "assets/ExportPage-BoIf-dRN.js",
+    "file": "assets/ExportPage-lTeIzgyF.js",
     "name": "ExportPage",
     "src": "src/features/exports/ExportPage.tsx",
     "isDynamicEntry": true,
@@ -70,25 +70,25 @@
       "_react-IsLpfBRF.js",
       "_tanstack-B10LnHfr.js",
       "index.html",
-      "_jobHandoff-DgxA36rf.js",
+      "_jobHandoff-CeMHes-8.js",
       "_astryx-C2sldg9D.js"
     ]
   },
   "src/features/import/ImportPage.tsx": {
-    "file": "assets/ImportPage-Cvh6bUcJ.js",
+    "file": "assets/ImportPage-Ba4xxmJs.js",
     "name": "ImportPage",
     "src": "src/features/import/ImportPage.tsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-IsLpfBRF.js",
-      "_jobHandoff-DgxA36rf.js",
+      "_jobHandoff-CeMHes-8.js",
       "index.html",
       "_astryx-C2sldg9D.js",
       "_tanstack-B10LnHfr.js"
     ]
   },
   "src/features/login/LoginPage.tsx": {
-    "file": "assets/LoginPage-CcCl48Pj.js",
+    "file": "assets/LoginPage-qIweIYJ1.js",
     "name": "LoginPage",
     "src": "src/features/login/LoginPage.tsx",
     "isDynamicEntry": true,
@@ -100,20 +100,20 @@
     ]
   },
   "src/features/resources/ResourcePages.tsx": {
-    "file": "assets/ResourcePages-CzQEj5s7.js",
+    "file": "assets/ResourcePages-DbWd10ue.js",
     "name": "ResourcePages",
     "src": "src/features/resources/ResourcePages.tsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-IsLpfBRF.js",
       "index.html",
-      "_jobHandoff-DgxA36rf.js",
+      "_jobHandoff-CeMHes-8.js",
       "_tanstack-B10LnHfr.js",
       "_astryx-C2sldg9D.js"
     ]
   },
   "src/features/settings/SettingsPage.tsx": {
-    "file": "assets/SettingsPage-C-VlJR4W.js",
+    "file": "assets/SettingsPage-BgwK6yOC.js",
     "name": "SettingsPage",
     "src": "src/features/settings/SettingsPage.tsx",
     "isDynamicEntry": true,

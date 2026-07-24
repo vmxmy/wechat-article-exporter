@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
@@ -97,6 +98,12 @@ type AlbumSyncJobs interface {
 type OrderedAlbumSyncJobs interface {
 	StartAlbumByIDWithOrder(context.Context, domain.AccountID, domain.AlbumID, wechat.AlbumOrder) (domain.Job, error)
 	StartAlbumByIDWithOrderAndDownload(context.Context, domain.AccountID, domain.AlbumID, wechat.AlbumOrder) (domain.Job, error)
+}
+
+// MultiAlbumSyncJobs persists a bounded ordered set as one album_sync job.
+// Its runtime resolves local IDs before any upstream work begins.
+type MultiAlbumSyncJobs interface {
+	StartAlbumsByIDWithOrder(context.Context, []domain.AlbumID, wechat.AlbumOrder, bool) (domain.Job, error)
 }
 
 type ExportJobs interface {
@@ -479,6 +486,47 @@ func (service *Service) SynchronizeAlbumWithOrderAndDownload(ctx context.Context
 	}
 	job, err := albumRuntime.StartAlbumByIDWithOrderAndDownload(ctx, accountID, albumID, order)
 	return service.startJob(ctx, job, err)
+}
+
+// SynchronizeAlbumsWithOrder keeps multi-album traversal inside one durable
+// operation. The old single-album methods are intentionally unchanged.
+func (service *Service) SynchronizeAlbumsWithOrder(ctx context.Context, albumIDs []domain.AlbumID, order wechat.AlbumOrder, download bool) (domain.Job, error) {
+	albumIDs, err := normalizeAlbumIDs(albumIDs)
+	if err != nil {
+		return domain.Job{}, err
+	}
+	if order != wechat.AlbumForward && order != wechat.AlbumReverse {
+		return domain.Job{}, errors.New("album traversal order must be forward or reverse")
+	}
+	runtime, ok := service.syncs.(MultiAlbumSyncJobs)
+	if !ok {
+		return domain.Job{}, fmt.Errorf("multi-album synchronization: %w", ErrUnavailable)
+	}
+	if service.starter == nil {
+		return domain.Job{}, fmt.Errorf("start album_sync worker: %w", ErrUnavailable)
+	}
+	job, err := runtime.StartAlbumsByIDWithOrder(ctx, albumIDs, order, download)
+	return service.startJob(ctx, job, err)
+}
+
+func normalizeAlbumIDs(values []domain.AlbumID) ([]domain.AlbumID, error) {
+	if len(values) < 1 || len(values) > 50 {
+		return nil, errors.New("album traversal requires between 1 and 50 album IDs")
+	}
+	result := make([]domain.AlbumID, 0, len(values))
+	seen := make(map[domain.AlbumID]struct{}, len(values))
+	for _, value := range values {
+		value = domain.AlbumID(strings.TrimSpace(string(value)))
+		if value == "" {
+			return nil, errors.New("album traversal IDs must not be empty")
+		}
+		if _, duplicate := seen[value]; duplicate {
+			return nil, errors.New("album traversal IDs must be unique")
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result, nil
 }
 
 func (service *Service) StartDownload(ctx context.Context, request domain.DownloadRequest) (domain.Job, error) {

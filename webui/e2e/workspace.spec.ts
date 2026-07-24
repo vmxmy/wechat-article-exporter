@@ -187,8 +187,8 @@ test('album ID export input rejects a selection larger than the local bound', as
   await expectOnlyLoopbackRequests(page)
 })
 
-test('album selections persist across server pages while traversal remains one-album-only', async ({ page }) => {
-  await installLoopbackFixture(page)
+test('album selections persist across server pages and queue one multi-album traversal', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
   await page.goto('/albums')
 
   await page.getByRole('checkbox', { name: 'Select album-fixture-1' }).check()
@@ -198,8 +198,9 @@ test('album selections persist across server pages while traversal remains one-a
 
   await page.getByRole('checkbox', { name: 'Select album-fixture-2' }).check()
   await expect(page.getByText('2 selected', { exact: false })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Traverse selected album' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Traverse and batch download' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Traverse selected albums' })).toBeEnabled()
+  await page.getByRole('button', { name: 'Traverse and batch download' }).click()
+  await expect.poll(() => fixture.albumTraversals).toEqual([{ albumIds: ['album-fixture-1', 'album-fixture-2'], order: 'forward', download: true }])
   await expect(page.getByRole('button', { name: 'Export selected albums' })).toBeEnabled()
   await expectOnlyLoopbackRequests(page)
 })

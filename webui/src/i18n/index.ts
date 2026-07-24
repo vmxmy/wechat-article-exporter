@@ -73,7 +73,7 @@ export type MessageCatalog = {
   }
   readonly resources: {
     readonly accounts: AccountResourceMessages
-    readonly albums: ResourceMessages & { readonly filters: { readonly title: string; readonly description: string; readonly accountId: string; readonly keyword: string }; readonly actions: { readonly title: string; readonly description: string; readonly order: string; readonly forward: string; readonly reverse: string; readonly traverse: string; readonly download: string; readonly export: string; readonly selectOne: string; readonly queued: (id: string) => string; readonly failed: string } }
+    readonly albums: ResourceMessages & { readonly filters: { readonly title: string; readonly description: string; readonly accountId: string; readonly keyword: string }; readonly actions: { readonly title: string; readonly description: string; readonly order: string; readonly forward: string; readonly reverse: string; readonly traverse: string; readonly download: string; readonly export: string; readonly selectOne: string; readonly selectAtLeastOne: string; readonly queued: (id: string) => string; readonly failed: string } }
     readonly jobs: JobResourceMessages
     readonly savedQueries: SavedQueryResourceMessages
   }

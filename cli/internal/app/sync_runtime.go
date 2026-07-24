@@ -39,6 +39,23 @@ type albumSyncJobItem struct {
 	Download bool                        `json:"download,omitempty"`
 }
 
+type multiAlbumSyncTarget struct {
+	LocalAlbumID domain.AlbumID              `json:"localAlbumId"`
+	Request      syncrunner.AlbumSyncRequest `json:"request"`
+}
+
+type multiAlbumSyncJobItem struct {
+	Version  int                    `json:"version"`
+	Albums   []multiAlbumSyncTarget `json:"albums"`
+	Download bool                   `json:"download,omitempty"`
+}
+
+type multiAlbumSyncCheckpoint struct {
+	Current       int                      `json:"current"`
+	Albums        []domain.AlbumCheckpoint `json:"albums"`
+	DownloadJobID domain.JobID             `json:"downloadJobId,omitempty"`
+}
+
 func newLocalSyncRuntime(runtime *ProfileRuntime, clock runtimeenv.Clock, schedulers ...*jobs.Scheduler) *localSyncRuntime {
 	if runtime == nil || runtime.Library == nil || runtime.Jobs == nil || runtime.WeChat == nil {
 		return nil
@@ -141,6 +158,48 @@ func (runtime *localSyncRuntime) StartAlbumByIDWithOrderAndDownload(ctx context.
 	return runtime.startAlbumByID(ctx, accountID, albumID, order, true)
 }
 
+func (runtime *localSyncRuntime) StartAlbumsByIDWithOrder(ctx context.Context, albumIDs []domain.AlbumID, order wechat.AlbumOrder, download bool) (domain.Job, error) {
+	if runtime == nil || runtime.library == nil || runtime.store == nil || runtime.album == nil {
+		return domain.Job{}, fmt.Errorf("album sync runtime: %w", application.ErrUnavailable)
+	}
+	if len(albumIDs) < 1 || len(albumIDs) > 50 {
+		return domain.Job{}, errors.New("album traversal requires between 1 and 50 album IDs")
+	}
+	if order != wechat.AlbumForward && order != wechat.AlbumReverse {
+		return domain.Job{}, errors.New("album order must be forward or reverse")
+	}
+	targets := make([]multiAlbumSyncTarget, 0, len(albumIDs))
+	seen := make(map[domain.AlbumID]struct{}, len(albumIDs))
+	for _, albumID := range albumIDs {
+		albumID = domain.AlbumID(strings.TrimSpace(string(albumID)))
+		if albumID == "" {
+			return domain.Job{}, errors.New("album traversal IDs must not be empty")
+		}
+		if _, duplicate := seen[albumID]; duplicate {
+			return domain.Job{}, errors.New("album traversal IDs must be unique")
+		}
+		seen[albumID] = struct{}{}
+		album, err := runtime.library.GetAlbum(ctx, albumID)
+		if err != nil {
+			return domain.Job{}, err
+		}
+		account, err := runtime.library.GetAccount(ctx, album.AccountID)
+		if err != nil {
+			return domain.Job{}, err
+		}
+		targets = append(targets, multiAlbumSyncTarget{LocalAlbumID: albumID, Request: syncrunner.AlbumSyncRequest{
+			FakeID: account.FakeID, AlbumID: album.UpstreamID, Order: order, PageSize: 20, PageDelay: 5 * time.Second,
+		}})
+	}
+	encoded, err := json.Marshal(multiAlbumSyncJobItem{Version: 2, Albums: targets, Download: download})
+	if err != nil {
+		return domain.Job{}, fmt.Errorf("encode multi-album sync job: %w", err)
+	}
+	return runtime.store.CreateWithItems(ctx, jobs.Spec{Kind: "album_sync", Profile: runtime.profile,
+		Payload: map[string]any{"albumIds": albumIDs, "order": order, "download": download},
+	}, []string{string(encoded)})
+}
+
 func (runtime *localSyncRuntime) startAlbumByID(ctx context.Context, accountID domain.AccountID, albumID domain.AlbumID, order wechat.AlbumOrder, download bool) (domain.Job, error) {
 	if runtime == nil || runtime.library == nil {
 		return domain.Job{}, fmt.Errorf("album sync runtime: %w", application.ErrUnavailable)
@@ -229,6 +288,15 @@ func (runtime *localSyncRuntime) execute(ctx context.Context, item jobs.Item, ch
 }
 
 func (runtime *localSyncRuntime) executeAlbum(ctx context.Context, item jobs.Item, checkpoint jobs.CheckpointFunc) error {
+	var version struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(item.Key), &version); err != nil {
+		return &jobs.ClassifiedError{Class: jobs.FailureParsing, Err: fmt.Errorf("decode album sync job item: %w", err)}
+	}
+	if version.Version == 2 {
+		return runtime.executeMultiAlbum(ctx, item, checkpoint)
+	}
 	var envelope albumSyncJobItem
 	decoder := json.NewDecoder(strings.NewReader(item.Key))
 	decoder.DisallowUnknownFields()
@@ -269,6 +337,75 @@ func (runtime *localSyncRuntime) executeAlbum(ctx context.Context, item jobs.Ite
 	return nil
 }
 
+func (runtime *localSyncRuntime) executeMultiAlbum(ctx context.Context, item jobs.Item, checkpoint jobs.CheckpointFunc) error {
+	var envelope multiAlbumSyncJobItem
+	decoder := json.NewDecoder(strings.NewReader(item.Key))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&envelope); err != nil || envelope.Version != 2 || len(envelope.Albums) < 1 || len(envelope.Albums) > 50 {
+		return &jobs.ClassifiedError{Class: jobs.FailureParsing, Err: errors.New("decode multi-album sync job item")}
+	}
+	state := multiAlbumSyncCheckpoint{Albums: make([]domain.AlbumCheckpoint, len(envelope.Albums))}
+	if len(item.Checkpoint) > 0 && string(item.Checkpoint) != "{}" && string(item.Checkpoint) != "null" {
+		if err := json.Unmarshal(item.Checkpoint, &state); err != nil || state.Current < 0 || state.Current > len(envelope.Albums) || len(state.Albums) != len(envelope.Albums) || (state.DownloadJobID != "" && state.Current != len(envelope.Albums)) {
+			return &jobs.ClassifiedError{Class: jobs.FailureParsing, Err: errors.New("decode multi-album sync checkpoint")}
+		}
+	}
+	for state.Current < len(envelope.Albums) {
+		index := state.Current
+		checkpointData, _ := json.Marshal(state.Albums[index])
+		result, err := runtime.album.Run(ctx, envelope.Albums[index].Request, checkpointData, func(value any) error {
+			current, ok := value.(domain.AlbumCheckpoint)
+			if !ok {
+				return errors.New("album checkpoint has an unexpected type")
+			}
+			state.Albums[index] = current
+			return checkpoint(state)
+		})
+		if err != nil {
+			return err
+		}
+		state.Albums[index] = result.Checkpoint
+		state.Current++
+		if err := checkpoint(state); err != nil {
+			return err
+		}
+	}
+	if !envelope.Download {
+		return nil
+	}
+	if state.DownloadJobID != "" {
+		return nil
+	}
+	if runtime.library == nil || runtime.downloads == nil {
+		return fmt.Errorf("queue album article downloads: %w", application.ErrUnavailable)
+	}
+	articleIDs := make([]domain.ArticleID, 0)
+	seen := make(map[domain.ArticleID]struct{})
+	for _, target := range envelope.Albums {
+		ids, err := runtime.library.QueryArticleIDs(ctx, domain.ArticleQuery{AlbumID: target.LocalAlbumID})
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if _, exists := seen[id]; !exists {
+				seen[id] = struct{}{}
+				articleIDs = append(articleIDs, id)
+			}
+		}
+	}
+	downloadJob, err := runtime.downloads.Start(ctx, domain.DownloadRequest{ArticleIDs: articleIDs})
+	if err != nil {
+		return err
+	}
+	if runtime.starter != nil {
+		if err := runtime.starter.Start(ctx, downloadJob); err != nil {
+			return fmt.Errorf("launch album download job %s: %w", downloadJob.ID, err)
+		}
+	}
+	state.DownloadJobID = downloadJob.ID
+	return checkpoint(state)
+}
+
 func (runtime *localSyncRuntime) Recover(ctx context.Context) (int64, error) {
 	if runtime == nil || runtime.store == nil {
 		return 0, fmt.Errorf("account sync runtime: %w", application.ErrUnavailable)
@@ -277,3 +414,4 @@ func (runtime *localSyncRuntime) Recover(ctx context.Context) (int64, error) {
 }
 
 var _ application.SyncJobs = (*localSyncRuntime)(nil)
+var _ application.MultiAlbumSyncJobs = (*localSyncRuntime)(nil)

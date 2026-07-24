@@ -1962,9 +1962,65 @@ func TestLocalSyncRuntimeFindsAlbumBeyondFirstFiveHundred(t *testing.T) {
 	}
 }
 
+func TestLocalSyncRuntimeTraversesMultipleAlbumsAsOneJobAndQueuesOneDownload(t *testing.T) {
+	database := openAppTestDatabase(t)
+	account, err := database.SaveAccount(context.Background(), domain.Account{FakeID: "fake-multi", Name: "Multi albums"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, album := range []domain.Album{
+		{ID: "album-first", AccountID: account.ID, UpstreamID: "upstream-first", Name: "First"},
+		{ID: "album-second", AccountID: account.ID, UpstreamID: "upstream-second", Name: "Second"},
+	} {
+		if _, err := database.SaveAlbumPage(context.Background(), library.AlbumPageCommit{Album: album}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	article := func(suffix string) domain.Article {
+		return domain.Article{ID: domain.ArticleID("article-" + suffix), AccountID: account.ID, Aid: "aid-" + suffix,
+			Title: strings.ToUpper(suffix), CanonicalURL: "https://mp.weixin.qq.com/s/" + suffix}
+	}
+	source := &appAlbumByIDSource{pages: map[string]wechat.AlbumPage{
+		"upstream-first":  {Album: domain.Album{ID: "album-first", AccountID: account.ID, UpstreamID: "upstream-first", Name: "First"}, Items: []wechat.AlbumArticle{{Key: "first", Article: article("first")}}, Completed: true},
+		"upstream-second": {Album: domain.Album{ID: "album-second", AccountID: account.ID, UpstreamID: "upstream-second", Name: "Second"}, Items: []wechat.AlbumArticle{{Key: "second", Article: article("second")}, {Key: "shared", Article: article("first")}}, Completed: true},
+	}}
+	runner, err := syncrunner.NewAlbumRunner(source, database, syncrunner.AlbumRunnerOptions{Sleep: func(context.Context, time.Duration) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloads := &recordingDownloadJobs{job: domain.Job{ID: "download-multi", Kind: "article_download", State: domain.JobQueued}}
+	starter := &recordingJobStarter{}
+	runtime := &localSyncRuntime{profile: "profile-a", store: library.NewJobStore(database), library: database, album: runner, downloads: downloads, starter: starter}
+	job, err := runtime.StartAlbumsByIDWithOrder(context.Background(), []domain.AlbumID{"album-second", "album-first"}, wechat.AlbumReverse, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, err := runtime.Run(context.Background(), job.ID)
+	if err != nil || final.State != domain.JobCompleted {
+		t.Fatalf("final=%#v err=%v", final, err)
+	}
+	if !reflect.DeepEqual(source.albumIDs, []string{"upstream-second", "upstream-first"}) || len(downloads.requests) != 1 || !reflect.DeepEqual(downloads.requests[0].ArticleIDs, []domain.ArticleID{"article-second", "article-first"}) || !reflect.DeepEqual(starter.jobs, []domain.Job{downloads.job}) {
+		t.Fatalf("albumIDs=%#v downloads=%#v started=%#v", source.albumIDs, downloads.requests, starter.jobs)
+	}
+	items, err := runtime.store.ListItems(context.Background(), job.ID)
+	if err != nil || len(items) != 1 || !strings.Contains(string(items[0].Checkpoint), "download-multi") {
+		t.Fatalf("items=%#v err=%v", items, err)
+	}
+}
+
 type appAlbumPageSource struct {
 	pages  map[string]wechat.AlbumPage
 	begins []string
+}
+
+type appAlbumByIDSource struct {
+	pages    map[string]wechat.AlbumPage
+	albumIDs []string
+}
+
+func (source *appAlbumByIDSource) ListAlbumArticles(_ context.Context, request wechat.AlbumListRequest) (wechat.AlbumPage, error) {
+	source.albumIDs = append(source.albumIDs, request.AlbumID)
+	return source.pages[request.AlbumID], nil
 }
 
 func (source *appAlbumPageSource) ListAlbumArticles(_ context.Context, request wechat.AlbumListRequest) (wechat.AlbumPage, error) {

@@ -227,6 +227,7 @@ type WorkspaceJobQuery struct {
 type WorkspaceAlbumTraversalRequest struct {
 	AccountID domain.AccountID  `json:"accountId"`
 	AlbumID   domain.AlbumID    `json:"albumId"`
+	AlbumIDs  []domain.AlbumID  `json:"albumIds,omitempty"`
 	Order     wechat.AlbumOrder `json:"order"`
 	Download  bool              `json:"download"`
 }
@@ -324,6 +325,10 @@ type WorkspaceAlbumController interface {
 type WorkspaceAlbumTraversalController interface {
 	SynchronizeAlbumWithOrder(context.Context, domain.AccountID, domain.AlbumID, wechat.AlbumOrder) (domain.Job, error)
 	SynchronizeAlbumWithOrderAndDownload(context.Context, domain.AccountID, domain.AlbumID, wechat.AlbumOrder) (domain.Job, error)
+}
+
+type WorkspaceMultiAlbumTraversalController interface {
+	SynchronizeAlbumsWithOrder(context.Context, []domain.AlbumID, wechat.AlbumOrder, bool) (domain.Job, error)
 }
 
 // WorkspaceReader is the P0 read contract for local browser, TUI, and MCP
@@ -514,6 +519,37 @@ func (workspace *Workspace) SynchronizeAccount(ctx context.Context, request doma
 }
 
 func (workspace *Workspace) SynchronizeAlbum(ctx context.Context, request WorkspaceAlbumTraversalRequest) (domain.Job, error) {
+	if len(request.AlbumIDs) > 0 {
+		if request.AlbumID != "" || request.AccountID != "" {
+			return domain.Job{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "multi-album traversal does not accept an account or single album identifier"}
+		}
+		if request.Order == "" {
+			request.Order = wechat.AlbumForward
+		}
+		if request.Order != wechat.AlbumForward && request.Order != wechat.AlbumReverse {
+			return domain.Job{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "album traversal order is not supported"}
+		}
+		if len(request.AlbumIDs) > 50 {
+			return domain.Job{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "album traversal accepts no more than 50 unique album identifiers"}
+		}
+		seen := make(map[domain.AlbumID]struct{}, len(request.AlbumIDs))
+		for _, albumID := range request.AlbumIDs {
+			albumID = domain.AlbumID(strings.TrimSpace(string(albumID)))
+			if albumID == "" {
+				return domain.Job{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "album traversal identifiers are required"}
+			}
+			if _, duplicate := seen[albumID]; duplicate {
+				return domain.Job{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "album traversal identifiers must be unique"}
+			}
+			seen[albumID] = struct{}{}
+		}
+		controls, ok := workspace.application.(WorkspaceMultiAlbumTraversalController)
+		if !ok {
+			return domain.Job{}, workspaceError(fmt.Errorf("multi-album traversal: %w", ErrUnavailable))
+		}
+		job, err := controls.SynchronizeAlbumsWithOrder(ctx, request.AlbumIDs, request.Order, request.Download)
+		return job, workspaceError(err)
+	}
 	if strings.TrimSpace(string(request.AccountID)) == "" || strings.TrimSpace(string(request.AlbumID)) == "" {
 		return domain.Job{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "album account and identifier are required"}
 	}

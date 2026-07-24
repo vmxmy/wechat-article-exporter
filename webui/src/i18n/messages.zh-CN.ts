@@ -258,7 +258,7 @@ export const zhCN = {
       loading: '正在加载本地专辑页…', unavailable: '本地 albums API 尚不可用。', empty: '没有与查询匹配的专辑。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '专辑分页', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见专辑列',
       columns: { name: '专辑', articles: '文章数', paid: '付费', description: '简介' },
       filters: { title: '专辑筛选', description: '筛选会在本地服务端完成，再返回受限的分页结果。', accountId: '账号 ID', keyword: '专辑关键词' },
-      actions: { title: '专辑操作', description: '遍历由共享持久化专辑任务可恢复地执行；批量下载会在遍历提交后创建文章下载任务。', order: '遍历顺序', forward: '正序', reverse: '逆序', traverse: '遍历所选专辑', download: '遍历并批量下载', export: '导出所选专辑', selectOne: '请先选择一个带所属账号的已保存专辑。', queued: (id: string) => `专辑任务 ${id} 已排队。`, failed: '无法为专辑创建任务。' }
+      actions: { title: '专辑操作', description: '1 至 50 个所选专辑会在同一个共享持久化任务中可恢复地遍历；全部遍历提交后可创建一个文章下载任务。', order: '遍历顺序', forward: '正序', reverse: '逆序', traverse: '遍历所选专辑', download: '遍历并批量下载', export: '导出所选专辑', selectOne: '请先选择一个带所属账号的已保存专辑。', selectAtLeastOne: '请先选择 1 至 50 个已保存专辑。', queued: (id: string) => `专辑任务 ${id} 已排队。`, failed: '无法为专辑创建任务。' }
     },
     jobs: {
       title: '任务',
