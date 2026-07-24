@@ -92,6 +92,62 @@ func TestWebCommandOpensBrowserWithoutNoOpen(t *testing.T) {
 	}
 }
 
+func TestWebCommandDoesNotLeakBootstrapURLWhenBrowserOpenFails(t *testing.T) {
+	applicationAdapter, _, stderr := newTestApp(t)
+	urlWritten := make(chan string, 1)
+	applicationAdapter.stdout = webURLWriter{urlWritten: urlWritten}
+	privatePath := "/private/browser/profile/session.json"
+	applicationAdapter.webOpenBrowser = func(_ context.Context, target string) error {
+		return errors.New("browser refused " + target + " " + privatePath)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- applicationAdapter.Execute(ctx, []string{"web"}) }()
+	workspaceURL := waitForWebURL(t, urlWritten)
+	if !strings.HasPrefix(workspaceURL, "http://127.0.0.1:") || strings.Contains(workspaceURL, retiredProjectDomain) {
+		t.Fatalf("workspace URL = %q; want random IPv4 loopback URL only", workspaceURL)
+	}
+	if output := stderr.String(); strings.Contains(output, workspaceURL) || strings.Contains(output, privatePath) || strings.Contains(output, "?token=") {
+		t.Fatalf("browser launch failure leaked bootstrap URL or local path to stderr: %q", output)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("web command cancellation = %v", err)
+	}
+}
+
+func TestWebCommandNormalLaneDoesNotEmitRetiredProjectDomains(t *testing.T) {
+	applicationAdapter, _, stderr := newTestApp(t)
+	urlWritten := make(chan string, 1)
+	applicationAdapter.stdout = webURLWriter{urlWritten: urlWritten}
+	opened := make(chan string, 1)
+	applicationAdapter.webOpenBrowser = func(_ context.Context, target string) error {
+		opened <- target
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- applicationAdapter.Execute(ctx, []string{"web"}) }()
+	workspaceURL := waitForWebURL(t, urlWritten)
+	openedURL := <-opened
+	for _, output := range []string{workspaceURL, openedURL, stderr.String()} {
+		for _, retiredDomain := range retiredProjectDomains {
+			if strings.Contains(output, retiredDomain) {
+				t.Fatalf("normal web-command output leaked retired project domain %q: %q", retiredDomain, output)
+			}
+		}
+	}
+	if openedURL != workspaceURL {
+		t.Fatalf("opened URL = %q; stdout URL = %q", openedURL, workspaceURL)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("web command cancellation = %v", err)
+	}
+}
+
 func TestWebCommandRejectsJSONOutput(t *testing.T) {
 	applicationAdapter, _, _ := newTestApp(t)
 	err := applicationAdapter.Execute(context.Background(), []string{"web", "--json"})
@@ -166,6 +222,13 @@ func TestWebCommandInjectsMaintenanceFacades(t *testing.T) {
 
 type webURLWriter struct {
 	urlWritten chan<- string
+}
+
+const retiredProjectDomain = "mp.ziikoo.app"
+
+var retiredProjectDomains = []string{
+	retiredProjectDomain,
+	"mptext.ziikoo.app",
 }
 
 func (w webURLWriter) Write(p []byte) (int, error) {

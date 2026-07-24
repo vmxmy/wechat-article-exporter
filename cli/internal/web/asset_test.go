@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,23 @@ import (
 func TestEmbeddedAssetsAreCompleteAndLocal(t *testing.T) {
 	if err := ValidateEmbeddedAssets(); err != nil {
 		t.Fatal(err)
+	}
+	for _, asset := range embeddedAssetReferences(t) {
+		for _, retiredDomain := range retiredProjectDomains {
+			if strings.Contains(asset, retiredDomain) {
+				t.Fatalf("embedded browser asset references retired project domain %q", retiredDomain)
+			}
+		}
+	}
+}
+
+func TestEmbeddedAssetsContainNoRetiredProjectDomains(t *testing.T) {
+	for name, asset := range embeddedAssetReferences(t) {
+		for _, retiredDomain := range retiredProjectDomains {
+			if strings.Contains(asset, retiredDomain) {
+				t.Fatalf("embedded browser asset %q references retired project domain %q", name, retiredDomain)
+			}
+		}
 	}
 }
 
@@ -111,6 +129,34 @@ func mustEmbeddedManifest(t *testing.T) map[string]viteManifestEntry {
 		t.Fatalf("entrypoint manifest = %#v", entry)
 	}
 	return manifest
+}
+
+func embeddedAssetReferences(t *testing.T) map[string]string {
+	t.Helper()
+	assets := map[string]string{}
+	err := fs.WalkDir(embeddedAssets, assetRoot, func(name string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		content, err := embeddedAssets.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		assets[name] = string(content)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return assets
+}
+
+var retiredProjectDomains = []string{
+	"mp.ziikoo.app",
+	"mptext.ziikoo.app",
 }
 
 func TestAssetHandlerDoesNotRewriteMissingAssetsOrAPIRequests(t *testing.T) {

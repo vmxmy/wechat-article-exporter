@@ -3,9 +3,11 @@ package web
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
@@ -35,6 +37,10 @@ func TestWorkspaceBindsOnlyRandomIPv4Loopback(t *testing.T) {
 	if !strings.HasPrefix(server.URL(), "http://127.0.0.1:") || !strings.Contains(server.URL(), "?token=") {
 		t.Fatalf("workspace URL = %q", server.URL())
 	}
+	workspaceURL := mustParseURL(t, server.URL())
+	if workspaceURL.Host != server.listener.Addr().String() || workspaceURL.Port() == "" || workspaceURL.Port() == "0" || workspaceURL.Query().Get("token") == "" {
+		t.Fatalf("workspace URL = %q; want exact random loopback listener and bootstrap credential", workspaceURL)
+	}
 }
 
 func TestBootstrapTokenCreatesOneSessionAndClearsURL(t *testing.T) {
@@ -57,6 +63,103 @@ func TestBootstrapTokenCreatesOneSessionAndClearsURL(t *testing.T) {
 	}
 	if got := get(t, client, bootstrapURL).StatusCode; got != http.StatusUnauthorized {
 		t.Fatalf("reused bootstrap token status = %d; want 401", got)
+	}
+}
+
+func TestBootstrapRejectsGuessesAndMultipleTokensWithoutLeakingCredentials(t *testing.T) {
+	server, client := startTestServer(t, time.Now)
+	bootstrapURL := server.URL()
+	bootstrap := mustParseURL(t, bootstrapURL)
+	secret := bootstrap.Query().Get("token")
+	base := strings.TrimSuffix(strings.Split(bootstrapURL, "?")[0], "/")
+	privatePath := "/private/browser/profile/session.json"
+
+	for name, target := range map[string]string{
+		"guessed":   base + "/?token=guessed-bootstrap-token&path=" + url.QueryEscape(privatePath),
+		"multiple":  base + "/?token=" + url.QueryEscape(secret) + "&token=guessed-bootstrap-token",
+		"reordered": base + "/?token=guessed-bootstrap-token&token=" + url.QueryEscape(secret),
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := get(t, client, target)
+			if response.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("bootstrap rejection status = %d; want 401", response.StatusCode)
+			}
+			assertResponseDoesNotLeak(t, response, secret, privatePath)
+		})
+	}
+
+	// Rejected attempts must neither authorize a session nor consume the exact
+	// one-time bootstrap credential.
+	authorize(t, client, bootstrapURL)
+	if got := get(t, client, bootstrapURL).StatusCode; got != http.StatusUnauthorized {
+		t.Fatalf("reused bootstrap token status = %d; want 401", got)
+	}
+}
+
+func TestHostConfusionIsRejectedBeforeBootstrapOrSessionAuthorization(t *testing.T) {
+	server, client := startTestServer(t, time.Now)
+	bootstrapURL := server.URL()
+	bootstrap := mustParseURL(t, bootstrapURL)
+	secret := bootstrap.Query().Get("token")
+	listenerAddress := server.listener.Addr().String()
+
+	for name, host := range map[string]string{
+		"missing port":        "127.0.0.1",
+		"localhost alias":     "localhost:" + bootstrap.Port(),
+		"comma separated":     listenerAddress + ",evil.example",
+		"user info confusion": "127.0.0.1@evil.example:" + bootstrap.Port(),
+		"suffix":              listenerAddress + ".evil.example",
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, bootstrapURL, nil)
+			request.Host = host
+			request.RemoteAddr = "127.0.0.1:54321"
+			response := httptest.NewRecorder()
+			server.handler().ServeHTTP(response, request)
+			if response.Code != http.StatusMisdirectedRequest {
+				t.Fatalf("Host %q status = %d; want 421", host, response.Code)
+			}
+			assertRecordedResponseDoesNotLeak(t, response, secret, "/private/browser/profile/session.json")
+		})
+	}
+
+	// A hostile Host must be rejected before the bootstrap token can be spent.
+	authorize(t, client, bootstrapURL)
+}
+
+func TestSessionCookiesAreScopedAndLogoutClearsThem(t *testing.T) {
+	server, client := startTestServer(t, time.Now)
+	bootstrapURL := server.URL()
+	noRedirect := *client
+	noRedirect.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := noRedirect.Get(bootstrapURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusSeeOther {
+		response.Body.Close()
+		t.Fatalf("bootstrap status = %d; want 303", response.StatusCode)
+	}
+	assertSessionCookieAttributes(t, response.Cookies(), false)
+	response.Body.Close()
+
+	base := strings.TrimSuffix(strings.Split(bootstrapURL, "?")[0], "/")
+	csrf := cookieFor(t, client, mustParseURL(t, base), csrfCookieName).Value
+	logout := requestWith(t, http.MethodPost, base+"/api/v1/session/logout", strings.NewReader("{}"), map[string]string{
+		"Origin": base, "Content-Type": "application/json", "X-CSRF-Token": csrf,
+	})
+	response, err = client.Do(logout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusNoContent {
+		response.Body.Close()
+		t.Fatalf("logout status = %d; want 204", response.StatusCode)
+	}
+	assertSessionCookieAttributes(t, response.Cookies(), true)
+	response.Body.Close()
+	if got := get(t, client, base+"/api/v1/status").StatusCode; got != http.StatusUnauthorized {
+		t.Fatalf("status after logout = %d; want 401", got)
 	}
 }
 
@@ -345,6 +448,55 @@ func readResponse(t *testing.T, response *http.Response) string {
 		t.Fatal(err)
 	}
 	return string(body)
+}
+
+func assertResponseDoesNotLeak(t *testing.T, response *http.Response, values ...string) {
+	t.Helper()
+	body := readResponse(t, response)
+	assertNoSensitiveValues(t, body+"\n"+fmt.Sprint(response.Header), values...)
+}
+
+func assertRecordedResponseDoesNotLeak(t *testing.T, response *httptest.ResponseRecorder, values ...string) {
+	t.Helper()
+	assertNoSensitiveValues(t, response.Body.String()+"\n"+fmt.Sprint(response.Header()), values...)
+}
+
+func assertNoSensitiveValues(t *testing.T, output string, values ...string) {
+	t.Helper()
+	for _, value := range values {
+		if value != "" && strings.Contains(output, value) {
+			t.Fatalf("response leaked sensitive value %q: %q", value, output)
+		}
+	}
+}
+
+func assertSessionCookieAttributes(t *testing.T, cookies []*http.Cookie, clearing bool) {
+	t.Helper()
+	seen := map[string]*http.Cookie{}
+	for _, cookie := range cookies {
+		seen[cookie.Name] = cookie
+	}
+	for _, name := range []string{sessionCookieName, csrfCookieName} {
+		cookie := seen[name]
+		if cookie == nil {
+			t.Fatalf("%s cookie was not set", name)
+		}
+		if cookie.Path != "/" || cookie.SameSite != http.SameSiteStrictMode {
+			t.Fatalf("%s cookie scope = %#v; want Path=/ and SameSite=Strict", name, cookie)
+		}
+		if cookie.HttpOnly != (name == sessionCookieName) {
+			t.Fatalf("%s HttpOnly = %t", name, cookie.HttpOnly)
+		}
+		if clearing {
+			if cookie.MaxAge >= 0 || cookie.Value != "" {
+				t.Fatalf("cleared %s cookie = %#v; want expired empty cookie", name, cookie)
+			}
+			continue
+		}
+		if cookie.Value == "" || cookie.MaxAge != 0 || cookie.Expires.IsZero() {
+			t.Fatalf("issued %s cookie = %#v; want non-empty session cookie with expiry", name, cookie)
+		}
+	}
 }
 
 type testApplication struct{}

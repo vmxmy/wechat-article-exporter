@@ -14,7 +14,7 @@
 - [ ] 2.3 Implement same-origin Host/Origin/CSRF validation for mutations and request-size/content-type limits.
 - [ ] 2.4 Add CSP, referrer, no-sniff, frame, cache-control, and error-redaction middleware with header regression tests.
 - [ ] 2.5 Implement `--no-open`, browser auto-open, stdout URL/stderr log discipline, signal cancellation, and bounded graceful shutdown.
-- [ ] 2.6 Add security tests for unauthorized access, guessed/reused token, cross-origin mutation, Host confusion, URL/log leakage, and retired-domain absence.
+- [x] 2.6 Add security tests for unauthorized access, guessed/reused token, cross-origin mutation, Host confusion, URL/log leakage, and retired-domain absence. Handler tests reject malformed and conflicting Host forms before bootstrap/session authorization, guessed and repeated/multiple bootstrap tokens without response leakage, and verify exact random IPv4 loopback URLs plus session-cookie issuance/logout clearing. Command tests preserve stdout/stderr URL discipline when browser launch fails and assert normal command output contains no retired project domains; embedded-asset tests reject retired project-domain references.
 
 ## 3. Shared browser API
 
