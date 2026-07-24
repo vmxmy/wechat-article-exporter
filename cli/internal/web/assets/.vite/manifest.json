@@ -6,8 +6,8 @@
       "_react-IsLpfBRF.js"
     ]
   },
-  "_jobHandoff-CRoIIBD8.js": {
-    "file": "assets/jobHandoff-CRoIIBD8.js",
+  "_jobHandoff-DfDO2RB2.js": {
+    "file": "assets/jobHandoff-DfDO2RB2.js",
     "name": "jobHandoff",
     "imports": [
       "index.html"
@@ -25,7 +25,7 @@
     ]
   },
   "index.html": {
-    "file": "assets/index-CK2uPEkg.js",
+    "file": "assets/index-deQJfBKr.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -46,11 +46,11 @@
       "src/features/resources/ResourcePages.tsx"
     ],
     "css": [
-      "assets/index-BNsi6AYx.css"
+      "assets/index-ChOZDJgH.css"
     ]
   },
   "src/features/articles/ArticleTable.tsx": {
-    "file": "assets/ArticleTable-C5urwB-i.js",
+    "file": "assets/ArticleTable-DsRx4PVb.js",
     "name": "ArticleTable",
     "src": "src/features/articles/ArticleTable.tsx",
     "isDynamicEntry": true,
@@ -62,7 +62,7 @@
     ]
   },
   "src/features/exports/ExportPage.tsx": {
-    "file": "assets/ExportPage-B91ejmdv.js",
+    "file": "assets/ExportPage-DI_ytbCQ.js",
     "name": "ExportPage",
     "src": "src/features/exports/ExportPage.tsx",
     "isDynamicEntry": true,
@@ -70,25 +70,25 @@
       "_react-IsLpfBRF.js",
       "_tanstack-B10LnHfr.js",
       "index.html",
-      "_jobHandoff-CRoIIBD8.js",
+      "_jobHandoff-DfDO2RB2.js",
       "_astryx-B-77Zl9q.js"
     ]
   },
   "src/features/import/ImportPage.tsx": {
-    "file": "assets/ImportPage-DuXAx0-q.js",
+    "file": "assets/ImportPage-O2B4fbkF.js",
     "name": "ImportPage",
     "src": "src/features/import/ImportPage.tsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-IsLpfBRF.js",
-      "_jobHandoff-CRoIIBD8.js",
+      "_jobHandoff-DfDO2RB2.js",
       "index.html",
       "_astryx-B-77Zl9q.js",
       "_tanstack-B10LnHfr.js"
     ]
   },
   "src/features/login/LoginPage.tsx": {
-    "file": "assets/LoginPage-g5vwTkl4.js",
+    "file": "assets/LoginPage-C5MS2H0i.js",
     "name": "LoginPage",
     "src": "src/features/login/LoginPage.tsx",
     "isDynamicEntry": true,
@@ -100,20 +100,20 @@
     ]
   },
   "src/features/resources/ResourcePages.tsx": {
-    "file": "assets/ResourcePages-BySJ85fp.js",
+    "file": "assets/ResourcePages-CVhZRiqS.js",
     "name": "ResourcePages",
     "src": "src/features/resources/ResourcePages.tsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-IsLpfBRF.js",
       "index.html",
-      "_jobHandoff-CRoIIBD8.js",
+      "_jobHandoff-DfDO2RB2.js",
       "_tanstack-B10LnHfr.js",
       "_astryx-B-77Zl9q.js"
     ]
   },
   "src/features/settings/SettingsPage.tsx": {
-    "file": "assets/SettingsPage-BI0zrME3.js",
+    "file": "assets/SettingsPage-DjIDIN_d.js",
     "name": "SettingsPage",
     "src": "src/features/settings/SettingsPage.tsx",
     "isDynamicEntry": true,
