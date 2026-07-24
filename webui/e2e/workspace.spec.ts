@@ -433,6 +433,35 @@ test('sanitized settings and storage maintenance flows do not reveal secrets', a
   await expectOnlyLoopbackRequests(page)
 })
 
+test('export defaults persist locally without changing sync settings or starting an export', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/settings')
+
+  await page.getByRole('combobox', { name: 'Collision policy' }).selectOption('replace')
+  await page.getByRole('checkbox', { name: 'Excel: include article content' }).uncheck()
+  await page.getByRole('checkbox', { name: 'JSON: include article content' }).uncheck()
+  await page.getByRole('checkbox', { name: 'JSON: include stored comments' }).check()
+  await page.getByRole('checkbox', { name: 'HTML: include stored comments' }).check()
+  await page.getByRole('button', { name: 'Save preferences' }).click()
+
+  await expect(page.getByText('Preferences saved.')).toBeVisible()
+  expect(fixture.preferencePatches).toEqual([expect.objectContaining({
+    export: {
+      namingTemplate: '{title}',
+      maximumNameBytes: 180,
+      collisionPolicy: 'replace',
+      excelIncludeContent: false,
+      jsonIncludeContent: false,
+      jsonIncludeComments: true,
+      htmlIncludeComments: true
+    }
+  })])
+  expect(fixture.preferencePatches[0]).not.toHaveProperty('sync')
+  expect(fixture.exports).toHaveLength(0)
+  await expect(page.locator('body')).not.toContainText('Sanitized exports')
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('credential validation checks write-only values before allowing import', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/settings')
