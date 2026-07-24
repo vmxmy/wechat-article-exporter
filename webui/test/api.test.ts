@@ -8,6 +8,8 @@ import {
   getAlbumPage,
   getArticleResourceSummary,
   getArticleDetail,
+  getArticleComments,
+  getArticleCommentReplies,
   getDiagnosticBundleDownloadURL,
   getExportArtifactDownloadURL,
   getRuntimeStatus,
@@ -109,6 +111,18 @@ describe('browser API client', () => {
 
     await expect(getArticleDetail('article / fixture')).resolves.toMatchObject({ articleId: 'article / fixture', metrics: { readCount: 12 }, resources: { items: [{ role: 'image', ordinal: 0, available: true }] } })
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/articles/article%20%2F%20fixture/detail?offset=0&limit=25', expect.any(Object))
+  })
+
+  it('loads bounded stored comments and server-paginated replies without requesting remote state', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { articleId: 'article / fixture', comments: { items: [{ id: 'comment-1', authorName: 'Reader', content: 'Stored', likeCount: 2, replyCount: 1, replyStatus: 'pending' }], total: 11, offset: 10, limit: 10 }, pendingReplies: 1 } }))
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: [{ id: 'reply-1', authorName: 'Author', content: 'Stored reply', likeCount: 1 }], total: 2, offset: 10, limit: 10 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getArticleComments('article / fixture', 2, 10)).resolves.toMatchObject({ articleId: 'article / fixture', pendingReplies: 1, comments: { total: 11, offset: 10 } })
+    await expect(getArticleCommentReplies('article / fixture', 'comment / fixture', 2, 10)).resolves.toMatchObject({ total: 2, offset: 10, limit: 10, items: [{ id: 'reply-1' }] })
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/articles/article%20%2F%20fixture/comments?offset=10&limit=10', expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/articles/article%20%2F%20fixture/comments/comment%20%2F%20fixture/replies?offset=10&limit=10', expect.any(Object))
   })
 
   it('sends caller-supplied exact confirmations for account and saved-query deletion', async () => {

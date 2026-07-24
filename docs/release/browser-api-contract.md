@@ -94,7 +94,8 @@ both styles in the same request is a `400 invalid_argument`.
 
 Shared rules, enforced identically across every paginated route
 (`accounts`, `accounts/search`, `articles`, `albums`, `saved-queries`,
-`jobs`, `articles/{id}/detail`):
+`jobs`, `articles/{id}/detail`, `articles/{id}/comments`, and
+`articles/{id}/comments/{commentId}/replies`):
 
 - Default page size (no pagination parameters at all): **50** items
   (`application.WorkspaceDefaultPageLimit`).
@@ -268,3 +269,28 @@ substituting an ephemeral request-local identifier.
 See `docs/release/browser-api-route-matrix.md` for the per-route-family
 mapping to the actual Go tests that cover auth, valid response, invalid
 input/error, redaction, and persistent-job-ID behavior.
+
+## 8. Stored article comments and replies
+
+`GET /api/v1/articles/{articleId}/comments` reads only locally stored comment
+records. `GET /api/v1/articles/{articleId}/comments/{commentId}/replies`
+reads only locally stored replies for one locally stored comment. Neither
+route contacts WeChat, resumes a download, accesses credentials, or exposes
+raw request/provenance state.
+
+Both identifiers are strict opaque values: 1–256 ASCII letters, digits, `.`,
+`_`, or `-`. Invalid identifiers are `400 invalid_argument`; malformed route
+shapes remain `404 not_found`. Both routes use the bounded pagination rules in
+§3 and deterministic ascending stored timestamp then opaque-ID order. They
+require the authenticated local browser session and validated loopback Host;
+GET reads do not require Origin or CSRF proof.
+
+The comments route uses the single-resource envelope (§2.1). It returns
+`articleId`, a bounded `comments` page, and a `pendingReplies` count. Each
+comment projection contains only opaque `id`, `authorName`, `content`,
+`createdAt`, `likeCount`, `replyCount`, and `replyStatus` (`complete` or
+`pending`). The replies route uses the standard page envelope (§2.2), with
+only opaque `id`, `authorName`, `content`, `createdAt`, and `likeCount`.
+Neither route returns database IDs, object/resource digests or URLs,
+filesystem paths, credentials/cookies/tokens, fetch times, upstream request
+metadata, error text, or continuation buffers.

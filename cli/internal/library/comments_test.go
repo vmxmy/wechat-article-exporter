@@ -67,3 +67,20 @@ func TestCommentContinuationResumeKeepsCommittedPages(t *testing.T) {
 		t.Fatalf("comments=%#v err=%v", comments, err)
 	}
 }
+
+func TestListCommentsForArticleIsBoundedOrderedAndDoesNotHydrateReplies(t *testing.T) {
+	database := openContentDatabase(t)
+	seedContentArticle(t, database)
+	createdAt := time.Date(2026, 7, 22, 0, 0, 0, 0, time.UTC)
+	_, err := database.CommitCommentPage(context.Background(), "article-a", CommentPageCommit{Comments: []CommentRecord{
+		{UpstreamID: "comment-b", Content: "second", CreatedAt: createdAt.Add(time.Minute), EmbeddedReplies: []ReplyRecord{{UpstreamID: "reply-b", Content: "hidden here"}}},
+		{UpstreamID: "comment-a", Content: "first", CreatedAt: createdAt},
+	}, Complete: true, FetchedAt: createdAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := database.ListCommentsForArticle(context.Background(), "article-a", 1, 1)
+	if err != nil || page.Total != 2 || page.Offset != 1 || page.Limit != 1 || len(page.Items) != 1 || page.Items[0].UpstreamID != "comment-b" || len(page.Items[0].EmbeddedReplies) != 0 {
+		t.Fatalf("page=%#v err=%v", page, err)
+	}
+}

@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestReplyThreadPartialFailurePersistsAndResumeTargetsOnlyIncomplete(t *testing.T) {
@@ -68,5 +69,26 @@ func TestCommitReplyPageReturnsPersistedMonotonicMaxReplyID(t *testing.T) {
 	}
 	if outOfOrder.MaxReplyID != 10 {
 		t.Fatalf("out-of-order page returned maxReplyId=%d, want persisted 10", outOfOrder.MaxReplyID)
+	}
+}
+
+func TestListRepliesForCommentIsBoundedAndOrdered(t *testing.T) {
+	database := openContentDatabase(t)
+	seedContentArticle(t, database)
+	createdAt := time.Date(2026, 7, 22, 0, 0, 0, 0, time.UTC)
+	_, err := database.CommitCommentPage(context.Background(), "article-a", CommentPageCommit{Comments: []CommentRecord{{UpstreamID: "comment-1", ReplyTotal: 2}}, Complete: true, FetchedAt: createdAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.CommitReplyPage(context.Background(), "article-a", "comment-1", ReplyPageCommit{Replies: []ReplyRecord{
+		{UpstreamID: "reply-b", Content: "second", CreatedAt: createdAt.Add(time.Minute)},
+		{UpstreamID: "reply-a", Content: "first", CreatedAt: createdAt},
+	}, FetchedAt: createdAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := database.ListRepliesForComment(context.Background(), "article-a", "comment-1", 1, 1)
+	if err != nil || page.Total != 2 || page.Offset != 1 || page.Limit != 1 || len(page.Items) != 1 || page.Items[0].UpstreamID != "reply-b" {
+		t.Fatalf("page=%#v err=%v", page, err)
 	}
 }

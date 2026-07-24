@@ -373,6 +373,42 @@ func (service *Service) ListArticleResourceDetails(ctx context.Context, id domai
 	return resources.ListArticleResourceDetails(ctx, id, offset, limit)
 }
 
+// ListArticleComments exposes a bounded local-only comments page. The
+// library retains raw object digests and all download state.
+func (service *Service) ListArticleComments(ctx context.Context, id domain.ArticleID, offset, limit int) (domain.Page[library.CommentRecord], error) {
+	comments, ok := service.library.(interface {
+		ListCommentsForArticle(context.Context, domain.ArticleID, int, int) (domain.Page[library.CommentRecord], error)
+	})
+	if !ok {
+		return domain.Page[library.CommentRecord]{}, fmt.Errorf("article comments: %w", ErrUnavailable)
+	}
+	return comments.ListCommentsForArticle(ctx, id, offset, limit)
+}
+
+// ListArticleCommentReplies exposes a bounded local-only reply page. It
+// accepts an upstream comment ID but never exposes a raw request cursor.
+func (service *Service) ListArticleCommentReplies(ctx context.Context, id domain.ArticleID, commentID string, offset, limit int) (domain.Page[library.ReplyRecord], error) {
+	replies, ok := service.library.(interface {
+		ListRepliesForComment(context.Context, domain.ArticleID, string, int, int) (domain.Page[library.ReplyRecord], error)
+	})
+	if !ok {
+		return domain.Page[library.ReplyRecord]{}, fmt.Errorf("article comment replies: %w", ErrUnavailable)
+	}
+	return replies.ListRepliesForComment(ctx, id, commentID, offset, limit)
+}
+
+// PendingArticleReplyThreads reports incomplete locally stored reply threads
+// without exposing retry errors, continuations, or remote request metadata.
+func (service *Service) PendingArticleReplyThreads(ctx context.Context, id domain.ArticleID) ([]library.ReplyThread, error) {
+	threads, ok := service.library.(interface {
+		PendingReplyThreads(context.Context, domain.ArticleID) ([]library.ReplyThread, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("article reply threads: %w", ErrUnavailable)
+	}
+	return threads.PendingReplyThreads(ctx, id)
+}
+
 func (service *Service) QueryAccounts(ctx context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
 	if service.library == nil {
 		return domain.Page[domain.Account]{Items: []domain.Account{}, Offset: query.Offset, Limit: query.Limit}, nil

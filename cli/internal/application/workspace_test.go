@@ -33,6 +33,16 @@ type workspaceLibrary struct {
 	metricsErr      error
 	resourceDetails domain.Page[library.ArticleResourceDetail]
 	resourceErr     error
+	comments        domain.Page[library.CommentRecord]
+	replies         domain.Page[library.ReplyRecord]
+	pendingReplies  []library.ReplyThread
+	commentsID      domain.ArticleID
+	commentsOffset  int
+	commentsLimit   int
+	repliesID       domain.ArticleID
+	repliesComment  string
+	repliesOffset   int
+	repliesLimit    int
 }
 
 func (library *workspaceLibrary) GetArticle(_ context.Context, id domain.ArticleID) (domain.Article, error) {
@@ -58,6 +68,24 @@ func (repository *workspaceLibrary) ListArticleResourceDetails(_ context.Context
 	page := repository.resourceDetails
 	page.Offset, page.Limit = offset, limit
 	return page, repository.resourceErr
+}
+
+func (repository *workspaceLibrary) ListCommentsForArticle(_ context.Context, id domain.ArticleID, offset, limit int) (domain.Page[library.CommentRecord], error) {
+	repository.commentsID, repository.commentsOffset, repository.commentsLimit = id, offset, limit
+	page := repository.comments
+	page.Offset, page.Limit = offset, limit
+	return page, nil
+}
+
+func (repository *workspaceLibrary) ListRepliesForComment(_ context.Context, id domain.ArticleID, commentID string, offset, limit int) (domain.Page[library.ReplyRecord], error) {
+	repository.repliesID, repository.repliesComment, repository.repliesOffset, repository.repliesLimit = id, commentID, offset, limit
+	page := repository.replies
+	page.Offset, page.Limit = offset, limit
+	return page, nil
+}
+
+func (repository *workspaceLibrary) PendingReplyThreads(context.Context, domain.ArticleID) ([]library.ReplyThread, error) {
+	return append([]library.ReplyThread(nil), repository.pendingReplies...), nil
 }
 
 func (library *workspaceLibrary) QueryAccounts(_ context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
@@ -185,6 +213,34 @@ func TestWorkspaceReadFacadeUsesApplicationAndReturnsSafeDTOs(t *testing.T) {
 	jobsPage, err := workspace.Jobs(context.Background(), WorkspaceJobQuery{Kind: " export ", States: []domain.JobState{domain.JobRunning}, Page: WorkspacePageRequest{Limit: 20}})
 	if err != nil || jobsPage.Total != 1 || manager.query.Kind != "export" || !reflect.DeepEqual(manager.query.States, []domain.JobState{domain.JobRunning}) {
 		t.Fatalf("Jobs() = %#v, query=%#v, err=%v", jobsPage, manager.query, err)
+	}
+}
+
+func TestWorkspaceArticleCommentsAreBoundedSafeAndMarkPendingReplies(t *testing.T) {
+	library := &workspaceLibrary{
+		comments:       domain.Page[library.CommentRecord]{Items: []library.CommentRecord{{ID: "database-id", UpstreamID: "comment-1", AuthorName: "Reader", Content: "Stored", LikeCount: 2, ReplyTotal: 1, RawObjectDigest: "not-for-browser"}}, Total: 3},
+		replies:        domain.Page[library.ReplyRecord]{Items: []library.ReplyRecord{{ID: "database-reply", UpstreamID: "reply-1", AuthorName: "Author", Content: "Stored reply", LikeCount: 1, RawObjectDigest: "not-for-browser"}}, Total: 1},
+		pendingReplies: []library.ReplyThread{{ContentID: "comment-1", LastError: "private upstream error"}},
+	}
+	workspace := NewWorkspace(New(Options{Runtime: runtimeenv.Dependencies{Profile: "fixture"}, Library: library, Jobs: &workspaceJobManager{}}))
+	comments, err := workspace.ArticleComments(context.Background(), "article-1", WorkspacePageRequest{Offset: 1, Limit: 2})
+	if err != nil || comments.ArticleID != "article-1" || comments.PendingReplies != 1 || comments.Comments.Total != 3 || len(comments.Comments.Items) != 1 || comments.Comments.Items[0] != (WorkspaceArticleComment{ID: "comment-1", AuthorName: "Reader", Content: "Stored", LikeCount: 2, ReplyCount: 1, ReplyStatus: "pending"}) {
+		t.Fatalf("comments=%#v err=%v", comments, err)
+	}
+	if library.commentsID != "article-1" || library.commentsOffset != 1 || library.commentsLimit != 2 {
+		t.Fatalf("comments query = article=%q offset=%d limit=%d", library.commentsID, library.commentsOffset, library.commentsLimit)
+	}
+	replies, err := workspace.ArticleCommentReplies(context.Background(), "article-1", "comment-1", WorkspacePageRequest{Limit: 1})
+	if err != nil || replies.Total != 1 || len(replies.Items) != 1 || replies.Items[0] != (WorkspaceArticleReply{ID: "reply-1", AuthorName: "Author", Content: "Stored reply", LikeCount: 1}) {
+		t.Fatalf("replies=%#v err=%v", replies, err)
+	}
+	if library.repliesID != "article-1" || library.repliesComment != "comment-1" || library.repliesLimit != 1 {
+		t.Fatalf("replies query = article=%q comment=%q limit=%d", library.repliesID, library.repliesComment, library.repliesLimit)
+	}
+	for _, input := range []struct{ articleID, commentID string }{{"article one", "comment-1"}, {"article-1", "comment one"}} {
+		if _, err := workspace.ArticleCommentReplies(context.Background(), domain.ArticleID(input.articleID), input.commentID, WorkspacePageRequest{}); err == nil {
+			t.Fatalf("expected invalid identifiers for %#v", input)
+		}
 	}
 }
 

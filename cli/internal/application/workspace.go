@@ -329,6 +329,33 @@ type WorkspaceArticleDetail struct {
 	Resources WorkspacePage[WorkspaceArticleResourceDetail] `json:"resources"`
 }
 
+// WorkspaceArticleComment and WorkspaceArticleReply are deliberately safe
+// browser projections. They omit database IDs, object digests, fetch times,
+// request provenance, and any continuation state.
+type WorkspaceArticleComment struct {
+	ID          string    `json:"id"`
+	AuthorName  string    `json:"authorName"`
+	Content     string    `json:"content"`
+	CreatedAt   time.Time `json:"createdAt,omitempty"`
+	LikeCount   int       `json:"likeCount"`
+	ReplyCount  int       `json:"replyCount"`
+	ReplyStatus string    `json:"replyStatus"`
+}
+
+type WorkspaceArticleReply struct {
+	ID         string    `json:"id"`
+	AuthorName string    `json:"authorName"`
+	Content    string    `json:"content"`
+	CreatedAt  time.Time `json:"createdAt,omitempty"`
+	LikeCount  int       `json:"likeCount"`
+}
+
+type WorkspaceArticleComments struct {
+	ArticleID      domain.ArticleID                       `json:"articleId"`
+	Comments       WorkspacePage[WorkspaceArticleComment] `json:"comments"`
+	PendingReplies int                                    `json:"pendingReplies"`
+}
+
 // WorkspaceAlbumController is the typed application capability for the
 // persisted album workflow. Both variants return the durable album_sync job.
 type WorkspaceAlbumController interface {
@@ -362,6 +389,8 @@ type WorkspaceReader interface {
 	ArticlePreview(context.Context, domain.ArticleID) (WorkspaceArticlePreview, error)
 	ArticleResources(context.Context, domain.ArticleID) (WorkspaceArticleResources, error)
 	ArticleDetail(context.Context, domain.ArticleID, WorkspacePageRequest) (WorkspaceArticleDetail, error)
+	ArticleComments(context.Context, domain.ArticleID, WorkspacePageRequest) (WorkspaceArticleComments, error)
+	ArticleCommentReplies(context.Context, domain.ArticleID, string, WorkspacePageRequest) (WorkspacePage[WorkspaceArticleReply], error)
 }
 
 // WorkspaceSavedQueryController is the mutable saved-query contract exposed
@@ -722,6 +751,97 @@ func (workspace *Workspace) ArticleDetail(ctx context.Context, id domain.Article
 	result.Metrics = WorkspaceArticleMetrics{Available: true, ReadCount: metrics.ReadCount, OldLikeCount: metrics.OldLikeCount,
 		LikeCount: metrics.LikeCount, ShareCount: metrics.ShareCount, CommentCount: metrics.CommentCount, CapturedAt: metrics.CapturedAt}
 	return result, nil
+}
+
+func (workspace *Workspace) ArticleComments(ctx context.Context, id domain.ArticleID, page WorkspacePageRequest) (WorkspaceArticleComments, error) {
+	id, page, err := workspaceCommentPageInput(id, page)
+	if err != nil {
+		return WorkspaceArticleComments{}, err
+	}
+	comments, ok := workspace.application.(interface {
+		ListArticleComments(context.Context, domain.ArticleID, int, int) (domain.Page[library.CommentRecord], error)
+		PendingArticleReplyThreads(context.Context, domain.ArticleID) ([]library.ReplyThread, error)
+	})
+	if !ok {
+		return WorkspaceArticleComments{}, workspaceError(fmt.Errorf("article comments: %w", ErrUnavailable))
+	}
+	pageResult, err := comments.ListArticleComments(ctx, id, page.Offset, page.Limit)
+	if err != nil {
+		return WorkspaceArticleComments{}, workspaceError(err)
+	}
+	pending, err := comments.PendingArticleReplyThreads(ctx, id)
+	if err != nil {
+		return WorkspaceArticleComments{}, workspaceError(err)
+	}
+	result := WorkspaceArticleComments{ArticleID: id, PendingReplies: len(pending), Comments: WorkspacePage[WorkspaceArticleComment]{Items: make([]WorkspaceArticleComment, 0, len(pageResult.Items)), Total: pageResult.Total, Offset: pageResult.Offset, Limit: pageResult.Limit}}
+	for _, comment := range pageResult.Items {
+		status := "complete"
+		if comment.ReplyTotal > 0 && containsPendingReplyThread(pending, comment.UpstreamID) {
+			status = "pending"
+		}
+		result.Comments.Items = append(result.Comments.Items, WorkspaceArticleComment{ID: comment.UpstreamID, AuthorName: comment.AuthorName, Content: comment.Content, CreatedAt: comment.CreatedAt, LikeCount: comment.LikeCount, ReplyCount: comment.ReplyTotal, ReplyStatus: status})
+	}
+	return result, nil
+}
+
+func (workspace *Workspace) ArticleCommentReplies(ctx context.Context, id domain.ArticleID, commentID string, page WorkspacePageRequest) (WorkspacePage[WorkspaceArticleReply], error) {
+	id, page, err := workspaceCommentPageInput(id, page)
+	if err != nil {
+		return WorkspacePage[WorkspaceArticleReply]{}, err
+	}
+	commentID = strings.TrimSpace(commentID)
+	if !validWorkspaceOpaqueID(commentID) {
+		return WorkspacePage[WorkspaceArticleReply]{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "comment identifier is invalid"}
+	}
+	replies, ok := workspace.application.(interface {
+		ListArticleCommentReplies(context.Context, domain.ArticleID, string, int, int) (domain.Page[library.ReplyRecord], error)
+	})
+	if !ok {
+		return WorkspacePage[WorkspaceArticleReply]{}, workspaceError(fmt.Errorf("article comment replies: %w", ErrUnavailable))
+	}
+	pageResult, err := replies.ListArticleCommentReplies(ctx, id, commentID, page.Offset, page.Limit)
+	if err != nil {
+		return WorkspacePage[WorkspaceArticleReply]{}, workspaceError(err)
+	}
+	result := WorkspacePage[WorkspaceArticleReply]{Items: make([]WorkspaceArticleReply, 0, len(pageResult.Items)), Total: pageResult.Total, Offset: pageResult.Offset, Limit: pageResult.Limit}
+	for _, reply := range pageResult.Items {
+		result.Items = append(result.Items, WorkspaceArticleReply{ID: reply.UpstreamID, AuthorName: reply.AuthorName, Content: reply.Content, CreatedAt: reply.CreatedAt, LikeCount: reply.LikeCount})
+	}
+	return result, nil
+}
+
+func workspaceCommentPageInput(id domain.ArticleID, page WorkspacePageRequest) (domain.ArticleID, WorkspacePageRequest, error) {
+	id = domain.ArticleID(strings.TrimSpace(string(id)))
+	if !validWorkspaceOpaqueID(string(id)) {
+		return "", WorkspacePageRequest{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "article identifier is invalid"}
+	}
+	page, err := page.normalize()
+	if err != nil {
+		return "", WorkspacePageRequest{}, err
+	}
+	return id, page, nil
+}
+
+func validWorkspaceOpaqueID(value string) bool {
+	if value == "" || len(value) > 256 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '-' || character == '_' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func containsPendingReplyThread(threads []library.ReplyThread, commentID string) bool {
+	for _, thread := range threads {
+		if thread.ContentID == commentID {
+			return true
+		}
+	}
+	return false
 }
 
 func (workspace *Workspace) RenderArticlePreview(ctx context.Context, id domain.ArticleID) (WorkspaceRenderedArticlePreview, error) {

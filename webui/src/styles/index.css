@@ -80,6 +80,13 @@
   .job-detail-list { display: grid; gap: var(--spacing-2); margin: 0; padding: 0; list-style: none; }
   .job-detail-list li { display: flex; flex-wrap: wrap; gap: var(--spacing-2); overflow-wrap: anywhere; }
   .unavailable-actions > div > p, .availability-note, .confirmation-note p { color: var(--color-text-secondary); }
+  .stored-comments, .comment-list, .stored-comment, .stored-replies, .stored-reply { display: grid; gap: var(--spacing-3); }
+  .stored-comments { margin-block-start: var(--spacing-4); }
+  .stored-comments h4, .stored-comments p, .stored-comment p, .stored-reply p { margin-block: 0; }
+  .stored-comment { padding: var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-inner); background: var(--color-background-muted); }
+  .stored-replies { margin-block-start: var(--spacing-3); padding-inline-start: var(--spacing-4); }
+  .stored-reply { padding-block-start: var(--spacing-3); border-block-start: 1px solid var(--color-border); }
+  .comment-metadata { color: var(--color-text-secondary); font-size: var(--text-body-small-size); }
   .action-button-group, .import-form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--spacing-3); }
   .account-action-form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--spacing-3); }
   .account-action-form .astryx-text-input { min-width: 12rem; flex: 1 1 12rem; }

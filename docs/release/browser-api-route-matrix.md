@@ -29,6 +29,8 @@ presence or absence of at least one asserting test per cell.
 | `GET /articles/preview/document` | ✓ | ✓ | ✓ (missing `articleId`) | ✓ (CSP/header assertions) | `TestArticlePreviewDocumentRequiresRendererAndSetsRestrictiveHeaders`, `TestArticlePreviewDocumentUsesStrictContentSecurityPolicy` |
 | `GET /articles/{id}/resources` | ✓ | ✓ | ✓ (rejects any query parameter) | ✓ (DTO-only assertion) | `TestArticleResourcesAPIProvidesOnlySafeCompletenessDTO` |
 | `GET /articles/{id}/detail` | ✓ | ✓ | ✓ (`limit=1` on comments-page rejected) | ✓ (bounded metrics/resource-detail-only assertion) | `TestArticleDetailAPIProvidesBoundedSafeMetricsAndResourceDetails` |
+| `GET /articles/{id}/comments` | ✓ | ✓ | ✓ (strict IDs, unsupported query, and `limit=101`) | ✓ (no database IDs, digests, fetch state, continuation, credentials, or paths) | `TestArticleCommentsAPIUsesBoundedSafeLocalProjections` |
+| `GET /articles/{id}/comments/{commentId}/replies` | ✓ | ✓ | ✓ (strict IDs and incompatible pagination styles) | ✓ (no database IDs, digests, fetch state, request metadata, credentials, or paths) | `TestArticleCommentsAPIUsesBoundedSafeLocalProjections` |
 | `GET /albums` | ✓ | ✓ | – (family covered by shared `parseAlbumQuery`; no dedicated negative test found) | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData` |
 | `GET /saved-queries` | ✓ | ✓ | ✓ (`offset=-1`) | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData`, `TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries` |
 | `GET /jobs` | ✓ | ✓ | ✓ (`state=wat`) | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData`, `TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries` |

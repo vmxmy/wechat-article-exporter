@@ -156,6 +156,46 @@ WHERE a.profile_id=? AND c.article_id=? AND c.upstream_id=?`, database.profileID
 	return repliesForCommentID(ctx, database.db, commentID)
 }
 
+// ListRepliesForComment returns one deterministic, bounded locally stored
+// reply page. contentID is the upstream comment identifier, never a database
+// row ID or a remote continuation value.
+func (database *Database) ListRepliesForComment(ctx context.Context, articleID domain.ArticleID, contentID string, offset, limit int) (domain.Page[ReplyRecord], error) {
+	var commentID string
+	err := database.db.QueryRowContext(ctx, `SELECT c.id FROM comments c JOIN articles a ON a.id=c.article_id
+WHERE a.profile_id=? AND c.article_id=? AND c.upstream_id=?`, database.profileID, articleID, contentID).Scan(&commentID)
+	if err != nil {
+		return domain.Page[ReplyRecord]{}, err
+	}
+	var total int
+	if err := database.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM replies WHERE comment_id=?`, commentID).Scan(&total); err != nil {
+		return domain.Page[ReplyRecord]{}, err
+	}
+	rows, err := database.db.QueryContext(ctx, `SELECT id, comment_id, upstream_id, author_name, content, like_count,
+created_at_upstream, raw_object_digest, fetched_at FROM replies WHERE comment_id=?
+ORDER BY created_at_upstream, upstream_id LIMIT ? OFFSET ?`, commentID, limit, offset)
+	if err != nil {
+		return domain.Page[ReplyRecord]{}, err
+	}
+	defer rows.Close()
+	items := make([]ReplyRecord, 0, limit)
+	for rows.Next() {
+		var reply ReplyRecord
+		var created sql.NullInt64
+		var fetchedAt int64
+		if err := rows.Scan(&reply.ID, &reply.CommentID, &reply.UpstreamID, &reply.AuthorName, &reply.Content,
+			&reply.LikeCount, &created, &reply.RawObjectDigest, &fetchedAt); err != nil {
+			return domain.Page[ReplyRecord]{}, err
+		}
+		reply.CreatedAt = unixMillis(created)
+		reply.FetchedAt = time.UnixMilli(fetchedAt)
+		items = append(items, reply)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.Page[ReplyRecord]{}, err
+	}
+	return domain.Page[ReplyRecord]{Items: items, Total: total, Offset: offset, Limit: limit}, nil
+}
+
 func (database *Database) ensureReplyCheckpointTable(ctx context.Context) error {
 	var count int
 	if err := database.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master

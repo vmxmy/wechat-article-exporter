@@ -26,7 +26,7 @@ interface ApiEnvelope<T> {
   readonly data: T
 }
 
-interface WorkspacePageResponse<T> {
+export interface WorkspacePageResponse<T> {
   readonly items: readonly T[]
   readonly total: number
   readonly offset: number
@@ -137,6 +137,27 @@ export interface ArticleDetail {
   readonly articleId: string
   readonly metrics: ArticleMetrics
   readonly resources: WorkspacePageResponse<ArticleResourceDetail>
+}
+export interface ArticleComment {
+  readonly id: string
+  readonly authorName: string
+  readonly content: string
+  readonly createdAt?: string
+  readonly likeCount: number
+  readonly replyCount: number
+  readonly replyStatus: 'complete' | 'pending'
+}
+export interface ArticleReply {
+  readonly id: string
+  readonly authorName: string
+  readonly content: string
+  readonly createdAt?: string
+  readonly likeCount: number
+}
+export interface ArticleComments {
+  readonly articleId: string
+  readonly comments: WorkspacePageResponse<ArticleComment>
+  readonly pendingReplies: number
 }
 
 export interface AlbumRecord {
@@ -525,6 +546,14 @@ export async function getArticleDetail(articleId: string, signal?: AbortSignal):
   const params = new URLSearchParams({ offset: '0', limit: '25' })
   return request<ArticleDetail>(`${apiBase}/articles/${encodeURIComponent(articleId)}/detail?${params}`, { signal })
 }
+export async function getArticleComments(articleId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<ArticleComments> {
+  const params = new URLSearchParams({ offset: String((page - 1) * pageSize), limit: String(pageSize) })
+  return request<ArticleComments>(`${apiBase}/articles/${encodeURIComponent(articleId)}/comments?${params}`, { signal })
+}
+export async function getArticleCommentReplies(articleId: string, commentId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<WorkspacePageResponse<ArticleReply>> {
+  const params = new URLSearchParams({ offset: String((page - 1) * pageSize), limit: String(pageSize) })
+  return requestWorkspacePage<ArticleReply>(`${apiBase}/articles/${encodeURIComponent(articleId)}/comments/${encodeURIComponent(commentId)}/replies?${params}`, signal)
+}
 export async function saveSavedQuery(input: SavedQueryInput): Promise<SavedQueryRecord> { return mutate<SavedQueryRecord>('saved-queries', 'POST', input) }
 export async function deleteSavedQuery(name: string, confirmation: string): Promise<void> {
   const csrfToken = await getCSRFToken()
@@ -785,6 +814,16 @@ function normalizePage<T>(response: PaginatedResponse<T> | WorkspacePageResponse
       total: response.total
     }
   }
+}
+
+async function requestWorkspacePage<T>(path: string, signal?: AbortSignal): Promise<WorkspacePageResponse<T>> {
+  const response = await fetch(path, { signal, credentials: 'same-origin', headers: { Accept: 'application/json' } })
+  if (!response.ok) throw new ApiError(response.status, await readErrorMessage(response))
+  const body = await response.json() as WorkspacePageResponse<T> & { readonly data?: readonly T[]; readonly apiVersion?: string }
+  if (Array.isArray(body.data) && typeof body.total === 'number' && typeof body.offset === 'number' && typeof body.limit === 'number') {
+    return { items: body.data, total: body.total, offset: body.offset, limit: body.limit }
+  }
+  return body
 }
 
 async function request<T>(path: string, init: RequestInit): Promise<T> {

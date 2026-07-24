@@ -4,6 +4,8 @@ import {
   getAlbumPage,
   getArticlePage,
   getArticleDetail,
+  getArticleComments,
+  getArticleCommentReplies,
   getArticleResourceSummary,
   getExportManifest,
   getExportPage,
@@ -39,6 +41,8 @@ export const queryKeys = {
   articles: (params: ArticlePageParams) => ['articles', params] as const,
   articleResourceSummary: (id: string) => ['articles', id, 'resources'] as const,
   articleDetail: (id: string) => ['articles', id, 'detail'] as const,
+  articleComments: (id: string, page: number, pageSize: number) => ['articles', id, 'comments', page, pageSize] as const,
+  articleCommentReplies: (articleID: string, commentID: string, page: number, pageSize: number) => ['articles', articleID, 'comments', commentID, 'replies', page, pageSize] as const,
   albums: (params: AlbumPageParams) => ['albums', params] as const,
   jobs: (params: PageParams) => ['jobs', params] as const,
   jobDetail: (id: string) => ['jobs', id, 'detail'] as const,
@@ -95,6 +99,22 @@ export function useArticleDetail(id: string | undefined) {
     queryKey: queryKeys.articleDetail(id ?? ''),
     queryFn: ({ signal }) => getArticleDetail(id ?? '', signal),
     enabled: Boolean(id)
+  })
+}
+
+export function useArticleComments(id: string | undefined, page: number, pageSize: number) {
+  return useQuery({
+    queryKey: queryKeys.articleComments(id ?? '', page, pageSize),
+    queryFn: ({ signal }) => getArticleComments(id ?? '', page, pageSize, signal),
+    enabled: Boolean(id)
+  })
+}
+
+export function useArticleCommentReplies(articleID: string | undefined, commentID: string | undefined, page: number, pageSize: number, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.articleCommentReplies(articleID ?? '', commentID ?? '', page, pageSize),
+    queryFn: ({ signal }) => getArticleCommentReplies(articleID ?? '', commentID ?? '', page, pageSize, signal),
+    enabled: Boolean(articleID && commentID && enabled)
   })
 }
 

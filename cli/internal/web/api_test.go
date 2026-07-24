@@ -296,6 +296,70 @@ func TestArticleDetailAPIProvidesBoundedSafeMetricsAndResourceDetails(t *testing
 	assertAPIError(t, response, "invalid_argument")
 }
 
+func TestArticleCommentsAPIUsesBoundedSafeLocalProjections(t *testing.T) {
+	createdAt := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
+	app := &apiApplication{
+		comments: domain.Page[library.CommentRecord]{Items: []library.CommentRecord{{
+			ID: "database-comment-id", UpstreamID: "comment-1", AuthorName: "Reader", Content: "Stored comment", LikeCount: 3, CreatedAt: createdAt,
+			RawObjectDigest: "secret-digest", FetchedAt: createdAt, ReplyTotal: 2,
+		}}, Total: 3},
+		replies: domain.Page[library.ReplyRecord]{Items: []library.ReplyRecord{{
+			ID: "database-reply-id", UpstreamID: "reply-1", AuthorName: "Author", Content: "Stored reply", LikeCount: 2, CreatedAt: createdAt,
+			RawObjectDigest: "secret-reply-digest", FetchedAt: createdAt,
+		}}, Total: 2},
+		pendingReplyThreads: []library.ReplyThread{{ContentID: "comment-1", LastError: "upstream token=secret", MaxReplyID: 42}},
+	}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+
+	response := get(t, client, base+"/api/v1/articles/article-1/comments?offset=1&limit=2")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("comments status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	body := readResponse(t, response)
+	for _, forbidden := range []string{"database-comment-id", "secret-digest", "fetchedAt", "maxReply", "token", "lastError", "buffer", "path", "url"} {
+		if strings.Contains(strings.ToLower(body), strings.ToLower(forbidden)) {
+			t.Fatalf("comments response leaked %q: %s", forbidden, body)
+		}
+	}
+	var comments application.WorkspaceArticleComments
+	if err := json.Unmarshal([]byte(body), &comments); err != nil || comments.ArticleID != "article-1" || comments.Comments.Total != 3 || comments.Comments.Offset != 1 || comments.Comments.Limit != 2 || comments.PendingReplies != 1 || len(comments.Comments.Items) != 1 || comments.Comments.Items[0].ID != "comment-1" || comments.Comments.Items[0].ReplyStatus != "pending" {
+		t.Fatalf("comments=%#v err=%v", comments, err)
+	}
+	if app.commentsArticleID != "article-1" || app.commentsOffset != 1 || app.commentsLimit != 2 {
+		t.Fatalf("comments lookup = article=%q offset=%d limit=%d", app.commentsArticleID, app.commentsOffset, app.commentsLimit)
+	}
+
+	response = get(t, client, base+"/api/v1/articles/article-1/comments/comment-1/replies?page=2&page_size=1")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("replies status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	body = readResponse(t, response)
+	for _, forbidden := range []string{"database-reply-id", "secret-reply-digest", "fetchedAt", "token", "path", "url"} {
+		if strings.Contains(strings.ToLower(body), strings.ToLower(forbidden)) {
+			t.Fatalf("replies response leaked %q: %s", forbidden, body)
+		}
+	}
+	var replies application.WorkspacePage[application.WorkspaceArticleReply]
+	if err := json.Unmarshal([]byte(body), &replies); err != nil || replies.Total != 2 || replies.Offset != 1 || replies.Limit != 1 || len(replies.Items) != 1 || replies.Items[0].ID != "reply-1" {
+		t.Fatalf("replies=%#v err=%v", replies, err)
+	}
+	if app.repliesArticleID != "article-1" || app.repliesCommentID != "comment-1" || app.repliesOffset != 1 || app.repliesLimit != 1 {
+		t.Fatalf("replies lookup = article=%q comment=%q offset=%d limit=%d", app.repliesArticleID, app.repliesCommentID, app.repliesOffset, app.repliesLimit)
+	}
+
+	for _, target := range []string{
+		"/api/v1/articles/article%20one/comments", "/api/v1/articles/article-1/comments?limit=101", "/api/v1/articles/article-1/comments?wat=1",
+		"/api/v1/articles/article-1/comments/comment%20one/replies", "/api/v1/articles/article-1/comments/comment-1/replies?offset=0&page=1",
+	} {
+		response := get(t, client, base+target)
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("GET %s status=%d body=%s", target, response.StatusCode, readResponse(t, response))
+		}
+		assertAPIError(t, response, "invalid_argument")
+	}
+}
+
 func TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries(t *testing.T) {
 	server, client := startAPIApplicationServer(t, &apiApplication{})
 	base := strings.TrimSuffix(strings.Split(server.URL(), "?")[0], "/")
@@ -789,6 +853,16 @@ type apiApplication struct {
 	detailArticleID      domain.ArticleID
 	detailOffset         int
 	detailLimit          int
+	comments             domain.Page[library.CommentRecord]
+	replies              domain.Page[library.ReplyRecord]
+	pendingReplyThreads  []library.ReplyThread
+	commentsArticleID    domain.ArticleID
+	commentsOffset       int
+	commentsLimit        int
+	repliesArticleID     domain.ArticleID
+	repliesCommentID     string
+	repliesOffset        int
+	repliesLimit         int
 	accountsErr          error
 	accountQuery         domain.AccountQuery
 	articleQuery         domain.ArticleQuery
@@ -941,6 +1015,21 @@ func (app *apiApplication) LatestArticleMetrics(_ context.Context, id domain.Art
 func (app *apiApplication) ListArticleResourceDetails(_ context.Context, id domain.ArticleID, offset, limit int) (domain.Page[library.ArticleResourceDetail], error) {
 	app.detailArticleID, app.detailOffset, app.detailLimit = id, offset, limit
 	page := app.resourceDetails
+	page.Offset, page.Limit = offset, limit
+	return page, nil
+}
+func (app *apiApplication) ListArticleComments(_ context.Context, id domain.ArticleID, offset, limit int) (domain.Page[library.CommentRecord], error) {
+	app.commentsArticleID, app.commentsOffset, app.commentsLimit = id, offset, limit
+	page := app.comments
+	page.Offset, page.Limit = offset, limit
+	return page, nil
+}
+func (app *apiApplication) PendingArticleReplyThreads(context.Context, domain.ArticleID) ([]library.ReplyThread, error) {
+	return append([]library.ReplyThread(nil), app.pendingReplyThreads...), nil
+}
+func (app *apiApplication) ListArticleCommentReplies(_ context.Context, id domain.ArticleID, commentID string, offset, limit int) (domain.Page[library.ReplyRecord], error) {
+	app.repliesArticleID, app.repliesCommentID, app.repliesOffset, app.repliesLimit = id, commentID, offset, limit
+	page := app.replies
 	page.Offset, page.Limit = offset, limit
 	return page, nil
 }

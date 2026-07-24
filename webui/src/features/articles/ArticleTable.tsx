@@ -1,12 +1,14 @@
 import { Button } from '@astryxdesign/core/Button'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
+import { Collapsible } from '@astryxdesign/core/Collapsible'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
+import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type RowSelectionState, type SortingState, type Updater, type VisibilityState } from '@tanstack/react-table'
 import { useEffect, useMemo, useState } from 'react'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { getArticlePreview, parseArticleQuery, saveArticleQueryHandoff, saveExportHandoff, type ArticleQuery, type ArticleRecord, type ArticleSort } from '../../lib/api'
-import { useArticleDetail, useArticlePage, useArticleResourceSummary } from '../../lib/queries'
+import { useArticleCommentReplies, useArticleComments, useArticleDetail, useArticlePage, useArticleResourceSummary } from '../../lib/queries'
 import { useWorkspaceMutations } from '../../lib/queries'
 import { navigateTo } from '../../app/navigation'
 
@@ -265,7 +267,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
       <section className="unavailable-actions" aria-labelledby="article-actions-title">
         <div><h2 id="article-actions-title">{messages.articles.actions.title}</h2><p>{messages.articles.actions.description}</p></div>
         {selectedArticle ? <ResourceSummary summary={resourceSummary} messages={messages} /> : null}
-        {selectedArticle ? <ArticleDetail detail={articleDetail} messages={messages} locale={locale} /> : null}
+        {selectedArticle ? <ArticleDetail detail={articleDetail} articleID={selectedArticle.id} messages={messages} locale={locale} /> : null}
         <div className="action-button-group">
           <Button label={messages.articles.actions.preview} variant="secondary" isDisabled={!selectedArticle} onClick={preview} />
           <Button label={messages.articles.actions.download} variant="primary" isDisabled={selectedIDs.length === 0} onClick={() => startDownload('article')} />
@@ -283,7 +285,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   )
 }
 
-function ArticleDetail({ detail, messages, locale }: { readonly detail: ReturnType<typeof useArticleDetail>; readonly messages: MessageCatalog; readonly locale: Locale }) {
+function ArticleDetail({ detail, articleID, messages, locale }: { readonly detail: ReturnType<typeof useArticleDetail>; readonly articleID: string; readonly messages: MessageCatalog; readonly locale: Locale }) {
   if (detail.isLoading) return <p role="status">{messages.articles.actions.detailLoading}</p>
   if (detail.isError || !detail.data) return <p role="status">{messages.articles.actions.detailUnavailable}</p>
   const { metrics, resources } = detail.data
@@ -305,8 +307,54 @@ function ArticleDetail({ detail, messages, locale }: { readonly detail: ReturnTy
         )}
         {resources.total > resources.items.length ? <p>{messages.articles.actions.resourceDetailsLimited(resources.items.length, resources.total)}</p> : null}
       </section>
+      <StoredComments articleID={articleID} messages={messages} />
     </section>
   )
+}
+
+function StoredComments({ articleID, messages }: { readonly articleID: string; readonly messages: MessageCatalog }) {
+  const [pageState, setPageState] = useState({ articleID, page: 1 })
+  const currentPage = pageState.articleID === articleID ? pageState.page : 1
+  const comments = useArticleComments(articleID, currentPage, 10)
+  const copy = messages.articles.actions
+  if (comments.isLoading) return <section aria-label={copy.commentsTitle}><h4>{copy.commentsTitle}</h4><p role="status">{copy.commentsLoading}</p></section>
+  if (comments.isError || !comments.data) return <section aria-label={copy.commentsTitle}><h4>{copy.commentsTitle}</h4><p role="status">{copy.commentsUnavailable}</p></section>
+  const { comments: commentPage, pendingReplies } = comments.data
+  const totalPages = Math.max(1, Math.ceil(commentPage.total / commentPage.limit))
+  return <section className="stored-comments" aria-labelledby="stored-comments-title">
+    <h4 id="stored-comments-title">{copy.commentsTitle}</h4>
+    {pendingReplies > 0 ? <p className="availability-note" role="status">{copy.commentsPartial(pendingReplies)}</p> : null}
+    {commentPage.items.length === 0 ? <p>{copy.commentsEmpty}</p> : <div className="comment-list">
+      {commentPage.items.map((comment) => <StoredComment key={comment.id} articleID={articleID} comment={comment} messages={messages} />)}
+    </div>}
+    {commentPage.total > commentPage.limit ? <nav className="pagination" aria-label={copy.commentsPagination}>
+      <Button label={messages.articles.previous} variant="secondary" size="sm" isDisabled={currentPage === 1} onClick={() => setPageState({ articleID, page: currentPage - 1 })} />
+      <span>{copy.commentsPage(currentPage, totalPages)}</span>
+      <Button label={messages.articles.next} variant="secondary" size="sm" isDisabled={currentPage >= totalPages} onClick={() => setPageState({ articleID, page: currentPage + 1 })} />
+    </nav> : null}
+  </section>
+}
+
+function StoredComment({ articleID, comment, messages }: { readonly articleID: string; readonly comment: import('../../lib/api').ArticleComment; readonly messages: MessageCatalog }) {
+  const [open, setOpen] = useState(false)
+  const [pageState, setPageState] = useState({ commentID: comment.id, page: 1 })
+  const currentPage = pageState.commentID === comment.id ? pageState.page : 1
+  const replies = useArticleCommentReplies(articleID, comment.id, currentPage, 10, open)
+  const copy = messages.articles.actions
+  return <article className="stored-comment">
+    <p className="comment-metadata"><strong>{comment.authorName || copy.unknownAuthor}</strong>{comment.createdAt ? <><span aria-hidden="true"> · </span><Timestamp value={comment.createdAt} format="auto" /></> : null}<span aria-hidden="true"> · </span>{copy.commentStats(comment.likeCount, comment.replyCount)}</p>
+    <p>{comment.content}</p>
+    {comment.replyCount > 0 ? <Collapsible trigger={copy.expandReplies(comment.replyCount)} isOpen={open} onOpenChange={setOpen}>
+      <div className="stored-replies">
+        {comment.replyStatus === 'pending' ? <p className="availability-note" role="status">{copy.repliesPending}</p> : null}
+        {replies.isLoading ? <p role="status">{copy.repliesLoading}</p> : null}
+        {replies.isError ? <p role="status">{copy.repliesUnavailable}</p> : null}
+        {replies.data ? <>{replies.data.items.length === 0 ? <p>{copy.repliesEmpty}</p> : replies.data.items.map((reply) => <div key={reply.id} className="stored-reply"><p className="comment-metadata"><strong>{reply.authorName || copy.unknownAuthor}</strong>{reply.createdAt ? <><span aria-hidden="true"> · </span><Timestamp value={reply.createdAt} format="auto" /></> : null}<span aria-hidden="true"> · </span>{copy.replyLikes(reply.likeCount)}</p><p>{reply.content}</p></div>)}
+          {replies.data.total > replies.data.limit ? <nav className="pagination" aria-label={copy.repliesPagination}><Button label={messages.articles.previous} variant="secondary" size="sm" isDisabled={currentPage === 1} onClick={() => setPageState({ commentID: comment.id, page: currentPage - 1 })} /><span>{copy.commentsPage(currentPage, Math.max(1, Math.ceil(replies.data.total / replies.data.limit)))}</span><Button label={messages.articles.next} variant="secondary" size="sm" isDisabled={currentPage >= Math.ceil(replies.data.total / replies.data.limit)} onClick={() => setPageState({ commentID: comment.id, page: currentPage + 1 })} /></nav> : null}
+        </> : null}
+      </div>
+    </Collapsible> : null}
+  </article>
 }
 
 function ResourceSummary({ summary, messages }: { readonly summary: ReturnType<typeof useArticleResourceSummary>; readonly messages: MessageCatalog }) {

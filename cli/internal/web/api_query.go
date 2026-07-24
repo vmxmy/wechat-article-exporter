@@ -178,7 +178,7 @@ func parseNumberedPage(values url.Values) (application.WorkspacePageRequest, err
 	if limit == 0 || limit > application.WorkspaceMaximumPageLimit {
 		return application.WorkspacePageRequest{}, invalidArgument(fmt.Sprintf("page limit must be between 1 and %d", application.WorkspaceMaximumPageLimit))
 	}
-	if *pageNumber > (int(^uint(0)>>1)/limit)+1 {
+	if *pageNumber-1 > int(^uint(0)>>1)/limit {
 		return application.WorkspacePageRequest{}, invalidArgument("page is too large")
 	}
 	return application.WorkspacePageRequest{Offset: (*pageNumber - 1) * limit, Limit: limit}, nil

@@ -110,15 +110,35 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		}
 		if suffix, ok := strings.CutPrefix(request.URL.Path, "/api/v1/articles/"); ok {
 			articleID, endpoint, hasEndpoint := strings.Cut(suffix, "/")
-			if !hasEndpoint || (endpoint != "resources" && endpoint != "detail") || articleID == "" || strings.Contains(articleID, "/") {
+			if !hasEndpoint || articleID == "" || strings.Contains(articleID, "/") {
 				server.apiError(writer, http.StatusNotFound, "not_found", "workspace resource was not found")
 				return
 			}
-			if endpoint == "detail" {
-				server.articleDetail(writer, request, domain.ArticleID(articleID))
+			if !validArticleID(articleID) {
+				server.apiError(writer, http.StatusBadRequest, "invalid_argument", "article identifier is invalid")
 				return
 			}
-			server.articleResources(writer, request, domain.ArticleID(articleID))
+			switch endpoint {
+			case "detail":
+				server.articleDetail(writer, request, domain.ArticleID(articleID))
+				return
+			case "resources":
+				server.articleResources(writer, request, domain.ArticleID(articleID))
+				return
+			case "comments":
+				server.articleComments(writer, request, domain.ArticleID(articleID))
+				return
+			}
+			commentID, replyEndpoint, hasReplyEndpoint := strings.Cut(strings.TrimPrefix(endpoint, "comments/"), "/")
+			if strings.HasPrefix(endpoint, "comments/") && hasReplyEndpoint && replyEndpoint == "replies" {
+				if !validCommentID(commentID) {
+					server.apiError(writer, http.StatusBadRequest, "invalid_argument", "comment identifier is invalid")
+					return
+				}
+				server.articleCommentReplies(writer, request, domain.ArticleID(articleID), commentID)
+				return
+			}
+			server.apiError(writer, http.StatusNotFound, "not_found", "workspace resource was not found")
 			return
 		}
 		if id, ok := strings.CutPrefix(request.URL.Path, "/api/v1/jobs/"); ok {
@@ -253,6 +273,50 @@ func (server *Server) articleDetail(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	writeAPI(writer, http.StatusOK, value)
+}
+
+func (server *Server) articleComments(writer http.ResponseWriter, request *http.Request, articleID domain.ArticleID) {
+	page, err := parsePage(request)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	value, err := server.workspace.ArticleComments(request.Context(), articleID, page)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusOK, value)
+}
+
+func (server *Server) articleCommentReplies(writer http.ResponseWriter, request *http.Request, articleID domain.ArticleID, commentID string) {
+	page, err := parsePage(request)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	value, err := server.workspace.ArticleCommentReplies(request.Context(), articleID, commentID, page)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writePage(writer, http.StatusOK, value)
+}
+
+func validArticleID(value string) bool { return validLocalOpaqueID(value) }
+func validCommentID(value string) bool { return validLocalOpaqueID(value) }
+
+func validLocalOpaqueID(value string) bool {
+	if value == "" || len(value) > 256 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '-' || character == '_' || character == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (server *Server) articlePreviewDocument(writer http.ResponseWriter, request *http.Request) {

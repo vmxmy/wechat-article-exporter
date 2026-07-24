@@ -170,6 +170,48 @@ WHERE a.profile_id=? AND c.article_id=? ORDER BY c.created_at_upstream, c.upstre
 	return comments, rows.Err()
 }
 
+// ListCommentsForArticle returns one deterministic, bounded local comment
+// page. It intentionally does not hydrate replies: callers that need replies
+// must use the separately bounded reply reader.
+func (database *Database) ListCommentsForArticle(ctx context.Context, articleID domain.ArticleID, offset, limit int) (domain.Page[CommentRecord], error) {
+	if err := database.ensureReplyCheckpointTable(ctx); err != nil {
+		return domain.Page[CommentRecord]{}, err
+	}
+	var total int
+	if err := database.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM comments c JOIN articles a ON a.id=c.article_id
+WHERE a.profile_id=? AND c.article_id=?`, database.profileID, articleID).Scan(&total); err != nil {
+		return domain.Page[CommentRecord]{}, err
+	}
+	rows, err := database.db.QueryContext(ctx, `SELECT c.id, c.article_id, c.upstream_id, c.author_name, c.content,
+c.like_count, c.created_at_upstream, c.raw_object_digest, c.fetched_at,
+COALESCE(rc.total_replies, 0), COALESCE(rc.max_reply_id, 0)
+FROM comments c JOIN articles a ON a.id=c.article_id
+LEFT JOIN reply_checkpoints rc ON rc.article_id=c.article_id AND rc.content_id=c.upstream_id
+WHERE a.profile_id=? AND c.article_id=? ORDER BY c.created_at_upstream, c.upstream_id LIMIT ? OFFSET ?`,
+		database.profileID, articleID, limit, offset)
+	if err != nil {
+		return domain.Page[CommentRecord]{}, err
+	}
+	defer rows.Close()
+	items := make([]CommentRecord, 0, limit)
+	for rows.Next() {
+		var comment CommentRecord
+		var created sql.NullInt64
+		var fetchedAt int64
+		if err := rows.Scan(&comment.ID, &comment.ArticleID, &comment.UpstreamID, &comment.AuthorName, &comment.Content,
+			&comment.LikeCount, &created, &comment.RawObjectDigest, &fetchedAt, &comment.ReplyTotal, &comment.ReplyMaxID); err != nil {
+			return domain.Page[CommentRecord]{}, err
+		}
+		comment.CreatedAt = unixMillis(created)
+		comment.FetchedAt = time.UnixMilli(fetchedAt)
+		items = append(items, comment)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.Page[CommentRecord]{}, err
+	}
+	return domain.Page[CommentRecord]{Items: items, Total: total, Offset: offset, Limit: limit}, nil
+}
+
 func upsertComment(ctx context.Context, transaction *sql.Tx, articleID domain.ArticleID, comment CommentRecord, fetchedAt time.Time) (bool, string, error) {
 	commentID := comment.ID
 	if commentID == "" {
