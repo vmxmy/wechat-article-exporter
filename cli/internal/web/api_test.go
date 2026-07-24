@@ -401,6 +401,35 @@ func TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries(t *testing.T) 
 	assertAPIError(t, response, "invalid_argument")
 }
 
+func TestAlbumsAPIRejectsInvalidQueriesBeforeWorkspaceCalls(t *testing.T) {
+	app := &apiApplication{}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+
+	for _, test := range []struct {
+		name   string
+		target string
+	}{
+		{name: "unsupported key", target: "/api/v1/albums?wat=1"},
+		{name: "repeated account ID", target: "/api/v1/albums?accountId=account-1&accountId=account-2"},
+		{name: "limit above maximum", target: "/api/v1/albums?limit=101"},
+		{name: "page below minimum", target: "/api/v1/albums?page=0"},
+		{name: "offset and page mixed", target: "/api/v1/albums?offset=0&page=1"},
+		{name: "page size below minimum", target: "/api/v1/albums?page_size=0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := get(t, client, base+test.target)
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("GET %s status=%d body=%s", test.target, response.StatusCode, readResponse(t, response))
+			}
+			assertAPIError(t, response, "invalid_argument")
+			if app.albumQueryCalls != 0 {
+				t.Fatalf("GET %s called QueryAlbums %d times", test.target, app.albumQueryCalls)
+			}
+		})
+	}
+}
+
 func TestReadAPIErrorModelDoesNotLeakApplicationFailures(t *testing.T) {
 	server, client := startAPIApplicationServer(t, &apiApplication{accountsErr: errors.New("sqlite at /private/token=secret")})
 	base := authorizeAPI(t, client, server.URL())
@@ -873,6 +902,7 @@ type apiApplication struct {
 	accountQuery         domain.AccountQuery
 	articleQuery         domain.ArticleQuery
 	albumQuery           domain.AlbumQuery
+	albumQueryCalls      int
 	jobQuery             domain.JobQuery
 	loginFlow            wechat.LoginFlow
 	poll                 wechat.PollResult
@@ -1040,6 +1070,7 @@ func (app *apiApplication) ListArticleCommentReplies(_ context.Context, id domai
 	return page, nil
 }
 func (app *apiApplication) QueryAlbums(_ context.Context, query domain.AlbumQuery) (domain.Page[domain.Album], error) {
+	app.albumQueryCalls++
 	app.albumQuery = query
 	page := app.albums
 	page.Offset, page.Limit = query.Offset, query.Limit

@@ -31,7 +31,7 @@ presence or absence of at least one asserting test per cell.
 | `GET /articles/{id}/detail` | ✓ | ✓ | ✓ (`limit=1` on comments-page rejected) | ✓ (bounded metrics/resource-detail-only assertion) | `TestArticleDetailAPIProvidesBoundedSafeMetricsAndResourceDetails` |
 | `GET /articles/{id}/comments` | ✓ | ✓ | ✓ (strict IDs, unsupported query, and `limit=101`) | ✓ (no database IDs, digests, fetch state, continuation, credentials, or paths) | `TestArticleCommentsAPIUsesBoundedSafeLocalProjections` |
 | `GET /articles/{id}/comments/{commentId}/replies` | ✓ | ✓ | ✓ (strict IDs and incompatible pagination styles) | ✓ (no database IDs, digests, fetch state, request metadata, credentials, or paths) | `TestArticleCommentsAPIUsesBoundedSafeLocalProjections` |
-| `GET /albums` | ✓ | ✓ | – (family covered by shared `parseAlbumQuery`; no dedicated negative test found) | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData` |
+| `GET /albums` | ✓ | ✓ | ✓ (unsupported key, repeated `accountId`, invalid limit/page/page_size, and incompatible pagination styles; rejects before `QueryAlbums`) | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData`, `TestAlbumsAPIRejectsInvalidQueriesBeforeWorkspaceCalls` |
 | `GET /saved-queries` | ✓ | ✓ | ✓ (`offset=-1`) | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData`, `TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries` |
 | `GET /jobs` | ✓ | ✓ | ✓ (`state=wat`) | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData`, `TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries` |
 | `GET /jobs/{id}` | ✓ | ✓ | ✓ (`jobs/not-a-uuid`) | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData`, `TestReadAPIRejectsUnauthorizedUnsupportedAndUnboundedQueries` |
@@ -96,9 +96,6 @@ presence or absence of at least one asserting test per cell.
   test found that specifically targets the bare read route in isolation;
   only their control-plane siblings (`/accounts/manifest/upload`,
   `/accounts/manifest/import`) and export sub-resources are directly tested.
-- `GET /albums` has no dedicated invalid-input test distinct from the shared
-  `parseAlbumQuery`/`parsePageValues` coverage exercised through other
-  routes.
 - No test in this package directly asserts the exact `error.code` value for
   every code in the §4 vocabulary of
   `docs/release/browser-api-contract.md`; several codes (`unavailable`,
