@@ -12,6 +12,11 @@ import (
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 )
 
+// maximumWorkspaceQueryTextLength bounds local presentation queries before
+// they reach storage adapters. It complements the HTTP header limit and keeps
+// all text-backed list and selector queries within a predictable cost.
+const maximumWorkspaceQueryTextLength = 512
+
 func parseAccountQuery(request *http.Request) (application.WorkspaceAccountQuery, error) {
 	values, err := strictQuery(request.URL.Query(), nil, "keyword", "search", "offset", "limit", "page", "page_size")
 	if err != nil {
@@ -159,6 +164,9 @@ func parseOffsetPage(values url.Values) (application.WorkspacePageRequest, error
 	if page.Limit > application.WorkspaceMaximumPageLimit {
 		return application.WorkspacePageRequest{}, invalidArgument(fmt.Sprintf("page limit must not exceed %d", application.WorkspaceMaximumPageLimit))
 	}
+	if page.Offset > application.WorkspaceMaximumPageOffset {
+		return application.WorkspacePageRequest{}, invalidArgument(fmt.Sprintf("page offset must not exceed %d", application.WorkspaceMaximumPageOffset))
+	}
 	return page, nil
 }
 
@@ -178,10 +186,15 @@ func parseNumberedPage(values url.Values) (application.WorkspacePageRequest, err
 	if limit == 0 || limit > application.WorkspaceMaximumPageLimit {
 		return application.WorkspacePageRequest{}, invalidArgument(fmt.Sprintf("page limit must be between 1 and %d", application.WorkspaceMaximumPageLimit))
 	}
-	if *pageNumber-1 > int(^uint(0)>>1)/limit {
+	pageOffset := *pageNumber - 1
+	if pageOffset > int(^uint(0)>>1)/limit {
 		return application.WorkspacePageRequest{}, invalidArgument("page is too large")
 	}
-	return application.WorkspacePageRequest{Offset: (*pageNumber - 1) * limit, Limit: limit}, nil
+	offset := pageOffset * limit
+	if offset > application.WorkspaceMaximumPageOffset {
+		return application.WorkspacePageRequest{}, invalidArgument(fmt.Sprintf("page offset must not exceed %d", application.WorkspaceMaximumPageOffset))
+	}
+	return application.WorkspacePageRequest{Offset: offset, Limit: limit}, nil
 }
 
 func strictQuery(values url.Values, repeatable map[string]bool, allowed ...string) (url.Values, error) {
@@ -195,6 +208,11 @@ func strictQuery(values url.Values, repeatable map[string]bool, allowed ...strin
 		}
 		if !repeatable[key] && len(entries) != 1 {
 			return nil, invalidArgument("query parameter must appear once")
+		}
+		for _, entry := range entries {
+			if len([]rune(entry)) > maximumWorkspaceQueryTextLength {
+				return nil, invalidArgument(fmt.Sprintf("query text must not exceed %d characters", maximumWorkspaceQueryTextLength))
+			}
 		}
 	}
 	return values, nil

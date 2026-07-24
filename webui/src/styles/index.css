@@ -67,7 +67,11 @@
   .pagination { justify-content: flex-end; margin-block-start: var(--spacing-4); }
   .error-state { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-4); }
   .error-state p { margin-block-end: 0; }
-  .read-only-badge { display: inline-flex; align-items: center; gap: var(--spacing-2); width: fit-content; margin: 0; padding: var(--spacing-1) var(--spacing-2); border: 1px solid var(--color-border); border-radius: var(--radius-control); color: var(--color-text-secondary); font-size: var(--text-body-small-size); white-space: nowrap; }
+  .workspace-local-note { width: fit-content; margin: 0; color: var(--color-text-secondary); font-size: var(--text-body-small-size); white-space: nowrap; }
+  .resource-column-end { text-align: end; font-variant-numeric: tabular-nums; }
+  .resource-column-center { text-align: center; }
+  .resource-column-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .resource-table-mobile { display: none; }
   .facts-list { display: grid; gap: var(--spacing-3); margin: 0; }
   .facts-list div { display: grid; grid-template-columns: minmax(7rem, 1fr) minmax(0, 2fr); gap: var(--spacing-3); }
   .facts-list dt { color: var(--color-text-secondary); }
@@ -101,6 +105,8 @@
   .account-sync-mode select { min-width: 0; padding: var(--spacing-2); border: 1px solid var(--color-border-emphasized); border-radius: var(--radius-control); color: var(--color-text-primary); background: var(--color-background-surface); }
   .import-form { width: min(100%, 42rem); }
   .import-form .astryx-field { flex: 1 1 20rem; }
+  .import-job-technical-details { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-2); }
+  .import-job-technical-details p { overflow-wrap: anywhere; }
   .confirmation-note summary { cursor: pointer; }
   .force-control { color: var(--color-text-secondary); font-size: var(--text-body-small-size); }
   .login-flow { align-self: start; }
@@ -156,5 +162,7 @@
     .pagination { justify-content: space-between; }
     .action-button-group, .import-form { align-items: stretch; flex-direction: column; }
     .job-detail-grid { grid-template-columns: 1fr; }
+    .resource-table-mobile { display: grid; }
+    .data-table-wrap:has(+ .resource-table-mobile), .column-controls { display: none; }
   }
 }

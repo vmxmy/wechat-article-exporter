@@ -1,11 +1,14 @@
 import { AppShell } from '@astryxdesign/core/AppShell'
 import { Button } from '@astryxdesign/core/Button'
+import { MobileNav } from '@astryxdesign/core/MobileNav'
 import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Component, lazy, Suspense, useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import { type Locale, type MessageCatalog, useMessages } from '../i18n'
-import { useRuntimeStatus, useWorkspaceSnapshot } from '../lib/queries'
-import { navigationEvent } from './navigation'
+import { useRuntimeStatus } from '../lib/queries'
+import { HomePage } from '../features/home/HomePage'
+import { SessionControl } from './SessionControl'
+import { getNavigationItem, navigationEvent, navigationGroups, navigationItems } from './navigation'
 
 const ArticleTable = lazy(() => import('../features/articles/ArticleTable').then(({ ArticleTable }) => ({ default: ArticleTable })))
 const ImportPage = lazy(() => import('../features/import/ImportPage').then(({ ImportPage }) => ({ default: ImportPage })))
@@ -22,24 +25,16 @@ interface WorkspaceProps {
   readonly onLocaleChange: (locale: Locale) => void
 }
 
-const navigation = [
-  { group: 'workspace', href: '/', key: 'overview' },
-  { group: 'workspace', href: '/login', key: 'login' },
-  { group: 'library', href: '/accounts', key: 'accounts' },
-  { group: 'library', href: '/articles', key: 'articles' },
-  { group: 'library', href: '/albums', key: 'albums' },
-  { group: 'library', href: '/saved-queries', key: 'savedQueries' },
-  { group: 'operations', href: '/jobs', key: 'jobs' },
-  { group: 'operations', href: '/exports', key: 'exports' },
-  { group: 'operations', href: '/import', key: 'import' },
-  { group: 'operations', href: '/settings', key: 'settings' }
-] as const
-
 export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
   const messages = useMessages(locale)
   const [path, setPath] = useState(window.location.pathname)
   const [navigationID, setNavigationID] = useState(0)
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
   const runtime = useRuntimeStatus()
+
+  useEffect(() => {
+    document.documentElement.lang = locale
+  }, [locale])
 
   useEffect(() => {
     const updatePath = () => {
@@ -55,41 +50,81 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
   }, [])
 
   useEffect(() => {
-    const main = document.getElementById('astryx-app-shell-main')
-    const skipLink = document.querySelector<HTMLAnchorElement>('[data-testid="skip-to-content"]')
-    if (!main || !skipLink) return
-
-    main.tabIndex = -1
-    const focusMain = () => main.focus()
-    skipLink.addEventListener('click', focusMain)
-    return () => skipLink.removeEventListener('click', focusMain)
+    let firstFrame = 0
+    let secondFrame = 0
+    const focusMain = (event: MouseEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('[data-testid="skip-to-content"]')) return
+      const main = document.getElementById('astryx-app-shell-main')
+      if (!main) return
+      main.tabIndex = -1
+      window.cancelAnimationFrame(firstFrame)
+      window.cancelAnimationFrame(secondFrame)
+      firstFrame = window.requestAnimationFrame(() => {
+        secondFrame = window.requestAnimationFrame(() => main.focus())
+      })
+    }
+    document.addEventListener('click', focusMain)
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      window.cancelAnimationFrame(secondFrame)
+      document.removeEventListener('click', focusMain)
+    }
   }, [])
 
   const connection = getConnectionState(runtime.isSuccess, runtime.isError, messages)
+  const currentPage = getNavigationItem(path)
+  const navigationSections = (closeAfterNavigation = false) => navigationGroups.map((group) => (
+    <SideNavSection key={group} title={messages.navigation[group]}>
+      {navigationItems.filter((item) => item.group === group).map((item) => (
+        <SideNavItem
+          key={item.href}
+          label={messages.navigation[item.key]}
+          href={item.href}
+          isSelected={path === item.href}
+          onClick={closeAfterNavigation ? () => setMobileNavigationOpen(false) : undefined}
+        />
+      ))}
+    </SideNavSection>
+  ))
 
   return (
     <AppShell
       height="fill"
       variant="surface"
       contentPadding={4}
+      mobileNav={{
+        breakpoint: 'md',
+        isOpen: mobileNavigationOpen,
+        onOpenChange: setMobileNavigationOpen,
+        content: (
+          <MobileNav
+            header={
+              <div>
+                <strong>{messages.a11y.navigation}</strong>
+                <div>{messages.a11y.currentPage(messages.navigation[currentPage.key])}</div>
+              </div>
+            }
+            label={messages.a11y.navigation}
+          >
+            {navigationSections(true)}
+            <p className="workspace-nav-footer">{messages.product.privacy}</p>
+          </MobileNav>
+        )
+      }}
       sideNav={
         <SideNav
           collapsible
-          header={<SideNavHeading superheading={messages.product.local} heading={messages.product.name} headingHref="/" />}
+          header={
+            <SideNavHeading
+              superheading={messages.product.local}
+              heading={messages.product.name}
+              headingHref="/"
+              subheading={messages.a11y.currentPage(messages.navigation[currentPage.key])}
+            />
+          }
           footer={<p className="workspace-nav-footer">{messages.product.privacy}</p>}
         >
-          {(['workspace', 'library', 'operations'] as const).map((group) => (
-            <SideNavSection key={group} title={messages.navigation[group]}>
-              {navigation.filter((item) => item.group === group).map((item) => (
-                <SideNavItem
-                  key={item.href}
-                  label={messages.navigation[item.key]}
-                  href={item.href}
-                  isSelected={path === item.href}
-                />
-              ))}
-            </SideNavSection>
-          ))}
+          {navigationSections()}
         </SideNav>
       }
     >
@@ -99,7 +134,8 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
           <span>{connection.label}</span>
         </div>
         <div className="header-actions">
-          <span className="read-only-badge">{messages.product.beta} · {messages.product.readOnly}</span>
+          <span className="workspace-local-note">{messages.product.localOnly}</span>
+          <SessionControl messages={messages} />
           <Button
             label={messages.localeSwitch}
             variant="secondary"
@@ -131,7 +167,7 @@ function renderPage(path: string, locale: Locale, messages: MessageCatalog) {
   if (path === '/jobs') return <JobsPage locale={locale} messages={messages} />
   if (path === '/exports') return <ExportPage locale={locale} messages={messages} />
   if (path === '/settings') return <SettingsPage locale={locale} messages={messages} />
-  return <Overview messages={messages} />
+  return <HomePage messages={messages} />
 }
 
 function getConnectionState(isSuccess: boolean, isError: boolean, messages: MessageCatalog) {
@@ -147,10 +183,20 @@ function PageLoading({ messages }: { readonly messages: MessageCatalog }) {
 function PageFocus({ children, shouldFocus }: { readonly children: ReactNode; readonly shouldFocus: boolean }) {
   useLayoutEffect(() => {
     if (!shouldFocus) return
-    const heading = document.querySelector<HTMLElement>('#astryx-app-shell-main h1')
-    if (!heading) return
-    heading.tabIndex = -1
-    heading.focus()
+    let timeout = 0
+    let attempts = 0
+    const focusHeading = () => {
+      const heading = document.querySelector<HTMLElement>('#astryx-app-shell-main h1')
+      if (heading) {
+        heading.tabIndex = -1
+        heading.focus()
+        return
+      }
+      attempts += 1
+      if (attempts < 20) timeout = window.setTimeout(focusHeading, 25)
+    }
+    timeout = window.setTimeout(focusHeading, 0)
+    return () => window.clearTimeout(timeout)
   }, [shouldFocus])
 
   return <>{children}</>
@@ -174,37 +220,4 @@ class PageErrorBoundary extends Component<{ readonly children: ReactNode; readon
     }
     return this.props.children
   }
-}
-
-function Overview({ messages }: { readonly messages: MessageCatalog }) {
-  const snapshot = useWorkspaceSnapshot()
-  const runtime = snapshot.data?.runtime
-  const session = snapshot.data?.session
-  const storage = snapshot.data?.storage ?? runtime?.storage
-  return (
-    <section className="overview" aria-labelledby="overview-title">
-      <p className="eyebrow">{messages.product.local}</p>
-      <h1 id="overview-title">{messages.overview.title}</h1>
-      <p className="lede">{messages.overview.description}</p>
-      <div className="overview-grid">
-        <section className="workspace-panel" aria-labelledby="profile-title">
-          <h2 id="profile-title">{messages.overview.profileTitle}</h2>
-          {snapshot.isLoading ? <p role="status">{messages.connection.checking}</p> : null}
-          {snapshot.isError ? <p>{messages.overview.unavailable}</p> : <dl className="facts-list"><div><dt>{messages.overview.runtimeProfile}</dt><dd>{runtime?.profileId ?? runtime?.profile ?? '—'}</dd></div><div><dt>{messages.overview.runtimeVersion}</dt><dd>{runtime?.version ?? '—'}</dd></div></dl>}
-        </section>
-        <section className="workspace-panel" aria-labelledby="next-title">
-          <h2 id="next-title">{messages.overview.sessionTitle}</h2>
-          {snapshot.isError ? <p>{messages.overview.unavailable}</p> : <dl className="facts-list"><div><dt>{messages.overview.sessionAccount}</dt><dd>{session?.accountName ?? '—'}</dd></div><div><dt>{messages.overview.sessionState}</dt><dd>{session?.state ?? runtime?.session ?? '—'}</dd></div></dl>}
-        </section>
-        <section className="workspace-panel" aria-labelledby="storage-title">
-          <h2 id="storage-title">{messages.overview.storageTitle}</h2>
-          <p>{storage ? messages.overview.storageCounts(storage.accounts, storage.articles, storage.albums, storage.jobs) : messages.overview.unavailable}</p>
-        </section>
-        <section className="workspace-panel" aria-labelledby="next-steps-title">
-          <h2 id="next-steps-title">{messages.overview.nextTitle}</h2>
-          <p>{messages.overview.nextDescription}</p>
-        </section>
-      </div>
-    </section>
-  )
 }

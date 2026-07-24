@@ -77,18 +77,24 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		server.switchableAccounts(writer, request)
 	case "/api/v1/accounts":
 		server.accounts(writer, request)
+	case "/api/v1/selectors/accounts":
+		server.accountOptions(writer, request)
 	case "/api/v1/accounts/manifest":
 		server.accountManifestRead(writer, request)
 	case "/api/v1/accounts/search":
 		server.accountSearch(writer, request)
 	case "/api/v1/articles":
 		server.articles(writer, request)
+	case "/api/v1/selectors/articles":
+		server.articleOptions(writer, request)
 	case "/api/v1/articles/preview":
 		server.articlePreview(writer, request)
 	case "/api/v1/articles/preview/document":
 		server.articlePreviewDocument(writer, request)
 	case "/api/v1/albums":
 		server.albums(writer, request)
+	case "/api/v1/selectors/albums":
+		server.albumOptions(writer, request)
 	case "/api/v1/saved-queries":
 		server.savedQueries(writer, request)
 	case "/api/v1/jobs":
@@ -225,6 +231,20 @@ func (server *Server) accounts(writer http.ResponseWriter, request *http.Request
 	writePage(writer, http.StatusOK, value)
 }
 
+func (server *Server) accountOptions(writer http.ResponseWriter, request *http.Request) {
+	query, err := parseAccountQuery(request)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	value, err := server.workspace.AccountOptions(request.Context(), query)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writePage(writer, http.StatusOK, value)
+}
+
 func (server *Server) articles(writer http.ResponseWriter, request *http.Request) {
 	query, err := parseArticleQuery(request)
 	if err != nil {
@@ -232,6 +252,20 @@ func (server *Server) articles(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	value, err := server.workspace.Articles(request.Context(), query)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writePage(writer, http.StatusOK, value)
+}
+
+func (server *Server) articleOptions(writer http.ResponseWriter, request *http.Request) {
+	query, err := parseArticleQuery(request)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	value, err := server.workspace.ArticleOptions(request.Context(), query)
 	if err != nil {
 		server.workspaceError(writer, err)
 		return
@@ -378,6 +412,20 @@ func (server *Server) albums(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 	value, err := server.workspace.Albums(request.Context(), query)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writePage(writer, http.StatusOK, value)
+}
+
+func (server *Server) albumOptions(writer http.ResponseWriter, request *http.Request) {
+	query, err := parseAlbumQuery(request)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	value, err := server.workspace.AlbumOptions(request.Context(), query)
 	if err != nil {
 		server.workspaceError(writer, err)
 		return

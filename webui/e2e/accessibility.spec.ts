@@ -54,7 +54,8 @@ test('article and album export handoffs use SPA navigation and focus the export 
   await expect(page.getByRole('heading', { name: 'Export articles', level: 1 })).toBeFocused()
 
   await page.goto('/albums')
-  await page.getByRole('checkbox', { name: 'Select album-fixture-1' }).check()
+  await page.getByRole('checkbox', { name: 'Select Sanitized album' }).check()
+  await expect(page.getByRole('checkbox', { name: 'Select album-fixture-1' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Export selected albums' }).click()
   await expect(page).toHaveURL(/\/exports$/)
   await expect(page.getByRole('heading', { name: 'Export articles', level: 1 })).toBeFocused()
@@ -85,7 +86,8 @@ test('keyboard-only exact confirmation gates destructive garbage collection', as
 test('keyboard-only destructive task confirmation can be cancelled without a native dialog', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/jobs')
-  await page.getByRole('checkbox', { name: 'Select job-fixture-1' }).check()
+  await page.getByRole('checkbox', { name: 'Select Export' }).check()
+  await expect(page.getByRole('checkbox', { name: 'Select job-fixture-1' })).toHaveCount(0)
 
   const pause = page.getByRole('button', { name: 'Pause selected task' }).first()
   await focusWithKeyboard(page, pause)
@@ -101,16 +103,76 @@ test('keyboard-only destructive task confirmation can be cancelled without a nat
   await expectOnlyLoopbackRequests(page)
 })
 
-test('narrow viewport keeps the sanitized export workspace usable without page overflow', async ({ page }) => {
+test('390px resource views use readable mobile projections without whole-document horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await installLoopbackFixture(page)
-  await page.goto('/exports')
 
-  await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Authorize default directory' })).toBeVisible()
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.goto('/accounts')
+  await expect(page.locator('.resource-table-mobile')).toBeVisible()
+  await expect(page.locator('.resource-table-mobile')).toContainText('Fixture Account')
+  await expectNoDocumentOverflow(page)
+
+  await page.goto('/articles')
+  await expect(page.locator('.article-table-mobile')).toBeVisible()
+  await expect(page.locator('.article-table-mobile')).toContainText('Sanitized article one')
+  await expectNoDocumentOverflow(page)
+
+  await page.goto('/albums')
+  await expect(page.locator('.resource-table-mobile')).toBeVisible()
+  await expect(page.locator('.resource-table-mobile')).toContainText('Sanitized album')
+  await expectNoDocumentOverflow(page)
+
+  await page.goto('/jobs')
+  await expect(page.getByRole('heading', { name: 'Jobs', level: 1 })).toBeVisible()
+  await expect(page.locator('.resource-table-mobile')).toBeVisible()
+  await expect(page.locator('.resource-table-mobile')).toContainText('Export')
+  await expectNoDocumentOverflow(page)
   await expectOnlyLoopbackRequests(page)
 })
+
+test('200% page zoom keeps the staged export primary flow usable without whole-document overflow', async ({ page }) => {
+  await installLoopbackFixture(page)
+  const session = await page.context().newCDPSession(page)
+  await page.goto('/exports')
+  await session.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 })
+  await expect.poll(() => page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(2)
+
+  await selectRemoteTypeaheadOption(page, 'Selected articles', 'Sanitized article one')
+  await clickButton(page, 'Continue to format')
+  await expect(page.getByRole('heading', { name: 'Format and options' })).toBeVisible()
+  await clickButton(page, 'Continue to destination')
+  await expect(page.getByRole('heading', { name: 'Destination and confirmation' })).toBeVisible()
+  await page.getByRole('button', { name: 'Authorize default directory' }).click()
+  await expect(page.getByRole('button', { name: 'Queue export' })).toBeEnabled()
+  await expectNoDocumentOverflow(page)
+  await expectOnlyLoopbackRequests(page)
+})
+
+async function toggleCheckbox(checkbox: Locator) {
+  await checkbox.evaluate((element) => (element as HTMLInputElement).click())
+}
+
+async function clickButton(page: Page, name: string) {
+  await page.getByRole('button', { name, exact: true }).evaluate((element) => (element as HTMLButtonElement).click())
+}
+
+async function selectRemoteTypeaheadOption(page: Page, label: string, option: string) {
+  const input = page.getByRole('combobox', { name: label, exact: true })
+  await input.scrollIntoViewIfNeeded()
+  await input.focus()
+  await input.evaluate((element, value) => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    nativeSetter?.call(element, value)
+    element.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  }, option)
+  const listboxID = await input.getAttribute('aria-controls')
+  if (!listboxID) throw new Error(`Remote selector ${label} did not expose its listbox relationship.`)
+  const listbox = page.locator(`[id=${JSON.stringify(listboxID)}]`)
+  const result = listbox.getByRole('option').filter({ hasText: option }).first()
+  await expect(result).toBeVisible()
+  await result.evaluate((element) => (element as HTMLElement).click())
+}
 
 async function focusWithKeyboard(page: Page, target: Locator) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -118,4 +180,8 @@ async function focusWithKeyboard(page: Page, target: Locator) {
     await page.keyboard.press('Tab')
   }
   throw new Error(`Could not reach ${await target.ariaSnapshot()} with Tab navigation.`)
+}
+
+async function expectNoDocumentOverflow(page: Page) {
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 }

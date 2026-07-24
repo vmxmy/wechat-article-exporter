@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -279,8 +280,211 @@ func TestWorkspaceArticlesProjectsAccountNamesWithoutExposingMissingIDs(t *testi
 	if got := []string{articles.Items[0].AccountName, articles.Items[1].AccountName, articles.Items[2].AccountName}; !reflect.DeepEqual(got, []string{"Readable account", "Readable account", ""}) {
 		t.Fatalf("article account names = %#v", got)
 	}
+	if !articles.Items[0].AccountNameAvailable || articles.Items[2].AccountNameAvailable {
+		t.Fatalf("article account fallback flags = %#v", articles.Items)
+	}
 	if library.accountNameGets != 1 {
 		t.Fatalf("account name lookups = %d", library.accountNameGets)
+	}
+}
+
+func TestWorkspaceArticleOptionsAreBoundedHumanReadableAndKeepStableIDs(t *testing.T) {
+	publishedFrom := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	publishedTo := time.Date(2026, 7, 2, 8, 0, 0, 0, time.UTC)
+	withContent := true
+	readMin := 10
+	readMax := 20
+	library := &workspaceLibrary{
+		articles: domain.Page[domain.Article]{Items: []domain.Article{
+			{
+				ID: "article-action-1", AccountID: "account-1", Title: "Readable article", Author: "private-author",
+				Digest: "private-body", CanonicalURL: "https://private.example/article", CoverURL: "https://private.example/cover",
+				Aid: "private-aid", AppMsgID: 42, ItemIndex: 3, MessageType: 1, State: "published", HasContent: true,
+				ReadCount: 100, OldLikeCount: 20, ShareCount: 10, LikeCount: 5, CommentCount: 2,
+			},
+			{ID: "article-action-2", AccountID: "account-missing", Title: "Fallback article"},
+		}, Total: 17, Offset: 20, Limit: 10},
+		accountByID: map[domain.AccountID]domain.Account{
+			"account-1": {ID: "account-1", Name: "Readable account"},
+		},
+	}
+	workspace := NewWorkspace(New(Options{Runtime: runtimeenv.Dependencies{Profile: "fixture"}, Library: library, Jobs: &workspaceJobManager{}}))
+
+	options, err := workspace.ArticleOptions(context.Background(), WorkspaceArticleQuery{
+		AccountID: "account-1", AlbumID: "album-1", Keyword: " article ", Author: " author ", State: " published ",
+		PublishedFrom: publishedFrom, PublishedTo: publishedTo, HasContent: &withContent, MessageTypes: []int{1, 2},
+		ReadMin: &readMin, ReadMax: &readMax, Sorts: []domain.ArticleSort{{Field: "published", Direction: domain.SortDescending}},
+		Page: WorkspacePageRequest{Offset: 20, Limit: 10},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantQuery := domain.ArticleQuery{
+		AccountID: "account-1", AlbumID: "album-1", Keyword: "article", Author: "author", State: "published",
+		PublishedFrom: publishedFrom, PublishedTo: publishedTo, HasContent: &withContent, MessageTypes: []int{1, 2},
+		ReadMin: &readMin, ReadMax: &readMax, Sorts: []domain.ArticleSort{{Field: "published", Direction: domain.SortDescending}},
+		Offset: 20, Limit: 10,
+	}
+	if !reflect.DeepEqual(library.articleQuery, wantQuery) {
+		t.Fatalf("ArticleOptions query = %#v, want %#v", library.articleQuery, wantQuery)
+	}
+	wantOptions := []WorkspaceArticleOption{
+		{ID: "article-action-1", Title: "Readable article", AccountName: "Readable account", AccountNameAvailable: true},
+		{ID: "article-action-2", Title: "Fallback article", AccountNameAvailable: false},
+	}
+	if options.Total != 17 || options.Offset != 20 || options.Limit != 10 || !reflect.DeepEqual(options.Items, wantOptions) {
+		t.Fatalf("ArticleOptions() = %#v", options)
+	}
+	if options.Items[0].ID != library.articles.Items[0].ID {
+		t.Fatalf("ArticleOptions changed stable action ID: got %q, want %q", options.Items[0].ID, library.articles.Items[0].ID)
+	}
+	var firstOption map[string]any
+	if err := json.Unmarshal(mustJSON(t, options.Items[0]), &firstOption); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(firstOption, map[string]any{
+		"id":                   "article-action-1",
+		"title":                "Readable article",
+		"accountName":          "Readable account",
+		"accountNameAvailable": true,
+	}) {
+		t.Fatalf("article selector projection = %#v", firstOption)
+	}
+	encoded := string(mustJSON(t, options))
+	for _, forbidden := range []string{
+		"accountId", "private-body", "private-author", "private-aid", "canonicalUrl", "coverUrl", "digest", "appmsgId",
+		"messageType", "readCount", "oldLikeCount", "shareCount", "likeCount", "commentCount", "hasContent", "albums",
+	} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("article selector leaked %q: %s", forbidden, encoded)
+		}
+	}
+
+	for _, request := range []WorkspacePageRequest{{Offset: -1}, {Limit: WorkspaceMaximumPageLimit + 1}} {
+		if _, err := workspace.ArticleOptions(context.Background(), WorkspaceArticleQuery{Page: request}); err == nil {
+			t.Fatalf("ArticleOptions accepted page %#v", request)
+		}
+	}
+}
+
+func TestWorkspaceSelectorOptionsAreBoundedSafeAndKeepStableIDs(t *testing.T) {
+	library := &workspaceLibrary{
+		accounts: domain.Page[domain.Account]{Items: []domain.Account{
+			{ID: "account-1", Name: " Readable ", Alias: "primary", FakeID: "private-fakeid", Description: "not for selector", AvatarURL: "https://example.test/private"},
+			{ID: "account-2", Alias: " Alias fallback ", FakeID: "private-fakeid-2"},
+			{ID: "account-3", FakeID: "private-fakeid-3"},
+		}, Total: 7, Offset: 20, Limit: 10},
+		albums: domain.Page[domain.Album]{Items: []domain.Album{
+			{ID: "album-1", AccountID: "account-1", Name: " Album ", UpstreamID: "private-upstream", Description: "not for selector", ArticleCount: 3},
+			{ID: "album-2", AccountID: "account-missing"},
+		}, Total: 4, Offset: 10, Limit: 10},
+		accountByID: map[domain.AccountID]domain.Account{"account-1": {ID: "account-1", Name: "Readable"}},
+	}
+	workspace := NewWorkspace(New(Options{Runtime: runtimeenv.Dependencies{Profile: "fixture"}, Library: library, Jobs: &workspaceJobManager{}}))
+
+	accounts, err := workspace.AccountOptions(context.Background(), WorkspaceAccountQuery{Keyword: " read ", Page: WorkspacePageRequest{Offset: 20, Limit: 10}})
+	if err != nil || accounts.Total != 7 || accounts.Offset != 20 || accounts.Limit != 10 || library.accountQuery.Keyword != "read" {
+		t.Fatalf("AccountOptions() = %#v, query=%#v, err=%v", accounts, library.accountQuery, err)
+	}
+	wantAccounts := []WorkspaceAccountOption{
+		{ID: "account-1", DisplayName: "Readable", DisplayNameAvailable: true, Alias: "primary"},
+		{ID: "account-2", DisplayName: "Alias fallback", DisplayNameAvailable: true, Alias: "Alias fallback"},
+		{ID: "account-3"},
+	}
+	if !reflect.DeepEqual(accounts.Items, wantAccounts) {
+		t.Fatalf("account options = %#v", accounts.Items)
+	}
+	accountJSON := string(mustJSON(t, accounts))
+	for _, forbidden := range []string{"fakeid", "private-fakeid", "avatarUrl", "description", "serviceType", "syncCursor"} {
+		if strings.Contains(accountJSON, forbidden) {
+			t.Fatalf("account options leaked %q: %s", forbidden, accountJSON)
+		}
+	}
+
+	albums, err := workspace.AlbumOptions(context.Background(), WorkspaceAlbumQuery{Keyword: " album ", Page: WorkspacePageRequest{Offset: 10, Limit: 10}})
+	if err != nil || albums.Total != 4 || albums.Offset != 10 || albums.Limit != 10 || library.albumQuery.Keyword != "album" {
+		t.Fatalf("AlbumOptions() = %#v, query=%#v, err=%v", albums, library.albumQuery, err)
+	}
+	wantAlbums := []WorkspaceAlbumOption{
+		{ID: "album-1", AccountID: "account-1", DisplayName: "Album", DisplayNameAvailable: true, AccountName: "Readable", AccountNameAvailable: true},
+		{ID: "album-2", AccountID: "account-missing"},
+	}
+	if !reflect.DeepEqual(albums.Items, wantAlbums) {
+		t.Fatalf("album options = %#v", albums.Items)
+	}
+	albumJSON := string(mustJSON(t, albums))
+	for _, forbidden := range []string{"upstreamId", "private-upstream", "description", "articleCount", "paid"} {
+		if strings.Contains(albumJSON, forbidden) {
+			t.Fatalf("album options leaked %q: %s", forbidden, albumJSON)
+		}
+	}
+
+	for _, request := range []WorkspacePageRequest{{Limit: WorkspaceMaximumPageLimit + 1}, {Offset: -1}} {
+		if _, err := workspace.AccountOptions(context.Background(), WorkspaceAccountQuery{Page: request}); err == nil {
+			t.Fatalf("AccountOptions accepted page %#v", request)
+		}
+		if _, err := workspace.AlbumOptions(context.Background(), WorkspaceAlbumQuery{Page: request}); err == nil {
+			t.Fatalf("AlbumOptions accepted page %#v", request)
+		}
+	}
+}
+
+func TestWorkspaceAlbumsCredentialsAndJobsProjectLocalNamesAndFallbacks(t *testing.T) {
+	library := &workspaceLibrary{
+		albums: domain.Page[domain.Album]{Items: []domain.Album{
+			{ID: "album-1", AccountID: "account-1", UpstreamID: "legacy-upstream", Name: "Album"},
+			{ID: "album-2", AccountID: "account-missing", Name: "Orphan"},
+		}},
+		accountByID: map[domain.AccountID]domain.Account{"account-1": {ID: "account-1", Name: "Local profile name"}},
+	}
+	manager := &workspaceJobManager{page: domain.Page[domain.Job]{Items: []domain.Job{{ID: "job-1", Kind: "album_sync"}}, Total: 1, Limit: 20}}
+	workspace := NewWorkspace(New(Options{Runtime: runtimeenv.Dependencies{Profile: "fixture"}, Library: library, Jobs: manager}))
+
+	albums, err := workspace.Albums(context.Background(), WorkspaceAlbumQuery{Page: WorkspacePageRequest{Limit: 20}})
+	if err != nil || albums.Items[0].AccountName != "Local profile name" || !albums.Items[0].AccountNameAvailable || albums.Items[1].AccountNameAvailable {
+		t.Fatalf("Albums() = %#v, %v", albums, err)
+	}
+	credentials, err := workspace.CredentialMetadata(context.Background(), []CredentialMetadata{
+		{ID: "credential-1", AccountID: "account-1", Kind: "wechat", Status: "valid"},
+		{ID: "credential-2", AccountID: "account-missing", Kind: "wechat", Status: "unknown"},
+	})
+	if err != nil || credentials[0].AccountName != "Local profile name" || !credentials[0].AccountNameAvailable || credentials[1].AccountNameAvailable {
+		t.Fatalf("CredentialMetadata() = %#v, %v", credentials, err)
+	}
+	encoded := string(mustJSON(t, credentials))
+	for _, forbidden := range []string{"secretRef", "cookie", "token", "passTicket", "key"} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("credential projection leaked %q: %s", forbidden, encoded)
+		}
+	}
+	jobsPage, err := workspace.Jobs(context.Background(), WorkspaceJobQuery{Page: WorkspacePageRequest{Limit: 20}})
+	if err != nil || jobsPage.Items[0].Label != "Album Sync" || jobsPage.Items[0].Kind != "album_sync" {
+		t.Fatalf("Jobs() = %#v, %v", jobsPage, err)
+	}
+}
+
+func TestWorkspaceAlbumsAndCredentialsDegradeWhenAccountNamesAreUnavailable(t *testing.T) {
+	library := &workspaceLibrary{
+		albums:          domain.Page[domain.Album]{Items: []domain.Album{{ID: "album-1", AccountID: "account-1", Name: "Album"}}, Total: 1, Limit: 20},
+		accountNamesErr: fmt.Errorf("local name lookup: %w", ErrUnavailable),
+	}
+	workspace := NewWorkspace(New(Options{Runtime: runtimeenv.Dependencies{Profile: "fixture"}, Library: library, Jobs: &workspaceJobManager{}}))
+
+	albums, err := workspace.Albums(context.Background(), WorkspaceAlbumQuery{Page: WorkspacePageRequest{Limit: 20}})
+	if err != nil || len(albums.Items) != 1 || albums.Items[0].ID != "album-1" || albums.Items[0].AccountID != "account-1" || albums.Items[0].AccountName != "" || albums.Items[0].AccountNameAvailable {
+		t.Fatalf("Albums() fallback = %#v, %v", albums, err)
+	}
+	credentials, err := workspace.CredentialMetadata(context.Background(), []CredentialMetadata{{ID: "credential-1", AccountID: "account-1", Kind: "wechat", Status: "valid"}})
+	if err != nil || len(credentials) != 1 || credentials[0].ID != "credential-1" || credentials[0].AccountID != "account-1" || credentials[0].AccountName != "" || credentials[0].AccountNameAvailable {
+		t.Fatalf("CredentialMetadata() fallback = %#v, %v", credentials, err)
+	}
+
+	library.accountNamesErr = errors.New("database read failed")
+	if _, err := workspace.Albums(context.Background(), WorkspaceAlbumQuery{Page: WorkspacePageRequest{Limit: 20}}); err == nil {
+		t.Fatal("Albums swallowed unexpected account-name failure")
+	}
+	if _, err := workspace.CredentialMetadata(context.Background(), []CredentialMetadata{{ID: "credential-1", AccountID: "account-1"}}); err == nil {
+		t.Fatal("CredentialMetadata swallowed unexpected account-name failure")
 	}
 }
 
@@ -429,7 +633,7 @@ func TestWorkspacePaginationRejectsUnboundedOrInvalidRequests(t *testing.T) {
 		t.Fatalf("default page = %#v, %v", page, err)
 	}
 
-	for _, request := range []WorkspacePageRequest{{Offset: -1}, {Limit: -1}, {Limit: WorkspaceMaximumPageLimit + 1}} {
+	for _, request := range []WorkspacePageRequest{{Offset: -1}, {Offset: WorkspaceMaximumPageOffset + 1}, {Limit: -1}, {Limit: WorkspaceMaximumPageLimit + 1}} {
 		_, err := workspace.Jobs(context.Background(), WorkspaceJobQuery{Page: request})
 		var workspaceErr *WorkspaceError
 		if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInvalidArgument {

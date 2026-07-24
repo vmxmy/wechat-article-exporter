@@ -26,7 +26,12 @@ func (server *Server) maintenanceRead(writer http.ResponseWriter, request *http.
 			server.maintenanceError(writer, err)
 			return true
 		}
-		writeAPI(writer, http.StatusOK, value)
+		projected, err := server.workspace.CredentialMetadata(request.Context(), value)
+		if err != nil {
+			server.workspaceError(writer, err)
+			return true
+		}
+		writeAPI(writer, http.StatusOK, projected)
 	case "/api/v1/settings/proxies":
 		service := server.maintenanceService(writer)
 		if service == nil {

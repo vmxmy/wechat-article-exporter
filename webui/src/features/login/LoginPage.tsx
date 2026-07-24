@@ -1,4 +1,5 @@
 import { Button } from '@astryxdesign/core/Button'
+import { Selector } from '@astryxdesign/core/Selector'
 import { useCallback, useEffect, useState } from 'react'
 import type { MessageCatalog } from '../../i18n'
 import { useSessionStatus, useSwitchableAccounts, useWorkspaceMutations } from '../../lib/queries'
@@ -46,7 +47,7 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
   const switchIdentity = (id: string) => mutations.switchAccount.mutate(id, {
     onSuccess: (nextSession) => {
       setError(undefined)
-      setNotice(messages.login.switchComplete(nextSession.accountName ?? id))
+      setNotice(messages.login.switchComplete(nextSession.accountName?.trim() || messages.login.accountUnavailable))
     },
     onError: (reason) => setError(reason instanceof Error ? reason.message : messages.login.switchUnavailable)
   })
@@ -54,9 +55,10 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
     <section aria-labelledby="login-title">
       <header className="page-heading">
         <div>
-          <p className="eyebrow">{messages.navigation.workspace}</p>
+          <p className="eyebrow">{messages.navigation.system}</p>
           <h1 id="login-title">{messages.login.title}</h1>
           <p className="lede">{messages.login.description}</p>
+          <p>{messages.login.legacyDescription}</p>
         </div>
       </header>
       <div className="overview-grid login-grid">
@@ -64,7 +66,8 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
           <h2 id="session-status-title">{messages.login.sessionTitle}</h2>
           {session.isLoading ? <p role="status">{messages.login.checking}</p> : null}
           {session.isError ? <p role="alert">{messages.login.unavailable}</p> : null}
-          {session.data ? <dl className="facts-list"><div><dt>{messages.login.account}</dt><dd>{session.data.accountName ?? '—'}</dd></div><div><dt>{messages.login.state}</dt><dd>{messages.login.states[session.data.state] ?? session.data.state}</dd></div></dl> : null}
+          {session.data ? <dl className="facts-list"><div><dt>{messages.login.account}</dt><dd>{session.data.accountName?.trim() || (session.data.accountId ? messages.login.accountUnavailable : '—')}</dd></div><div><dt>{messages.login.state}</dt><dd>{messages.login.states[session.data.state] ?? messages.login.unknownState}</dd></div></dl> : null}
+          <p>{messages.login.manageGlobally}</p>
           {session.data?.state === 'authenticated' ? <div className="action-button-group"><Button label={messages.login.logout} variant="destructive" isLoading={mutations.logout.isPending} onClick={logout} /></div> : null}
         </section>
         <section className="workspace-panel" aria-labelledby="account-switch-title">
@@ -75,10 +78,7 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
           {session.data?.state === 'authenticated' && switchableAccounts.data?.available && switchableAccounts.data.accounts.length === 0 ? <p>{messages.login.switchEmpty}</p> : null}
           {session.data?.state === 'authenticated' && switchableAccounts.data?.available && switchableAccounts.data.accounts.length > 0 ? (
             <div className="action-button-group" aria-live="polite">
-              <label htmlFor="switchable-account">{messages.login.switchAccount}</label>
-              <select id="switchable-account" value={session.data?.accountId ?? ''} onChange={(event) => switchIdentity(event.target.value)} disabled={mutations.switchAccount.isPending}>
-                {switchableAccounts.data.accounts.map((account) => <option key={account.id} value={account.id}>{account.name || account.alias || account.id}</option>)}
-              </select>
+              <Selector label={messages.login.switchAccount} options={switchableAccounts.data.accounts.map((account) => ({ value: account.id, label: account.name.trim() || account.alias?.trim() || messages.login.accountUnavailable, description: account.alias?.trim() || undefined }))} value={session.data?.accountId ?? ''} onChange={switchIdentity} isDisabled={mutations.switchAccount.isPending} />
               {mutations.switchAccount.isPending ? <p role="status">{messages.login.switching}</p> : null}
             </div>
           ) : null}
@@ -87,7 +87,7 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
           <h2 id="qr-login-title">{messages.login.qrTitle}</h2>
           <p>{messages.login.qrDescription}</p>
           {qrCode ? <img className="qr-code" src={`data:image/png;base64,${qrCode}`} alt={messages.login.qrTitle} /> : null}
-          {loginState ? <p role="status">{messages.login.states[loginState] ?? loginState}</p> : null}
+          {loginState ? <p role="status">{messages.login.states[loginState] ?? messages.login.unknownState}</p> : null}
           {notice ? <p role="status">{notice}</p> : null}
           {error ? <p role="alert">{error}</p> : null}
           <div className="action-button-group">

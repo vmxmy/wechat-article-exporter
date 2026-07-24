@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 )
 
 func TestMaintenanceAPIFailsClosedWithoutExplicitServices(t *testing.T) {
@@ -117,6 +118,32 @@ func TestMaintenanceAPIUsesFacadesAndNeverEchoesSecretsOrPaths(t *testing.T) {
 	}
 	if body := readResponse(t, response); strings.Contains(body, "verify-secret") || strings.Contains(body, "/private") {
 		t.Fatalf("backup verification leaked sensitive content: %s", body)
+	}
+}
+
+func TestMaintenanceCredentialProjectionAddsLocalAccountNamesWithoutSecrets(t *testing.T) {
+	app := &apiApplication{accounts: domain.Page[domain.Account]{Items: []domain.Account{{ID: "account-1", Name: "Readable account"}}}}
+	credentials := &webCredentialMaintenance{items: []application.CredentialMetadata{
+		{ID: "credential-1", AccountID: "account-1", Kind: "wechat", Status: "valid"},
+		{ID: "credential-2", AccountID: "account-missing", Kind: "wechat", Status: "unknown"},
+	}}
+	server, client := startMaintenanceApplicationServer(t, app, application.NewMaintenance(application.MaintenanceOptions{Credentials: credentials}), nil)
+	base := authorizeAPI(t, client, server.URL())
+
+	response := get(t, client, base+"/api/v1/settings/credentials")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("credential list status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	body := readResponse(t, response)
+	for _, required := range []string{`"id":"credential-1"`, `"accountId":"account-1"`, `"accountName":"Readable account"`, `"accountNameAvailable":true`, `"id":"credential-2"`, `"accountNameAvailable":false`} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("credential projection missing %q: %s", required, body)
+		}
+	}
+	for _, forbidden := range []string{"secretRef", "cookie", "passTicket", "appMsgToken", "token-secret", "/private"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("credential projection leaked %q: %s", forbidden, body)
+		}
 	}
 }
 
@@ -350,8 +377,12 @@ func TestMaintenanceAPIPatchesExportPreferencesDefaults(t *testing.T) {
 }
 
 func startMaintenanceServer(t *testing.T, maintenance *application.MaintenanceService, storage *application.MaintenanceStorageService) (*Server, *http.Client) {
+	return startMaintenanceApplicationServer(t, &apiApplication{}, maintenance, storage)
+}
+
+func startMaintenanceApplicationServer(t *testing.T, app application.Application, maintenance *application.MaintenanceService, storage *application.MaintenanceStorageService) (*Server, *http.Client) {
 	t.Helper()
-	server, err := New(Options{Application: &apiApplication{}, Maintenance: maintenance, StorageMaintenance: storage})
+	server, err := New(Options{Application: app, Maintenance: maintenance, StorageMaintenance: storage})
 	if err != nil {
 		t.Fatal(err)
 	}

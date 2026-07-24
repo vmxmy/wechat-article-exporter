@@ -15,6 +15,49 @@ wechat-article web --no-open
 
 `web` 持续运行到按下 `Ctrl-C` 或命令上下文结束。它不支持 `--json`，因为 stdout 只保留给可复制的本地地址；运行日志写 stderr。
 
+## 工作区导航与日常操作
+
+嵌入式工作区是本地的 React/Vite/Astryx 单页应用；它通过 TanStack
+Query 读取同源 `/api/v1`，而不是另起开发服务器或连接项目运营的 Web
+服务。左侧导航按任务分组：
+
+| 分组 | 目的地 | 用途 |
+| --- | --- | --- |
+| Home | Home | 根据当前本地 session、账号、文章和失败任务推荐下一步。 |
+| Content | Accounts、Articles、Albums | 发现并同步账号，浏览本地文章与专辑。 |
+| Work | Jobs、Exports、Import URL | 观察持久任务、按步骤导出，或导入单个公开文章 URL。 |
+| System | Settings | 管理偏好、Credential、网络/代理、本地维护和诊断。 |
+
+右上角的全局 session 控件可从任何页面查看登录状态、切换可用账号或登出；`/login` 仍保留为兼容的深链接。Home 会优先推荐登录、添加账号、同步文章、继续浏览/导出，或处理失败任务。它显示的是本地 profile 的摘要，不能改变正在运行的工作区所绑定的 profile。
+
+正常资源列表优先显示账号名/别名、文章标题、专辑名、账号归属、任务名称和本地化状态。确切的稳定 ID 仍是所有操作的身份值；当名称不可用时，界面会给出可解释的本地回退，并可在 Technical details 中查看和复制完整 ID。不要把显示名称当作 API 身份，也不要从浏览器请求中构造或猜测 ID。
+
+## 浏览内容、筛选和保存视图
+
+Articles 默认提供关键字、账号、发布时间范围和状态。需要作者、专辑、消息类型、内容/评论/删除/原创/付费状态或互动指标时，打开 **More filters**。已应用的条件会显示为可读摘要，可逐项移除或一次清除；没有本地文章与筛选后无匹配结果也会显示不同的后续操作提示。
+
+账号和专辑选择器按名称（账号也可按别名）搜索，但在后台只提交稳定本地 ID。导出中的文章选择器同样按文章标题和所属账号名称远程搜索，因此可找到不在当前文章列表第一页的本地文章。所有选择器使用有界分页结果，不会把整个资料库加载到浏览器。专辑选项同时显示所属账号名称；若该名称不可用，页面会使用说明性回退而不会把完整 ID 当作普通名称显示。
+
+Saved queries 使用与 Articles 相同的可视化筛选模型，显示可读摘要并可复用。原始查询 JSON 只在明确打开的 Technical query JSON 模式中可见和编辑，并仍会经过验证；旧的 `/saved-queries` 深链接继续可用。文章、专辑、账号和任务列表中的选择会产生就近的上下文操作栏；详情面板不会清除当前筛选、页码或选择。
+
+## 三步导出
+
+Exports 按固定顺序完成：
+
+1. **Select scope**：选择本地文章、一个账号、一个专辑、一个保存视图，或从 Articles 交接的当前匹配结果。页面用名称和数量概述范围，但提交稳定 ID 或已验证的查询契约。
+2. **Format and options**：选择格式；页面只显示该格式允许的选项。
+3. **Destination and confirmation**：授权默认本地导出目录后即可排队，不需要输入主机路径；也可在已授权目录中创建受限子目录。排队后显示本地化任务名称和短引用，完整 job ID 位于 Technical details。
+
+默认目的地并不放宽目录边界：浏览器取得的仍是 opaque directory token，服务端仍执行输出根、路径穿越和 symlink 逃逸检查。文章或专辑页面交接到 Exports 也不会创建跨页面的文件权限或任意路径访问。
+
+## 设置、语言与窄屏
+
+Settings 设有辅助导航，将内容分为 **General/Preferences**、**Download/Export Defaults**、**Credentials**、**Network/Proxy**、**Storage Maintenance** 和 **Diagnostics**。常规偏好与危险维护操作分开；Credential 值和代理授权仍为只写，维护/信任/删除/恢复操作继续使用原有的精确确认、恢复说明和密钥边界。
+
+工作区提供 English 与简体中文。右上角的语言切换会保存在浏览器本地首选项；Settings 的 **Display language** 会同时保存 profile 的 `display.language`（仅允许 `en` 或 `zh-CN`），供 TUI 和新的工作区会话复用。
+
+在窄窗口，账号、文章、专辑、任务和导出记录从桌面表格重排为可读资源列表；移动导航抽屉会说明其用途和当前页。文章标题在桌面截断、在移动列表最多两行，完整标题仍可通过聚焦或详情访问。仅 manifest 一类本质二维的数据区域可以局部横向滚动，页面本身不应出现横向滚动。
+
 ## 本地性与隐私
 
 工作区固定绑定随机 IPv4 loopback 地址 `127.0.0.1`，不提供 host 或 port 参数，不能监听 `0.0.0.0`、局域网或公网地址，也不支持手机/其他电脑访问。每次启动都会生成新的高熵 bootstrap token；关闭后该 token 和所有浏览器 session 都会失效。
@@ -42,11 +85,9 @@ wechat-article profile list
 
 不要上传真实 session、Cookie、vault passphrase 或未脱敏的文章归档到 issue、截图或第三方文件服务。
 
-## 可访问性与语言
+## 可访问性
 
-浏览器工作区提供 English 与简体中文。右上角的语言切换会保存在浏览器本地首选项；Settings 的 **Display language** 会同时保存 profile 的 `display.language`（仅允许 `en` 或 `zh-CN`），供 TUI 和新的工作区会话复用。
-
-所有主导航、表格选择、表单、确认和任务控制都应可用键盘操作：使用 `Tab`/`Shift+Tab` 移动焦点，`Enter` 或 `Space` 触发聚焦控件。页面为控件提供可访问名称、可见焦点状态和状态/错误 live announcement；窄窗口会改为单列布局。遇到焦点丢失、读屏未宣告或键盘无法完成某项操作，请通过 `wechat-article diagnostics bundle --output ./diagnostics.zip` 收集脱敏诊断后报告问题。
+所有主导航、资源选择、表单、确认和任务控制都应可用键盘操作：使用 `Tab`/`Shift+Tab` 移动焦点，`Enter` 或 `Space` 触发聚焦控件。路由切换会把焦点移到新页面标题；移动导航抽屉、详情面板和确认对话框会管理焦点，并在关闭时恢复触发控件。页面为控件提供可访问名称、可见焦点状态和状态/错误 live announcement；在 390px 宽度与 200% 缩放的主要流程中不应出现整页横向滚动。遇到焦点丢失、读屏未宣告或键盘无法完成某项操作，请通过 `wechat-article diagnostics bundle --output ./diagnostics.zip` 收集脱敏诊断后报告问题。
 
 ## 排错
 
@@ -56,13 +97,15 @@ wechat-article profile list
 | 地址显示 401 | 一次性地址已经用过、工作区已关闭或 session 已过期；重新运行 `wechat-article web` 获取新地址。 |
 | 其他设备无法连接 | 这是预期安全边界；工作区只允许同机 `127.0.0.1`。 |
 | 页面无法加载或 API 不可用 | 保持 `web` 进程运行，确认地址仍是 `127.0.0.1`，再运行 `wechat-article status --json` 与 `wechat-article diagnostics status --json`。 |
-| 看不到另一入口创建的内容/任务 | 确认两个入口使用同一 active profile；切换 profile 后需要重启浏览器工作区。 |
+| 看不到另一入口创建的内容/任务 | 确认两个入口使用同一 active profile；切换 profile 后需要重启浏览器工作区。Home 中的推荐只反映当前 profile 的本地摘要。 |
+| 找不到账号、专辑或文章 | 在名称选择器中搜索名称或账号别名；导出文章选择器也可按文章标题或所属账号搜索。结果是有界分页的本地投影。若名称缺失，请打开 Technical details 核对稳定 ID，而不是把完整 ID 当作名称输入。 |
+| 筛选后没有文章 | 在 Articles 的 Applied filters 中逐项移除条件或使用 Clear all filters；资料库从未有文章时，按页面提示先同步账号。 |
 | 导出目录不可用 | 从导出页重新授权默认目录或创建其下子目录；不要尝试粘贴绝对路径。 |
 | 恢复提交后页面无法继续操作 | 这是预期行为：成功恢复会关闭本地服务器。重新运行 `wechat-article web`，使用新的地址打开工作区。 |
 | 归档、manifest 或 Credential 上传被拒绝 | restore 仅支持一个最多 2 GiB 的归档；完成、过期或关闭工作区后会清理。账户 manifest 和 Credential 均只接受单个受限 JSON 文件；重新选择文件后再试，且不要尝试上传任意其他文件。 |
 
 ## 当前浏览器范围
 
-工作区已经覆盖本地 session、账号/文章/专辑的分页查询、账号搜索与同步、账户 manifest 下载及上传导入、单 URL 导入、保存的文章查询、受限本地预览、带边界的作业详情与允许的控制、受控目录导出、从文章筛选或所选专辑交接的导出、导出 manifest/verification、opaque artifact 下载、精确确认后的输出目录打开、凭据/代理/安全偏好和 Credential JSON 上传、备份创建/验证/一次性 ZIP 下载、单归档恢复上传/staging/prepare/commit、完整性、GC 和诊断（包括 opaque diagnostic bundle 下载）。账号同步默认使用增量模式（由本地同步状态确定边界）；在 Accounts 中可明确改为全量同步，它不会沿用该边界。完整逐项对照见 [能力矩阵](../release/browser-capability-matrix.md)。
+工作区已经覆盖本地 session、任务导向的 Home/Content/Work/System 导航、账号/文章/专辑的分页查询与有界名称选择、账号搜索与同步、账户 manifest 下载及上传导入、单 URL 导入、可视化保存文章查询、受限本地预览、带边界的作业详情与允许的控制、三步受控目录导出、从文章筛选或所选专辑交接的导出、导出 manifest/verification、opaque artifact 下载、精确确认后的输出目录打开、分类的凭据/代理/安全偏好和 Credential JSON 上传、备份创建/验证/一次性 ZIP 下载、单归档恢复上传/staging/prepare/commit、完整性、GC 和诊断（包括 opaque diagnostic bundle 下载）。账号同步默认使用增量模式（由本地同步状态确定边界）；在 Accounts 中可明确改为全量同步，它不会沿用该边界。完整逐项对照见 [能力矩阵](../release/browser-capability-matrix.md)。
 
 未交付的浏览器能力不会被标记为 parity：通用的任意文件上传和超出已选专辑交接范围的批量导出工作流仍使用 Cobra 或 TUI。即使 manifest、Credential JSON 和恢复归档可由浏览器选择并上传，浏览器仍没有任意主机路径或通用文件访问 API；上传受单文件、大小和格式限制，staged archive、backup ZIP 和 artifact 下载/输出目录打开都受到 opaque capability 与精确确认的约束。文章预览及文章/元数据/评论/资源下载、单专辑遍历和批量下载会复用同一套持久作业；stdio MCP 则有意不提供 GUI、浏览器 session 或网络监听，只通过 stdio 和 profile policy 面向自动化。

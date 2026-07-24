@@ -21,6 +21,10 @@ const (
 	// limits. Adapters must page rather than turn a local browser request into a
 	// whole-library read.
 	WorkspaceMaximumPageLimit = 100
+	// WorkspaceMaximumPageOffset prevents local presentation adapters from
+	// issuing pathological deep-offset reads. It is intentionally independent
+	// of page size so both offset and numbered pagination share one bound.
+	WorkspaceMaximumPageOffset = 100_000
 )
 
 // WorkspaceErrorCode is the stable error vocabulary for local presentation
@@ -102,6 +106,10 @@ func (request WorkspacePageRequest) normalize() (WorkspacePageRequest, error) {
 	if request.Offset < 0 {
 		return WorkspacePageRequest{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "page offset must not be negative"}
 	}
+	if request.Offset > WorkspaceMaximumPageOffset {
+		return WorkspacePageRequest{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument,
+			Message: fmt.Sprintf("page offset must not exceed %d", WorkspaceMaximumPageOffset)}
+	}
 	if request.Limit < 0 {
 		return WorkspacePageRequest{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "page limit must not be negative"}
 	}
@@ -142,6 +150,7 @@ const (
 type WorkspaceJob struct {
 	ID               domain.JobID         `json:"id"`
 	Kind             string               `json:"kind"`
+	Label            string               `json:"label"`
 	State            domain.JobState      `json:"state"`
 	Profile          domain.ProfileID     `json:"profile,omitempty"`
 	CreatedAt        time.Time            `json:"createdAt"`
@@ -193,6 +202,17 @@ type WorkspaceAccountQuery struct {
 	Page    WorkspacePageRequest `json:"page"`
 }
 
+// WorkspaceAccountOption is the bounded selector projection for a saved local
+// account. Stable ID remains the submitted value; display-name availability is
+// explicit so clients can render a localized explained fallback without
+// presenting the identifier as if it were a name.
+type WorkspaceAccountOption struct {
+	ID                   domain.AccountID `json:"id"`
+	DisplayName          string           `json:"displayName,omitempty"`
+	DisplayNameAvailable bool             `json:"displayNameAvailable"`
+	Alias                string           `json:"alias,omitempty"`
+}
+
 type WorkspaceArticleQuery struct {
 	AccountID       string               `json:"accountId,omitempty"`
 	AlbumID         string               `json:"albumId,omitempty"`
@@ -230,20 +250,67 @@ type WorkspaceArticleQuery struct {
 // Stable IDs remain internal to local query and action contracts; the list
 // projects the owning account as a display name rather than exposing it.
 type WorkspaceArticle struct {
-	ID          domain.ArticleID `json:"id"`
-	Title       string           `json:"title"`
-	AccountName string           `json:"accountName,omitempty"`
-	Author      string           `json:"author,omitempty"`
-	PublishedAt time.Time        `json:"publishedAt,omitempty"`
-	State       string           `json:"state,omitempty"`
-	HasContent  bool             `json:"hasContent"`
-	HasComments bool             `json:"hasComments"`
+	ID                   domain.ArticleID `json:"id"`
+	Title                string           `json:"title"`
+	AccountName          string           `json:"accountName,omitempty"`
+	AccountNameAvailable bool             `json:"accountNameAvailable"`
+	Author               string           `json:"author,omitempty"`
+	PublishedAt          time.Time        `json:"publishedAt,omitempty"`
+	State                string           `json:"state,omitempty"`
+	HasContent           bool             `json:"hasContent"`
+	HasComments          bool             `json:"hasComments"`
+}
+
+// WorkspaceArticleOption is the minimal, human-readable article projection
+// used by a browser typeahead. Its stable ID remains private to the selection
+// contract while title and owning-account name make the result understandable.
+// It deliberately excludes content, metrics, resource data, and upstream IDs.
+type WorkspaceArticleOption struct {
+	ID                   domain.ArticleID `json:"id"`
+	Title                string           `json:"title"`
+	AccountName          string           `json:"accountName,omitempty"`
+	AccountNameAvailable bool             `json:"accountNameAvailable"`
 }
 
 type WorkspaceAlbumQuery struct {
 	AccountID string               `json:"accountId,omitempty"`
 	Keyword   string               `json:"keyword,omitempty"`
 	Page      WorkspacePageRequest `json:"page"`
+}
+
+// WorkspaceAlbum adds the owning account display projection to the existing
+// album wire fields. UpstreamID is retained for v1 additive compatibility; new
+// selector consumers use WorkspaceAlbumOption, which deliberately omits it.
+type WorkspaceAlbum struct {
+	ID                   domain.AlbumID   `json:"id"`
+	AccountID            domain.AccountID `json:"accountId,omitempty"`
+	AccountName          string           `json:"accountName,omitempty"`
+	AccountNameAvailable bool             `json:"accountNameAvailable"`
+	UpstreamID           string           `json:"upstreamId,omitempty"`
+	Name                 string           `json:"name"`
+	Description          string           `json:"description,omitempty"`
+	ArticleCount         int              `json:"articleCount"`
+	Paid                 bool             `json:"paid,omitempty"`
+}
+
+// WorkspaceAlbumOption is the minimal searchable album selector projection.
+// Both local stable IDs remain action values; no upstream identity or content
+// metadata is included.
+type WorkspaceAlbumOption struct {
+	ID                   domain.AlbumID   `json:"id"`
+	AccountID            domain.AccountID `json:"accountId,omitempty"`
+	DisplayName          string           `json:"displayName,omitempty"`
+	DisplayNameAvailable bool             `json:"displayNameAvailable"`
+	AccountName          string           `json:"accountName,omitempty"`
+	AccountNameAvailable bool             `json:"accountNameAvailable"`
+}
+
+// WorkspaceCredentialMetadata adds only a local account display name to the
+// existing secret-free credential metadata contract.
+type WorkspaceCredentialMetadata struct {
+	CredentialMetadata
+	AccountName          string `json:"accountName,omitempty"`
+	AccountNameAvailable bool   `json:"accountNameAvailable"`
 }
 
 type WorkspaceJobQuery struct {
@@ -395,8 +462,11 @@ type WorkspaceReader interface {
 	Runtime(context.Context) (WorkspaceRuntime, error)
 	Session(context.Context) (WorkspaceSession, error)
 	Accounts(context.Context, WorkspaceAccountQuery) (WorkspacePage[domain.Account], error)
+	AccountOptions(context.Context, WorkspaceAccountQuery) (WorkspacePage[WorkspaceAccountOption], error)
 	Articles(context.Context, WorkspaceArticleQuery) (WorkspacePage[WorkspaceArticle], error)
-	Albums(context.Context, WorkspaceAlbumQuery) (WorkspacePage[domain.Album], error)
+	ArticleOptions(context.Context, WorkspaceArticleQuery) (WorkspacePage[WorkspaceArticleOption], error)
+	Albums(context.Context, WorkspaceAlbumQuery) (WorkspacePage[WorkspaceAlbum], error)
+	AlbumOptions(context.Context, WorkspaceAlbumQuery) (WorkspacePage[WorkspaceAlbumOption], error)
 	SavedArticleQueries(context.Context, WorkspacePageRequest) (WorkspacePage[domain.SavedArticleQuery], error)
 	Jobs(context.Context, WorkspaceJobQuery) (WorkspacePage[WorkspaceJob], error)
 	JobDetails(context.Context, domain.JobID) (WorkspaceJobDetail, error)
@@ -490,10 +560,54 @@ func (workspace *Workspace) Accounts(ctx context.Context, input WorkspaceAccount
 	return workspacePage(result), workspaceError(err)
 }
 
-func (workspace *Workspace) Articles(ctx context.Context, input WorkspaceArticleQuery) (WorkspacePage[WorkspaceArticle], error) {
+func (workspace *Workspace) AccountOptions(ctx context.Context, input WorkspaceAccountQuery) (WorkspacePage[WorkspaceAccountOption], error) {
 	page, err := input.Page.normalize()
 	if err != nil {
+		return WorkspacePage[WorkspaceAccountOption]{}, err
+	}
+	result, err := workspace.application.QueryAccounts(ctx, domain.AccountQuery{Keyword: strings.TrimSpace(input.Keyword), Offset: page.Offset, Limit: page.Limit})
+	if err != nil {
+		return WorkspacePage[WorkspaceAccountOption]{}, workspaceError(err)
+	}
+	items := make([]WorkspaceAccountOption, 0, len(result.Items))
+	for _, account := range result.Items {
+		displayName := strings.TrimSpace(account.Name)
+		if displayName == "" {
+			displayName = strings.TrimSpace(account.Alias)
+		}
+		items = append(items, WorkspaceAccountOption{ID: account.ID, DisplayName: displayName, DisplayNameAvailable: displayName != "", Alias: strings.TrimSpace(account.Alias)})
+	}
+	return WorkspacePage[WorkspaceAccountOption]{Items: items, Total: result.Total, Offset: result.Offset, Limit: result.Limit}, nil
+}
+
+func (workspace *Workspace) Articles(ctx context.Context, input WorkspaceArticleQuery) (WorkspacePage[WorkspaceArticle], error) {
+	result, err := workspace.articlePage(ctx, input)
+	if err != nil {
 		return WorkspacePage[WorkspaceArticle]{}, err
+	}
+	return workspaceArticles(ctx, workspace.application, result)
+}
+
+func (workspace *Workspace) ArticleOptions(ctx context.Context, input WorkspaceArticleQuery) (WorkspacePage[WorkspaceArticleOption], error) {
+	result, err := workspace.articlePage(ctx, input)
+	if err != nil {
+		return WorkspacePage[WorkspaceArticleOption]{}, err
+	}
+	articles, err := workspaceArticles(ctx, workspace.application, result)
+	if err != nil {
+		return WorkspacePage[WorkspaceArticleOption]{}, err
+	}
+	items := make([]WorkspaceArticleOption, 0, len(articles.Items))
+	for _, article := range articles.Items {
+		items = append(items, WorkspaceArticleOption{ID: article.ID, Title: article.Title, AccountName: article.AccountName, AccountNameAvailable: article.AccountNameAvailable})
+	}
+	return WorkspacePage[WorkspaceArticleOption]{Items: items, Total: articles.Total, Offset: articles.Offset, Limit: articles.Limit}, nil
+}
+
+func (workspace *Workspace) articlePage(ctx context.Context, input WorkspaceArticleQuery) (domain.Page[domain.Article], error) {
+	page, err := input.Page.normalize()
+	if err != nil {
+		return domain.Page[domain.Article]{}, err
 	}
 	result, err := workspace.application.QueryArticles(ctx, domain.ArticleQuery{
 		AccountID: domain.AccountID(input.AccountID), AlbumID: domain.AlbumID(input.AlbumID), Keyword: strings.TrimSpace(input.Keyword),
@@ -506,9 +620,9 @@ func (workspace *Workspace) Articles(ctx context.Context, input WorkspaceArticle
 		Sorts: append([]domain.ArticleSort(nil), input.Sorts...), Offset: page.Offset, Limit: page.Limit,
 	})
 	if err != nil {
-		return WorkspacePage[WorkspaceArticle]{}, workspaceError(err)
+		return domain.Page[domain.Article]{}, workspaceError(err)
 	}
-	return workspaceArticles(ctx, workspace.application, result)
+	return result, nil
 }
 
 func workspaceArticles(ctx context.Context, application Application, page domain.Page[domain.Article]) (WorkspacePage[WorkspaceArticle], error) {
@@ -518,36 +632,116 @@ func workspaceArticles(ctx context.Context, application Application, page domain
 			accountIDs = append(accountIDs, article.AccountID)
 		}
 	}
-	accountNames := map[domain.AccountID]string{}
-	if len(accountIDs) > 0 {
-		accounts, ok := application.(interface {
-			AccountNames(context.Context, []domain.AccountID) (map[domain.AccountID]string, error)
-		})
-		if !ok {
-			return WorkspacePage[WorkspaceArticle]{}, workspaceError(fmt.Errorf("article account names: %w", ErrUnavailable))
-		}
-		resolved, err := accounts.AccountNames(ctx, accountIDs)
-		if err != nil {
-			return WorkspacePage[WorkspaceArticle]{}, workspaceError(err)
-		}
-		accountNames = resolved
+	accountNames, err := workspaceAccountNames(ctx, application, accountIDs)
+	if err != nil {
+		return WorkspacePage[WorkspaceArticle]{}, err
 	}
 	items := make([]WorkspaceArticle, 0, len(page.Items))
 	for _, article := range page.Items {
-		items = append(items, WorkspaceArticle{ID: article.ID, Title: article.Title, AccountName: strings.TrimSpace(accountNames[article.AccountID]),
+		accountName := strings.TrimSpace(accountNames[article.AccountID])
+		items = append(items, WorkspaceArticle{ID: article.ID, Title: article.Title, AccountName: accountName, AccountNameAvailable: accountName != "",
 			Author: article.Author, PublishedAt: article.PublishedAt, State: article.State, HasContent: article.HasContent, HasComments: article.HasComments})
 	}
 	return WorkspacePage[WorkspaceArticle]{Items: items, Total: page.Total, Offset: page.Offset, Limit: page.Limit}, nil
 }
 
-func (workspace *Workspace) Albums(ctx context.Context, input WorkspaceAlbumQuery) (WorkspacePage[domain.Album], error) {
+func (workspace *Workspace) Albums(ctx context.Context, input WorkspaceAlbumQuery) (WorkspacePage[WorkspaceAlbum], error) {
 	page, err := input.Page.normalize()
 	if err != nil {
-		return WorkspacePage[domain.Album]{}, err
+		return WorkspacePage[WorkspaceAlbum]{}, err
 	}
 	result, err := workspace.application.QueryAlbums(ctx, domain.AlbumQuery{AccountID: domain.AccountID(input.AccountID),
 		Keyword: strings.TrimSpace(input.Keyword), Offset: page.Offset, Limit: page.Limit})
-	return workspacePage(result), workspaceError(err)
+	if err != nil {
+		return WorkspacePage[WorkspaceAlbum]{}, workspaceError(err)
+	}
+	return workspaceAlbums(ctx, workspace.application, result)
+}
+
+func (workspace *Workspace) AlbumOptions(ctx context.Context, input WorkspaceAlbumQuery) (WorkspacePage[WorkspaceAlbumOption], error) {
+	albums, err := workspace.Albums(ctx, input)
+	if err != nil {
+		return WorkspacePage[WorkspaceAlbumOption]{}, err
+	}
+	items := make([]WorkspaceAlbumOption, 0, len(albums.Items))
+	for _, album := range albums.Items {
+		displayName := strings.TrimSpace(album.Name)
+		items = append(items, WorkspaceAlbumOption{ID: album.ID, AccountID: album.AccountID, DisplayName: displayName,
+			DisplayNameAvailable: displayName != "", AccountName: album.AccountName, AccountNameAvailable: album.AccountNameAvailable})
+	}
+	return WorkspacePage[WorkspaceAlbumOption]{Items: items, Total: albums.Total, Offset: albums.Offset, Limit: albums.Limit}, nil
+}
+
+func workspaceAlbums(ctx context.Context, application Application, page domain.Page[domain.Album]) (WorkspacePage[WorkspaceAlbum], error) {
+	accountIDs := make([]domain.AccountID, 0, len(page.Items))
+	for _, album := range page.Items {
+		if album.AccountID != "" {
+			accountIDs = append(accountIDs, album.AccountID)
+		}
+	}
+	accountNames, err := workspaceOptionalAccountNames(ctx, application, accountIDs)
+	if err != nil {
+		return WorkspacePage[WorkspaceAlbum]{}, err
+	}
+	items := make([]WorkspaceAlbum, 0, len(page.Items))
+	for _, album := range page.Items {
+		accountName := strings.TrimSpace(accountNames[album.AccountID])
+		items = append(items, WorkspaceAlbum{ID: album.ID, AccountID: album.AccountID, AccountName: accountName,
+			AccountNameAvailable: accountName != "", UpstreamID: album.UpstreamID, Name: album.Name, Description: album.Description,
+			ArticleCount: album.ArticleCount, Paid: album.Paid})
+	}
+	return WorkspacePage[WorkspaceAlbum]{Items: items, Total: page.Total, Offset: page.Offset, Limit: page.Limit}, nil
+}
+
+func workspaceAccountNames(ctx context.Context, application Application, ids []domain.AccountID) (map[domain.AccountID]string, error) {
+	if len(ids) == 0 {
+		return map[domain.AccountID]string{}, nil
+	}
+	accounts, ok := application.(interface {
+		AccountNames(context.Context, []domain.AccountID) (map[domain.AccountID]string, error)
+	})
+	if !ok {
+		return nil, workspaceError(fmt.Errorf("account names: %w", ErrUnavailable))
+	}
+	names, err := accounts.AccountNames(ctx, ids)
+	if err != nil {
+		return nil, workspaceError(err)
+	}
+	return names, nil
+}
+
+// workspaceOptionalAccountNames treats an absent optional capability as a
+// secondary-presentation fallback. Actual lookup failures remain observable;
+// otherwise database or authorization failures would look like ordinary
+// missing names and the browser could not offer a scoped retry.
+func workspaceOptionalAccountNames(ctx context.Context, application Application, ids []domain.AccountID) (map[domain.AccountID]string, error) {
+	names, err := workspaceAccountNames(ctx, application, ids)
+	if err == nil {
+		return names, nil
+	}
+	if errors.Is(err, ErrUnavailable) {
+		return map[domain.AccountID]string{}, nil
+	}
+	return nil, err
+}
+
+func (workspace *Workspace) CredentialMetadata(ctx context.Context, items []CredentialMetadata) ([]WorkspaceCredentialMetadata, error) {
+	accountIDs := make([]domain.AccountID, 0, len(items))
+	for _, item := range items {
+		if accountID := domain.AccountID(strings.TrimSpace(item.AccountID)); accountID != "" {
+			accountIDs = append(accountIDs, accountID)
+		}
+	}
+	accountNames, err := workspaceOptionalAccountNames(ctx, workspace.application, accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]WorkspaceCredentialMetadata, 0, len(items))
+	for _, item := range items {
+		accountName := strings.TrimSpace(accountNames[domain.AccountID(item.AccountID)])
+		result = append(result, WorkspaceCredentialMetadata{CredentialMetadata: item, AccountName: accountName, AccountNameAvailable: accountName != ""})
+	}
+	return result, nil
 }
 
 func (workspace *Workspace) SavedArticleQueries(ctx context.Context, request WorkspacePageRequest) (WorkspacePage[domain.SavedArticleQuery], error) {

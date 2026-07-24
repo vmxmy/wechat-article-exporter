@@ -122,7 +122,7 @@ func (service *Service) JobDetails(ctx context.Context, id domain.JobID) (Worksp
 	if limited {
 		items = items[:WorkspaceJobDetailMaximumItems]
 	}
-	result := WorkspaceJobDetail{Job: WorkspaceJob{ID: job.ID, Kind: job.Kind, State: job.State, Profile: job.Profile, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Counts: job.Counts, PermittedActions: service.PermittedJobActions(job.State)}, Items: make([]WorkspaceJobItemDetail, 0, len(items)), ItemsTotal: itemsTotal, ItemsLimited: limited,
+	result := WorkspaceJobDetail{Job: WorkspaceJob{ID: job.ID, Kind: job.Kind, Label: workspaceJobLabel(job.Kind), State: job.State, Profile: job.Profile, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Counts: job.Counts, PermittedActions: service.PermittedJobActions(job.State)}, Items: make([]WorkspaceJobItemDetail, 0, len(items)), ItemsTotal: itemsTotal, ItemsLimited: limited,
 		Logs: make([]WorkspaceJobLogDetail, 0, len(logs)), Lease: WorkspaceJobLeaseDetail{Active: lease.Active, ExpiresAt: lease.ExpiresAt}, RefreshedAt: service.runtime.Clock.Now()}
 	for _, item := range items {
 		result.Items = append(result.Items, WorkspaceJobItemDetail{ID: item.ID, State: item.State, AttemptCount: item.AttemptCount,

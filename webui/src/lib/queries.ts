@@ -1,7 +1,9 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getAccountPage,
+  getAccountSelectorPage,
   getAlbumPage,
+  getAlbumSelectorPage,
   getArticlePage,
   getArticleDetail,
   getArticleComments,
@@ -22,10 +24,12 @@ import {
   type AccountInput,
   type AccountSyncMode,
   type AlbumPageParams,
+  type AlbumSelectorPageParams,
   type AlbumTraversalOrder,
   type ArticleDownloadKind,
   type ArticlePageParams,
   type PageParams,
+  type SelectorPageParams,
   type RestoreConflictPolicy
   ,type SavedQueryInput
   ,type ConfirmedJobControlAction
@@ -38,12 +42,14 @@ export const queryKeys = {
   storage: ['storage'] as const,
   snapshot: ['snapshot'] as const,
   accounts: (params: PageParams) => ['accounts', params] as const,
+  accountSelectors: (params: SelectorPageParams) => ['selectors', 'accounts', params] as const,
   articles: (params: ArticlePageParams) => ['articles', params] as const,
   articleResourceSummary: (id: string) => ['articles', id, 'resources'] as const,
   articleDetail: (id: string) => ['articles', id, 'detail'] as const,
   articleComments: (id: string, page: number, pageSize: number) => ['articles', id, 'comments', page, pageSize] as const,
   articleCommentReplies: (articleID: string, commentID: string, page: number, pageSize: number) => ['articles', articleID, 'comments', commentID, 'replies', page, pageSize] as const,
   albums: (params: AlbumPageParams) => ['albums', params] as const,
+  albumSelectors: (params: AlbumSelectorPageParams) => ['selectors', 'albums', params] as const,
   jobs: (params: PageParams) => ['jobs', params] as const,
   jobDetail: (id: string) => ['jobs', id, 'detail'] as const,
   exports: (params: PageParams) => ['exports', params] as const,
@@ -80,6 +86,11 @@ export function useWorkspaceSnapshot() {
 
 export function useAccountPage(params: PageParams) {
   return usePageQuery(queryKeys.accounts(params), ({ signal }) => getAccountPage(params, signal))
+}
+
+/** Automatically loads the saved-local-account selector, unlike discovery. */
+export function useAccountSelectorPage(params: SelectorPageParams) {
+  return usePageQuery(queryKeys.accountSelectors(params), ({ signal }) => getAccountSelectorPage(params, signal))
 }
 
 export function useArticlePage(params: ArticlePageParams) {
@@ -120,6 +131,11 @@ export function useArticleCommentReplies(articleID: string | undefined, commentI
 
 export function useAlbumPage(params: AlbumPageParams) {
   return usePageQuery(queryKeys.albums(params), ({ signal }) => getAlbumPage(params, signal))
+}
+
+/** Automatically loads the saved-local-album selector, unlike discovery. */
+export function useAlbumSelectorPage(params: AlbumSelectorPageParams) {
+  return usePageQuery(queryKeys.albumSelectors(params), ({ signal }) => getAlbumSelectorPage(params, signal))
 }
 
 export function useJobPage(params: PageParams) {

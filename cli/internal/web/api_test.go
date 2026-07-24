@@ -136,7 +136,10 @@ func TestSessionAccountSwitchingAPIUsesSafeWorkspaceDTOs(t *testing.T) {
 }
 
 func TestSnapshotPollingRevisionAdvancesOnlyForObservedStateChanges(t *testing.T) {
-	now := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
+	// The HTTP cookie jar evaluates Expires against the real clock. Keep the
+	// controlled clock in the future so bootstrap session cookies remain valid
+	// regardless of when this deterministic snapshot test is run.
+	now := time.Now().UTC().Truncate(time.Second)
 	app := &apiApplication{
 		runtime: domain.RuntimeStatus{Profile: "fixture-profile", Storage: domain.StorageStatus{Articles: 1}},
 		session: wechat.Session{State: wechat.SessionMissing},
@@ -638,6 +641,232 @@ func TestAccountCRUDAndSearchUseAuthenticatedWorkspaceFacade(t *testing.T) {
 	}
 }
 
+func TestSelectorAndReadableProjectionAPIContracts(t *testing.T) {
+	app := &apiApplication{
+		accounts: domain.Page[domain.Account]{Items: []domain.Account{
+			{ID: "account-1", Name: "Readable", Alias: "alias", FakeID: "private-fakeid", Description: "private-description", AvatarURL: "https://private.example/avatar"},
+			{ID: "account-2", FakeID: "private-fakeid-2"},
+		}, Total: 102},
+		articles: domain.Page[domain.Article]{Items: []domain.Article{
+			{ID: "article-1", AccountID: "account-1", Title: "Known owner"},
+			{ID: "article-2", AccountID: "account-missing", Title: "Unknown owner"},
+		}, Total: 2},
+		albums: domain.Page[domain.Album]{Items: []domain.Album{
+			{ID: "album-1", AccountID: "account-1", Name: "Album", UpstreamID: "private-upstream", Description: "private-description", ArticleCount: 3},
+			{ID: "album-2", AccountID: "account-missing"},
+		}, Total: 2},
+		jobs: domain.Page[domain.Job]{Items: []domain.Job{{ID: "11111111-1111-1111-1111-111111111111", Kind: "article_download"}}, Total: 1},
+	}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+
+	response := get(t, client, base+"/api/v1/selectors/accounts?search=read&page=2&page_size=25")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("account selector status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	accountBody := readResponse(t, response)
+	if app.accountQuery != (domain.AccountQuery{Keyword: "read", Offset: 25, Limit: 25}) {
+		t.Fatalf("account selector query=%#v", app.accountQuery)
+	}
+	for _, required := range []string{`"id":"account-1"`, `"displayName":"Readable"`, `"displayNameAvailable":true`, `"id":"account-2"`, `"displayNameAvailable":false`, `"pageSize":25`} {
+		if !strings.Contains(accountBody, required) {
+			t.Fatalf("account selector missing %q: %s", required, accountBody)
+		}
+	}
+	for _, forbidden := range []string{"private-fakeid", "fakeid", "private-description", "avatarUrl", "private.example", "syncCursor"} {
+		if strings.Contains(accountBody, forbidden) {
+			t.Fatalf("account selector leaked %q: %s", forbidden, accountBody)
+		}
+	}
+
+	response = get(t, client, base+"/api/v1/selectors/albums?search=album&limit=20")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("album selector status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	albumBody := readResponse(t, response)
+	for _, required := range []string{`"id":"album-1"`, `"accountId":"account-1"`, `"displayName":"Album"`, `"accountName":"Readable"`, `"accountNameAvailable":true`, `"id":"album-2"`, `"displayNameAvailable":false`, `"accountNameAvailable":false`} {
+		if !strings.Contains(albumBody, required) {
+			t.Fatalf("album selector missing %q: %s", required, albumBody)
+		}
+	}
+	for _, forbidden := range []string{"private-upstream", "upstreamId", "private-description", "description", "articleCount"} {
+		if strings.Contains(albumBody, forbidden) {
+			t.Fatalf("album selector leaked %q: %s", forbidden, albumBody)
+		}
+	}
+
+	response = get(t, client, base+"/api/v1/articles?limit=20")
+	articleBody := readResponse(t, response)
+	for _, required := range []string{`"accountName":"Readable"`, `"accountNameAvailable":true`, `"accountNameAvailable":false`} {
+		if !strings.Contains(articleBody, required) {
+			t.Fatalf("article projection missing %q: %s", required, articleBody)
+		}
+	}
+	if strings.Contains(articleBody, `"accountId"`) {
+		t.Fatalf("article list exposed account IDs: %s", articleBody)
+	}
+
+	response = get(t, client, base+"/api/v1/albums?limit=20")
+	legacyAlbumBody := readResponse(t, response)
+	for _, required := range []string{`"id":"album-1"`, `"upstreamId":"private-upstream"`, `"accountName":"Readable"`, `"accountNameAvailable":true`} {
+		if !strings.Contains(legacyAlbumBody, required) {
+			t.Fatalf("additive album response missing %q: %s", required, legacyAlbumBody)
+		}
+	}
+
+	response = get(t, client, base+"/api/v1/jobs?limit=20")
+	jobBody := readResponse(t, response)
+	if !strings.Contains(jobBody, `"kind":"article_download"`) || !strings.Contains(jobBody, `"label":"Article Download"`) {
+		t.Fatalf("job projection lost compatibility or label: %s", jobBody)
+	}
+
+	for _, target := range []string{
+		"/api/v1/selectors/accounts?limit=101",
+		"/api/v1/selectors/albums?page=1&page_size=101",
+	} {
+		response = get(t, client, base+target)
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("GET %s status=%d body=%s", target, response.StatusCode, readResponse(t, response))
+		}
+		assertAPIError(t, response, "invalid_argument")
+	}
+}
+
+func TestArticleSelectorAPIForwardsBoundedQueryAndExposesOnlyHumanReadableOptions(t *testing.T) {
+	app := &apiApplication{
+		accounts: domain.Page[domain.Account]{Items: []domain.Account{
+			{ID: "account-1", Name: "Readable account"},
+		}},
+		articles: domain.Page[domain.Article]{Items: []domain.Article{
+			{
+				ID: "article-action-1", AccountID: "account-1", Title: "Known owner", Author: "private-author",
+				Digest: "private-body", CanonicalURL: "https://private.example/article", CoverURL: "https://private.example/cover",
+				Aid: "private-aid", AppMsgID: 42, ItemIndex: 3, MessageType: 1, HasContent: true,
+				ReadCount: 100, OldLikeCount: 20, ShareCount: 10, LikeCount: 5, CommentCount: 2,
+			},
+			{ID: "article-action-2", AccountID: "account-missing", Title: "Unknown owner"},
+		}, Total: 17},
+	}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+
+	response := get(t, client, base+"/api/v1/selectors/articles?accountId=account-1&albumId=album-1&search=fixture&author=writer&state=published&publishedFrom=2026-07-01T08%3A00%3A00Z&publishedTo=2026-07-02T08%3A00%3A00Z&hasContent=true&messageType=1&messageType=2&readMin=10&readMax=20&sort=published%3Adesc&page=3&page_size=10")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("article selector status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	body := readResponse(t, response)
+	var selectorResponse struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &selectorResponse); err != nil {
+		t.Fatal(err)
+	}
+	if len(selectorResponse.Data) != 2 || !reflect.DeepEqual(selectorResponse.Data[0], map[string]any{
+		"id":                   "article-action-1",
+		"title":                "Known owner",
+		"accountName":          "Readable account",
+		"accountNameAvailable": true,
+	}) {
+		t.Fatalf("article selector projection = %#v", selectorResponse.Data)
+	}
+	if _, ok := selectorResponse.Data[1]["accountName"]; ok || selectorResponse.Data[1]["accountNameAvailable"] != false {
+		t.Fatalf("article selector fallback = %#v", selectorResponse.Data[1])
+	}
+	if app.articleQuery.AccountID != "account-1" || app.articleQuery.AlbumID != "album-1" || app.articleQuery.Keyword != "fixture" || app.articleQuery.Author != "writer" || app.articleQuery.State != "published" ||
+		app.articleQuery.Offset != 20 || app.articleQuery.Limit != 10 || !app.articleQuery.PublishedFrom.Equal(time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)) || !app.articleQuery.PublishedTo.Equal(time.Date(2026, 7, 2, 8, 0, 0, 0, time.UTC)) ||
+		app.articleQuery.HasContent == nil || !*app.articleQuery.HasContent || !reflect.DeepEqual(app.articleQuery.MessageTypes, []int{1, 2}) || app.articleQuery.ReadMin == nil || *app.articleQuery.ReadMin != 10 || app.articleQuery.ReadMax == nil || *app.articleQuery.ReadMax != 20 ||
+		!reflect.DeepEqual(app.articleQuery.Sorts, []domain.ArticleSort{{Field: "published", Direction: domain.SortDescending}}) {
+		t.Fatalf("article selector query = %#v", app.articleQuery)
+	}
+	for _, required := range []string{
+		`"id":"article-action-1"`, `"title":"Known owner"`, `"accountName":"Readable account"`, `"accountNameAvailable":true`,
+		`"id":"article-action-2"`, `"title":"Unknown owner"`, `"accountNameAvailable":false`, `"page":3`, `"pageSize":10`, `"total":17`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("article selector missing %q: %s", required, body)
+		}
+	}
+	for _, forbidden := range []string{
+		`"accountId"`, "private-body", "private-author", "private-aid", "canonicalUrl", "coverUrl", "digest", "appmsgId",
+		"messageType", "readCount", "oldLikeCount", "shareCount", "likeCount", "commentCount", "hasContent", "albums",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("article selector leaked %q: %s", forbidden, body)
+		}
+	}
+	if !strings.Contains(body, `"id":"article-action-1"`) {
+		t.Fatalf("article selector changed stable action ID: %s", body)
+	}
+
+	for _, target := range []string{
+		"/api/v1/selectors/articles?limit=101",
+		"/api/v1/selectors/articles?offset=-1&limit=10",
+		"/api/v1/selectors/articles?offset=100001&limit=10",
+		"/api/v1/selectors/articles?page=10002&page_size=10",
+		"/api/v1/selectors/articles?page=0&page_size=10",
+		"/api/v1/selectors/articles?deleted=maybe",
+		"/api/v1/selectors/articles?readMin=20&readMax=10",
+		"/api/v1/selectors/articles?unknown=1",
+	} {
+		response = get(t, client, base+target)
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("GET %s status=%d body=%s", target, response.StatusCode, readResponse(t, response))
+		}
+		assertAPIError(t, response, "invalid_argument")
+	}
+}
+
+func TestWorkspaceListQueriesRejectOverlongTextBeforeReachingApplication(t *testing.T) {
+	app := &apiApplication{}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+	longSearch := strings.Repeat("x", maximumWorkspaceQueryTextLength+1)
+
+	for _, target := range []string{
+		"/api/v1/accounts?search=" + longSearch,
+		"/api/v1/albums?keyword=" + longSearch,
+		"/api/v1/selectors/articles?search=" + longSearch,
+	} {
+		response := get(t, client, base+target)
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("GET %s status=%d body=%s", target, response.StatusCode, readResponse(t, response))
+		}
+		assertAPIError(t, response, "invalid_argument")
+	}
+	if app.accountQueryCalls != 0 || app.albumQueryCalls != 0 || app.articleQueryCalls != 0 {
+		t.Fatalf("overlong query reached application: account calls=%d album calls=%d article calls=%d", app.accountQueryCalls, app.albumQueryCalls, app.articleQueryCalls)
+	}
+}
+
+func TestArticleSelectorRequiresSessionAndOnlyPermitsGET(t *testing.T) {
+	app := &apiApplication{}
+	server, client := startAPIApplicationServer(t, app)
+	base := strings.TrimSuffix(strings.Split(server.URL(), "?")[0], "/")
+
+	response := get(t, client, base+"/api/v1/selectors/articles")
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated selector status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "authentication_required")
+	if !reflect.DeepEqual(app.articleQuery, domain.ArticleQuery{}) {
+		t.Fatalf("unauthenticated selector reached application: %#v", app.articleQuery)
+	}
+
+	base = authorizeAPI(t, client, server.URL())
+	request := requestWith(t, http.MethodPost, base+"/api/v1/selectors/articles", strings.NewReader(`{}`), map[string]string{"Content-Type": "application/json"})
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusMethodNotAllowed || response.Header.Get("Allow") != http.MethodGet {
+		t.Fatalf("POST selector status=%d allow=%q body=%s", response.StatusCode, response.Header.Get("Allow"), readResponse(t, response))
+	}
+	assertAPIError(t, response, "method_not_allowed")
+	if !reflect.DeepEqual(app.articleQuery, domain.ArticleQuery{}) {
+		t.Fatalf("POST selector reached application: %#v", app.articleQuery)
+	}
+}
+
 func TestAccountAPIRejectsInvalidMutationInputsBeforeWorkspaceCalls(t *testing.T) {
 	app := &apiApplication{}
 	server, client := startAPIApplicationServer(t, app)
@@ -904,6 +1133,8 @@ type apiApplication struct {
 	repliesOffset        int
 	repliesLimit         int
 	accountsErr          error
+	accountQueryCalls    int
+	articleQueryCalls    int
 	accountQuery         domain.AccountQuery
 	articleQuery         domain.ArticleQuery
 	albumQuery           domain.AlbumQuery
@@ -1023,6 +1254,7 @@ func (app *apiApplication) SwitchAccount(_ context.Context, accountID string) (w
 	return app.switched, nil
 }
 func (app *apiApplication) QueryAccounts(_ context.Context, query domain.AccountQuery) (domain.Page[domain.Account], error) {
+	app.accountQueryCalls++
 	app.accountQuery = query
 	page := app.accounts
 	page.Offset, page.Limit = query.Offset, query.Limit
@@ -1046,6 +1278,7 @@ func (app *apiApplication) SearchAccounts(_ context.Context, query domain.Accoun
 	return page, nil
 }
 func (app *apiApplication) QueryArticles(_ context.Context, query domain.ArticleQuery) (domain.Page[domain.Article], error) {
+	app.articleQueryCalls++
 	app.articleQuery = query
 	page := app.articles
 	page.Offset, page.Limit = query.Offset, query.Limit

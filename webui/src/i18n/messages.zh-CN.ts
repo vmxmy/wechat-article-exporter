@@ -3,14 +3,17 @@ export const zhCN = {
     name: '文章导出器',
     local: '本地工作区',
     privacy: '仅限本机回环访问 · 数据保留在本地',
-    beta: 'Beta',
-    readOnly: '只读'
+    localOnly: '仅在此设备上运行'
   },
   navigation: {
-    workspace: '工作区',
-    library: '资料库',
-    operations: '操作',
-    overview: '概览',
+    home: '首页',
+    content: '内容',
+    work: '工作',
+    system: '系统',
+    workspace: '首页',
+    library: '内容',
+    operations: '工作',
+    overview: '首页概览',
     login: '登录',
     import: '导入 URL',
     accounts: '账号',
@@ -22,7 +25,10 @@ export const zhCN = {
     settings: '设置'
   },
   a11y: {
-    skip: '跳至工作区内容'
+    skip: '跳至工作区内容',
+    navigation: '工作区导航',
+    openNavigation: '打开工作区导航',
+    currentPage: (page: string) => `当前页面：${page}`
   },
   localeSwitch: 'Switch to English',
   connection: {
@@ -40,12 +46,32 @@ export const zhCN = {
     runtimeTitle: '运行时',
     sessionTitle: '会话',
     storageTitle: '本地存储',
-    unavailable: '实时本地详情暂不可用。P0 API 正在接入期间，页面保持只读。',
+    unavailable: '暂时无法获取实时本地详情，请确认本地工作区仍在运行。',
     sessionAccount: '账号',
     sessionState: '状态',
     runtimeProfile: 'Profile',
     runtimeVersion: '版本',
-    storageCounts: (accounts: number, articles: number, albums: number, jobs: number) => `${accounts} 个账号 · ${articles} 篇文章 · ${albums} 个专辑 · ${jobs} 个任务`
+    storageCounts: (accounts: number, articles: number, albums: number, jobs: number) => `${accounts} 个账号 · ${articles} 篇文章 · ${albums} 个专辑 · ${jobs} 个任务`,
+    primaryActionTitle: '建议的下一步',
+    secondaryActionsTitle: '继续工作',
+    actions: {
+      signInTitle: '登录微信',
+      signInDescription: '先连接本地微信会话，再发现或同步账号。',
+      signIn: '登录',
+      addAccountTitle: '添加第一个账号',
+      addAccountDescription: '发现或保存账号，让本地工作区知道要同步哪些内容。',
+      addAccount: '添加账号',
+      syncTitle: '同步文章记录',
+      syncDescription: '账号已经就绪。同步账号以填充本地文章资料库。',
+      sync: '选择账号并同步',
+      browseTitle: '继续处理文章',
+      browseDescription: '浏览本地资料库，或导出此设备上已有的内容。',
+      browse: '浏览文章',
+      export: '导出文章',
+      failedJobsTitle: (count: number) => `${count} 个失败任务需要处理`,
+      failedJobsDescription: '先查看失败原因，再继续其他后台工作。',
+      failedJobs: '查看失败任务'
+    }
   },
   unavailableActions: {
     confirmationTitle: '需要确认',
@@ -55,9 +81,16 @@ export const zhCN = {
   login: {
     title: '微信登录',
     description: '查看当前本地会话，或启动二维码登录流程。',
+    legacyDescription: '此旧深链接继续可用；也可从全局会话控件查看状态、切换账号或退出登录。',
+    manageGlobally: '可在任意页面通过工作区顶部的会话控件切换账号或退出登录。',
     sessionTitle: '当前会话',
+    sessionMenu: '会话',
+    signedOut: '会话 · 未登录',
+    accountUnavailable: '已登录账号',
+    manageSession: '管理登录',
     account: '账号',
     state: '状态',
+    unknownState: '暂无法确定状态',
     checking: '正在检查本地会话…',
     unavailable: '无法加载本地会话状态。',
     qrTitle: '二维码登录',
@@ -82,7 +115,7 @@ export const zhCN = {
     description: '粘贴一个公开文章 URL，将其导入本地工作区。',
     url: '文章 URL',
     placeholder: 'https://mp.weixin.qq.com/s/…',
-    submit: '导入 URL', force: '内容已存在时重新下载', queued: (id: string) => `已排队导入任务 ${id}。`, failed: '无法将 URL 加入队列。',
+    submit: '导入 URL', force: '内容已存在时重新下载', queued: (reference: string) => `导入已加入队列。参考号：${reference}`, failed: '无法将 URL 加入队列。', technicalDetails: '技术详情', jobID: '任务 ID', copyJobID: '复制任务 ID',
     note: '导入会创建持久化本地下载任务，不会将 URL 上传到项目运营的服务。'
   },
   exports: {
@@ -103,6 +136,15 @@ export const zhCN = {
       savedQuery: '已保存查询', savedQueryPlaceholder: '选择已保存查询', matchingQuery: '匹配文章查询（JSON）', matching: '导出匹配查询',
       active: (label: string) => `当前范围：${label}`, explicit: (count: number) => `${count} 个明确文章 ID`,
       accountLabel: (id: string) => `账号 ${id}`, albumLabel: (id: string) => `专辑 ${id}`, albumsLabel: (count: number) => `已选 ${count} 个专辑`, savedQueryLabel: (name: string) => `已保存查询 ${name}`, matchingLabel: '当前匹配筛选条件'
+    },
+    workflow: {
+      stages: '导出步骤', scope: '选择范围', scopeDescription: '选择要导出的本地文章、账号、专辑、已保存查询或当前结果。', scopeType: '范围类型',
+      selectedArticles: '已选文章', selectedArticlesDescription: '从本地资料库中选择文章标题。', selectedArticlesEmpty: '没有可选择的本地文章。',
+      oneAccount: '一个账号', oneAccountDescription: '导出一个账号保存的全部文章。', oneAlbum: '一个专辑', oneAlbumDescription: '导出一个专辑中的全部文章。',
+      savedQuery: '已保存查询', savedQueryDescription: '使用一个已保存的本地查询。', matching: '当前匹配结果', matchingDescription: '使用从文章资料库交接的查询。',
+      chooseAccount: '选择账号', chooseAlbum: '选择专辑', useCurrentResults: '使用当前结果', format: '格式与选项', formatDescription: '选择格式，并只显示该格式允许的选项。',
+      destination: '目标位置与确认', destinationDescription: '使用已授权的默认目标位置。浏览器不会接收本机路径。', authorizeDefaultDescription: '授权默认本地目标位置后继续，无需输入路径。', destinationReady: '默认目标位置已可用于本次导出。', optionalDestination: '可选目标位置详情',
+      continueToFormat: '继续选择格式', continueToDestination: '继续选择目标位置', back: '返回', currentAction: '当前导出操作', technicalDetails: '技术详情', copyValue: '复制值', savedAccountFallback: '已保存账号', savedAlbumFallback: '已保存专辑', selectedArticlesLabel: (count: number) => `已选 ${count} 篇文章`, matchingSummary: '当前结果', noMatchingFilters: '全部本地文章', recordLabel: (format: string) => `${format.toUpperCase()} 导出`, queued: (jobLabel: string, reference: string) => `${jobLabel}已加入队列。参考号：${reference}`, jobLabel: '导出任务', jobID: '任务 ID', exportID: '导出 ID', provenanceGeneration: '溯源代次'
     },
     articleIds: '文章 ID',
     articleIdsHint: '每行输入一个稳定文章 ID，或用逗号分隔。',
@@ -167,6 +209,7 @@ export const zhCN = {
     verificationValid: (count: number) => `验证通过：已验证 ${count} 个输出文件。`,
     verificationInvalid: (count: number) => `验证发现问题，已检查 ${count} 个输出文件。`,
     verificationIssues: '验证问题',
+    verificationIssue: (position: number) => `输出文件 ${position}`,
     artifactTitle: '产物下载与输出目录',
     artifactDescription: 'Manifest 下载使用不透明的 artifact 能力。打开输出目录需要针对该导出的精确确认值；浏览器不会发送路径。',
     openAction: '打开输出目录',
@@ -180,13 +223,15 @@ export const zhCN = {
     title: '设置与维护',
     description: '管理浏览器安全的本地设置，并执行明确的维护检查。此处绝不显示密钥值或本机路径。',
     loading: '正在加载本地设置…', unavailable: '一项本地维护能力暂不可用。', retry: '重试', actionFailed: '无法完成本地维护操作。',
-    credentials: { title: '凭据', description: '仅列出元数据。输入的凭据字段只写入，导入后会从浏览器中清除。', empty: '没有可用的凭据元数据。', import: '导入凭据', validate: '验证凭据', validating: '正在验证凭据…', validationPassed: '凭据验证通过。可以导入这些已输入的值。', validationFailed: '凭据验证失败。导入前请检查或刷新已输入的值。', validationHint: '验证只检查当前输入的仅写入值，不会导入或保留它们。', remove: '移除', removeConfirmation: (id: string) => `remove-credential:${id}`, removeConfirmationLabel: '移除此凭据的精确确认字符串', removeConfirmationHint: '请原样输入此值。它只会移除所选凭据元数据及其密钥字节。', confirmRemove: '移除凭据', cancelRemove: '取消移除', nickname: '昵称', biz: '业务 ID（仅写入）', uin: 'UIN（仅写入）', key: 'Key（仅写入）', passTicket: 'Pass ticket（仅写入）', wapSid2: 'WAP SID2（仅写入）', appMsgToken: 'App message token（仅写入）', cookie: 'Cookie（仅写入）', optional: '可选', imported: '已导入凭据。密钥值未保留在浏览器中。', file: '凭据 JSON 文件', fileHint: '所选文件仅在本机流式导入，随后会从表单中清除。不会保留文件名或内容。', fileImported: '凭据文件已导入。浏览器未保留密钥值或文件详情。', columns: { account: '账号', kind: '类型', status: '状态', updated: '更新时间' } },
-    proxies: { title: '代理', description: '代理授权仅写入。credential-trusted 路由必须先披露，并在创建前输入精确确认值。', empty: '尚未配置代理路由。', add: '添加代理', remove: '移除', removeConfirmation: (id: string) => `remove-proxy:${id}`, removeConfirmationLabel: '移除此代理路由的精确确认字符串', removeConfirmationHint: '请原样输入此值。它只会移除所选代理路由；不会显示授权信息或路径。', confirmRemove: '移除代理', cancelRemove: '取消移除', enable: '启用', disable: '停用', test: '测试', name: '名称', endpoint: '端点', authorization: '授权信息（仅写入）', trust: '信任等级', publicOnly: '仅公开', credentialTrusted: '凭据可信', priority: '优先级', classes: '请求类别', disclosure: '凭据披露', disclosureRequired: '此路由可能接收：', confirmation: '精确确认值', confirmationHint: '请原样复制此值；它仅适用于当前拟创建的凭据可信路由。', health: '健康状态', probe: '测试结果', enabled: '已启用', disabled: '已停用', columns: { name: '名称', endpoint: '端点', trust: '信任', priority: '优先级', health: '健康', state: '状态', actions: '操作' } },
-    preferences: { title: '偏好设置', description: '只能编辑安全的设置。导出目标和其他本机路径会被刻意隐藏。', save: '保存偏好设置', saved: '偏好设置已保存。', downloadConcurrency: '下载并发数', forceContent: '强制下载正文', metadataOverrides: '元数据覆盖正文', directFirst: '优先尝试直连', fallbackEnabled: '允许代理回退', language: '显示语言', languageEnglish: 'English', languageChinese: '简体中文', namingTemplate: '导出命名模板', maximumNameBytes: '文件名最大字节数', collisionPolicy: '冲突策略', collisionFail: '安全失败', collisionSkip: '跳过已有输出', collisionReplace: '替换已有输出', collisionSuffix: '追加后缀', excelIncludeContent: 'Excel：包含文章正文', jsonIncludeContent: 'JSON：包含文章正文', jsonIncludeComments: 'JSON：包含本地已存储的评论', htmlIncludeComments: 'HTML：包含本地已存储的评论', exportDefaultsHint: '这些默认值仅适用于未来的 CLI 和 TUI 导出；不会修改当前网页导出表单，也不会创建任务。' },
-    backups: { title: '备份', description: '创建本地备份、下载一次性归档，或使用不透明的备份 ID 验证。', create: '创建备份', created: '备份已创建。', download: '下载备份归档', verify: '验证备份', backupId: '备份 ID', valid: '备份验证通过。', invalid: '备份验证报告了失败项。', restoreTitle: '恢复', restoreDescription: '选择一个本地备份归档，设定名称冲突处理方式，然后暂存以获得一次性恢复确认。', archive: '备份归档', policy: '冲突策略', refuse: '拒绝冲突', rename: '重命名冲突项', stage: '暂存归档以恢复', staging: '正在暂存归档…', confirmation: '精确的一次性恢复确认字符串', confirmationHint: '请原样复制显示的值。提交后将替换本地工作区并关闭此浏览器会话。', commit: '恢复并关闭工作区', destructiveWarning: '破坏性操作：恢复会替换当前本地工作区。此浏览器会话中无法撤销。', terminalTitle: '恢复已完成', terminalMessage: '本地工作区已关闭。请重新运行 wechat-article web 以打开它。' },
+    navigation: { label: '设置分区', general: '常规与偏好设置', downloadExport: '下载与导出默认值', credentials: '凭据', network: '网络与代理', storage: '存储维护', diagnostics: '诊断' },
+    credentials: { title: '凭据', description: '仅列出元数据。输入的凭据字段只写入，导入后会从浏览器中清除。', importTitle: '导入凭据', listTitle: '已保存的凭据元数据', accountUnavailable: '已保存账号', technicalDetails: '凭据技术详情', accountId: '账号 ID', copyAccountId: '复制账号 ID', empty: '没有可用的凭据元数据。', import: '导入凭据', validate: '验证凭据', validating: '正在验证凭据…', validationPassed: '凭据验证通过。可以导入这些已输入的值。', validationFailed: '凭据验证失败。导入前请检查或刷新已输入的值。', validationHint: '验证只检查当前输入的仅写入值，不会导入或保留它们。', remove: '移除', removed: '凭据已移除。', removeConfirmation: (id: string) => `remove-credential:${id}`, removeConfirmationLabel: '移除此凭据的精确确认字符串', removeConfirmationHint: '请原样输入此值。它只会移除所选凭据元数据及其密钥字节。', confirmRemove: '移除凭据', cancelRemove: '取消移除', nickname: '昵称', biz: '业务 ID（仅写入）', uin: 'UIN（仅写入）', key: 'Key（仅写入）', passTicket: 'Pass ticket（仅写入）', wapSid2: 'WAP SID2（仅写入）', appMsgToken: 'App message token（仅写入）', cookie: 'Cookie（仅写入）', optional: '可选', imported: '已导入凭据。密钥值未保留在浏览器中。', file: '凭据 JSON 文件', fileHint: '所选文件仅在本机流式导入，随后会从表单中清除。不会保留文件名或内容。', fileImported: '凭据文件已导入。浏览器未保留密钥值或文件详情。', columns: { account: '账号', kind: '类型', status: '状态', updated: '更新时间' } },
+    proxies: { title: '代理', description: '代理授权仅写入。凭据可信路由必须先披露，并在创建前输入精确确认值。', addTitle: '添加代理路由', listTitle: '已配置的代理路由', endpointPlaceholder: 'https://proxy.example', empty: '尚未配置代理路由。', add: '添加代理', added: '代理路由已添加。', remove: '移除', removed: '代理路由已移除。', removeConfirmation: (id: string) => `remove-proxy:${id}`, removeConfirmationLabel: '移除此代理路由的精确确认字符串', removeConfirmationHint: '请原样输入此值。它只会移除所选代理路由；不会显示授权信息或路径。', confirmRemove: '移除代理', cancelRemove: '取消移除', enable: '启用', enabledNotice: '代理路由已启用。', disable: '停用', disabledNotice: '代理路由已停用。', test: '测试', tested: '代理检查已完成。', name: '名称', endpoint: '端点', authorization: '授权信息（仅写入）', trust: '信任等级', publicOnly: '仅公开', credentialTrusted: '凭据可信', publicOnlyExplanation: '仅公开路由绝不会接收携带凭据的请求。', credentialTrustedExplanation: '凭据可信路由只有在完成下方披露和精确确认后，才可能接收经身份验证请求的凭据。', priority: '优先级', classes: '请求类别', disclosure: '凭据披露', disclosureRequired: '此路由可能接收：', confirmation: '精确确认值', confirmationHint: '请原样复制此值；它仅适用于当前拟创建的凭据可信路由。', health: '健康状态', probe: '测试结果', enabled: '已启用', disabled: '已停用', columns: { name: '名称', endpoint: '端点', trust: '信任', priority: '优先级', health: '健康', state: '状态', actions: '操作' } },
+    preferences: { title: '偏好设置', description: '只能编辑安全的设置。导出目标和其他本机路径会被刻意隐藏。', downloadDefaults: '下载默认值', exportDefaults: '导出默认值', save: '保存偏好设置', saved: '偏好设置已保存。', downloadConcurrency: '下载并发数', forceContent: '强制下载正文', metadataOverrides: '元数据覆盖正文', directFirst: '优先尝试直连', fallbackEnabled: '允许代理回退', language: '显示语言', languageEnglish: 'English', languageChinese: '简体中文', namingTemplate: '导出命名模板', maximumNameBytes: '文件名最大字节数', collisionPolicy: '冲突策略', collisionFail: '安全失败', collisionSkip: '跳过已有输出', collisionReplace: '替换已有输出', collisionSuffix: '追加后缀', excelIncludeContent: 'Excel：包含文章正文', jsonIncludeContent: 'JSON：包含文章正文', jsonIncludeComments: 'JSON：包含本地已存储的评论', htmlIncludeComments: 'HTML：包含本地已存储的评论', exportDefaultsHint: '这些默认值仅适用于未来的 CLI 和 TUI 导出；不会修改当前网页导出表单，也不会创建任务。' },
+    storage: { description: '创建或验证本地备份、查看完整性，然后再进入隔离的恢复和清理区域。', dangerEyebrow: '危险区域', dangerTitle: '破坏性恢复与清理', dangerDescription: '这些操作会影响本地工作区存储。需要恢复时请先确认已有最新备份，并原样输入服务端提供的每一个确认字符串。' },
+    backups: { title: '备份', description: '创建本地备份、下载一次性归档，或使用不透明的备份 ID 验证。', create: '创建备份', created: '备份已创建。', download: '下载备份归档', verify: '验证备份', backupId: '备份 ID', valid: '备份验证通过。', invalid: '备份验证报告了失败项。', summaryCreated: '创建时间', summarySize: '大小', summaryObjects: '存储对象', technicalDetails: '备份技术详情', checksum: 'SHA-256', copyChecksum: '复制备份 SHA-256', restoreTitle: '恢复', restoreDescription: '选择一个本地备份归档，设定名称冲突处理方式，然后暂存以获得一次性恢复确认。', archive: '备份归档', policy: '冲突策略', refuse: '拒绝冲突', rename: '重命名冲突项', stage: '暂存归档以恢复', staging: '正在暂存归档…', confirmation: '精确的一次性恢复确认字符串', confirmationHint: '请原样复制显示的值。提交后将替换本地工作区并关闭此浏览器会话。', commit: '恢复并关闭工作区', destructiveWarning: '破坏性操作：恢复会替换当前本地工作区。此浏览器会话中无法撤销。', terminalTitle: '恢复已完成', terminalMessage: '本地工作区已关闭。请重新运行 wechat-article web 以打开它。' },
     integrity: { title: '完整性', description: '读取本地存储的安全完整性报告。', checked: '检查时间', issues: '个问题', noIssues: '未报告完整性问题。', columns: { kind: '类型', message: '信息', repairable: '可修复', recommendation: '建议' } },
-    gc: { title: '垃圾回收', description: '请先生成计划。应用时必须输入该计划返回的一次性精确确认值。', plan: '生成 GC 计划', apply: '一次性应用此计划', planned: 'GC 计划已生成。', planExpired: '此计划可能已过期。重试前请生成新计划。', generated: '生成时间', expires: '过期时间', confirmation: '一次性精确确认值', totals: '计划回收量', result: 'GC 已完成。', categories: { objects: '未引用对象', temporary: '临时文件', debug: '过期调试捕获', logs: '已完成任务日志' } },
-    diagnostics: { title: '诊断', description: '仅显示安全摘要；详细路径、密钥和原始后端错误均被排除。', collected: '收集时间', empty: '未报告诊断检查。', createBundle: '创建诊断包', creatingBundle: '正在创建诊断包…', bundleReady: '诊断包已可下载。', bundleDescription: '下载链接使用一次性、会过期的不透明句柄。浏览器不会显示或发送本机路径。', downloadBundle: '下载诊断包', bundleExpires: '下载过期时间', bundleChecksum: 'SHA-256', columns: { check: '检查项', status: '状态', summary: '摘要' } },
+    gc: { title: '垃圾回收', description: '请先生成计划。应用时必须输入该计划返回的一次性精确确认值。', plan: '生成 GC 计划', apply: '一次性应用此计划', planned: 'GC 计划已生成。', planExpired: '此计划可能已过期。重试前请生成新计划。', generated: '生成时间', expires: '过期时间', confirmation: '一次性精确确认值', totals: '计划回收量', quantity: (count: string, bytes: string) => `${count} 项 · ${bytes}`, result: 'GC 已完成。', categories: { objects: '未引用对象', temporary: '临时文件', debug: '过期调试捕获', logs: '已完成任务日志' } },
+    diagnostics: { title: '诊断', description: '仅显示安全摘要；详细路径、密钥和原始后端错误均被排除。', collected: '收集时间', empty: '未报告诊断检查。', createBundle: '创建诊断包', creatingBundle: '正在创建诊断包…', bundleReady: '诊断包已可下载。', bundleDescription: '下载链接使用一次性、会过期的不透明句柄。浏览器不会显示或发送本机路径。', summaryCreated: '创建时间', summarySize: '大小', technicalDetails: '诊断包技术详情', checksum: 'SHA-256', copyChecksum: '复制诊断包 SHA-256', downloadBundle: '下载诊断包', bundleExpires: '下载过期时间', bundleChecksum: 'SHA-256', columns: { check: '检查项', status: '状态', summary: '摘要' } },
     common: { yes: '是', no: '否', bytes: (count: number) => `${new Intl.NumberFormat().format(count)} B`, countBytes: (count: number, bytes: number) => `${count} 项 · ${new Intl.NumberFormat().format(bytes)} B` }
   },
   articles: {
@@ -216,6 +261,17 @@ export const zhCN = {
       title: '高级筛选', advanced: '高级筛选', advancedHint: '筛选条件与本地文章 API 使用同一套查询字段。翻页或导出匹配结果前请先应用更改。', invalid: '请检查查询值：日期必须使用 RFC3339，且最小值不能超过最大值。',
       apply: '应用筛选', reset: '重置筛选', accountId: '账号 ID', albumId: '专辑 ID', author: '作者', state: '状态', messageTypes: '消息类型（逗号分隔）', hasContent: '已下载正文', hasComments: '已下载评论', deleted: '已删除', original: '原创文章', paid: '付费文章', any: '不限', yes: '是', no: '否',
       publishedFrom: '发布时间起点（RFC3339）', publishedTo: '发布时间终点（RFC3339）', readMin: '最少阅读数', readMax: '最多阅读数', oldLikeMin: '最少旧版点赞数', oldLikeMax: '最多旧版点赞数', shareMin: '最少分享数', shareMax: '最多分享数', likeMin: '最少点赞数', likeMax: '最多点赞数', commentMin: '最少评论数', commentMax: '最多评论数', weCoinMin: '最少微信豆', weCoinMax: '最多微信豆', mediaSecondsMin: '最短媒体时长（秒）', mediaSecondsMax: '最长媒体时长（秒）'
+    },
+    ux: {
+      moreFilters: '更多筛选', appliedFilters: '已应用的筛选条件', clearFilters: '清除全部筛选', removeFilter: (label: string) => `移除${label}筛选`,
+      savedViews: '已保存视图', savedViewsPlaceholder: '选择已保存视图', saveView: '保存当前视图', openDetails: (title: string) => `打开“${title}”的详情`, details: '详情', closeDetails: '关闭文章详情', selectedCount: (count: number) => `已选择 ${count} 项`, selectionActions: '所选文章操作', moreActions: '更多操作',
+      firstUseTitle: '本地文章资料库还是空的', firstUseDescription: '请选择一个账号并开始同步，将文章记录保存到此设备。', firstUseAction: '选择要同步的账号',
+      filteredEmptyTitle: '没有文章符合这些筛选条件', filteredEmptyDescription: '请调整已应用的筛选条件，或清除全部筛选以返回本地资料库。', filteredEmptyAction: '清除全部筛选',
+      accountUnavailable: '所选账号', accountNameUnavailable: '账号名称暂不可用', albumUnavailable: '所选专辑', accountDescription: '按名称或别名搜索已保存账号；结果仅保留在本机。', albumDescription: '按名称搜索已保存专辑，每项下方显示所属账号。', selectorNoResults: '没有匹配的本地结果。', duplicateSelection: (position: number, total: number) => `同名结果 ${position} / ${total}`, dateFrom: '发布时间范围开始', dateTo: '发布时间范围结束', messageTypePlaceholder: '选择消息类型',
+      messageTypes: { '1': '文字消息', '2': '图片消息', '3': '语音消息', '4': '视频消息', '6': '图文文章' },
+      moreFilterDescription: '使用更多本地文章属性，而不会让常用筛选条件变得拥挤。', technicalDetails: '技术详情', copyArticleID: '复制文章 ID',
+      metrics: { reads: '阅读数', oldLikes: '旧版点赞', likes: '点赞', shares: '分享', comments: '评论', captured: '采集时间' },
+      savedQuery: { visualEditor: '可视化查询编辑器', visualDescription: '使用与文章资料库相同的筛选条件构建此已保存视图。', technicalMode: '技术查询 JSON', technicalDescription: '仅用于高级诊断。JSON 通过验证后才会替换可视化筛选条件。', rawJSON: '查询 JSON', applyTechnical: '应用技术 JSON', invalidTechnical: '技术查询必须是受支持的有效文章筛选对象。', savedSummary: '已保存筛选摘要', editingVisual: '正在编辑可视化筛选条件' }
     },
     actions: {
       title: '已选文章操作',
@@ -270,10 +326,10 @@ export const zhCN = {
   resources: {
     accounts: {
       title: '账号',
-      description: '已保存的本地账号按受限服务端分页展示。此只读 Beta 暂不提供账号修改和同步控制。',
+      description: '已保存的本地账号按受限服务端分页展示。选择账号后可同步、编辑、导出或管理本地记录。',
       loading: '正在加载本地账号页…', unavailable: '本地 accounts API 尚不可用。', empty: '没有与查询匹配的已保存账号。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '账号分页', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见账号列',
       columns: { name: '账号', alias: '别名', articles: '文章数', synced: '最近同步', state: '同步状态' },
-      actions: { title: '账号操作', description: '发现账号、保存本地账号记录，或为一个已选账号启动同步。', search: '搜索发现', fakeid: '账号 fakeid', name: '账号名称', alias: '别名', discover: '发现账号', discoveryResults: '发现结果', discoveryEmpty: '没有匹配此发现搜索的账号。', useCandidate: '使用此候选账号', candidateSelected: (name: string) => `已选择 ${name}。请检查账号详情，然后保存本地账号。`, add: '保存账号', saved: (name: string) => `已保存 ${name}。现在可以开始同步。`, edit: '更新所选账号', remove: '删除所选账号', sync: '同步所选账号', syncMode: '同步模式', incremental: '增量同步', full: '全量同步', incrementalHint: '使用最新本地同步状态，刷新新增和已变更的文章列表记录。', fullHint: '不依赖本地同步边界，获取当前可用的文章列表。', downloadManifest: '下载账号清单', importManifest: '导入账号清单', manifestHint: '所选 JSON 清单仅在本机上传，随后立即从控件中清除。本页面不会保留文件名或内容。', manifestImported: (added: number, merged: number, unchanged: number) => `账号清单已导入：新增 ${added} 个，合并 ${merged} 个，未变更 ${unchanged} 个。`, manifestFailed: '无法导入账号清单。', selectOne: '请先仅选择一个账号。', deleteTitle: '删除所选账号', deleteConfirm: '删除所选本地账号记录？此操作无法撤销。', deleteConfirmation: (ids: readonly string[]) => `delete-accounts:${ids.join(',')}`, deleteConfirmationLabel: '删除这些账号的精确确认', deleteConfirmationHint: '请准确输入该值。它只会授权删除所选的本地账号记录。', confirmDelete: '删除账号', cancelDelete: '保留账号', actionFailed: '无法完成账号操作。' }
+      actions: { title: '账号操作', description: '发现账号、保存本地账号记录，或为一个已选账号启动同步。', search: '搜索发现', fakeid: '账号 fakeid', fakeidHint: '仅当无法通过发现找到账号时使用。保存手工录入的账号时需要此技术标识。', technicalDetails: '高级技术详情', name: '账号名称', alias: '别名', discover: '发现账号', discoveryResults: '发现结果', discoveryEmpty: '没有匹配此发现搜索的账号。', useCandidate: '使用此候选账号', candidateSelected: (name: string) => `已选择 ${name}。请检查账号详情，然后保存本地账号。`, add: '保存账号', saved: (name: string) => `已保存 ${name}。现在可以开始同步。`, edit: '更新所选账号', remove: '删除所选账号', sync: '同步所选账号', syncMode: '同步模式', incremental: '增量同步', full: '全量同步', incrementalHint: '使用最新本地同步状态，刷新新增和已变更的文章列表记录。', fullHint: '不依赖本地同步边界，获取当前可用的文章列表。', downloadManifest: '下载账号清单', importManifest: '导入账号清单', manifestHint: '所选 JSON 清单仅在本机上传，随后立即从控件中清除。本页面不会保留文件名或内容。', manifestImported: (added: number, merged: number, unchanged: number) => `账号清单已导入：新增 ${added} 个，合并 ${merged} 个，未变更 ${unchanged} 个。`, manifestFailed: '无法导入账号清单。', selectOne: '请先仅选择一个账号。', deleteTitle: '删除所选账号', deleteConfirm: '删除所选本地账号记录？此操作无法撤销。', deleteConfirmation: (ids: readonly string[]) => `delete-accounts:${ids.join(',')}`, deleteConfirmationLabel: '删除这些账号的精确确认', deleteConfirmationHint: '请准确输入该值。它只会授权删除所选的本地账号记录。', confirmDelete: '删除账号', cancelDelete: '保留账号', actionFailed: '无法完成账号操作。' }
     },
     albums: {
       title: '专辑',
@@ -281,7 +337,7 @@ export const zhCN = {
       loading: '正在加载本地专辑页…', unavailable: '本地 albums API 尚不可用。', empty: '没有与查询匹配的专辑。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '专辑分页', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见专辑列',
       columns: { name: '专辑', articles: '文章数', paid: '付费', description: '简介' },
       filters: { title: '专辑筛选', description: '筛选会在本地服务端完成，再返回受限的分页结果。', accountId: '账号 ID', keyword: '专辑关键词' },
-      actions: { title: '专辑操作', description: '1 至 50 个所选专辑会在同一个共享持久化任务中可恢复地遍历；全部遍历提交后可创建一个文章下载任务。', order: '遍历顺序', forward: '正序', reverse: '逆序', traverse: '遍历所选专辑', download: '遍历并批量下载', export: '导出所选专辑', selectOne: '请先选择一个带所属账号的已保存专辑。', selectAtLeastOne: '请先选择 1 至 50 个已保存专辑。', queued: (id: string) => `专辑任务 ${id} 已排队。`, failed: '无法为专辑创建任务。' }
+      actions: { title: '专辑操作', description: '1 至 50 个所选专辑会在同一个共享持久化任务中可恢复地遍历；全部遍历提交后可创建一个文章下载任务。', order: '遍历顺序', forward: '正序', reverse: '逆序', traverse: '遍历所选专辑', download: '遍历并批量下载', export: '导出所选专辑', selectOne: '请先选择一个带所属账号的已保存专辑。', selectAtLeastOne: '请先选择 1 至 50 个已保存专辑。', queued: '专辑任务已加入队列，正在打开任务页面…', failed: '无法为专辑创建任务。' }
     },
     jobs: {
       title: '任务',
@@ -289,7 +345,7 @@ export const zhCN = {
       loading: '正在加载本地任务快照…', unavailable: '本地 jobs 快照 API 尚不可用。', empty: '尚未记录持久任务。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '任务分页', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见任务列',
       columns: { kind: '类型', state: '状态', created: '创建时间', updated: '更新时间', counts: '进度' },
       actions: { title: '任务控制', description: '暂停、继续、重试或取消一个已选持久化任务。', start: '启动任务', pause: '暂停所选任务', resume: '继续所选任务', retry: '重试所选任务', cancel: '取消所选任务', selectOne: '请先仅选择一个任务。', pauseTitle: '暂停所选任务', retryTitle: '重试所选任务', cancelTitle: '取消所选任务', confirmPause: '要暂停此任务吗？请先输入此所选任务的精确凭证。', confirmRetry: '要重试此任务吗？请先输入此所选任务的精确凭证。', confirmCancel: '要取消此任务吗？这可能中断本地工作；请先输入精确凭证。', pauseConfirmation: (id: string) => `pause-job:${id}`, retryConfirmation: (id: string) => `retry-job:${id}`, cancelConfirmationProof: (id: string) => `cancel-job:${id}`, confirmationLabel: '此任务操作的精确确认', confirmationHint: '请准确输入该值。它只会授权此所选任务操作。', cancelConfirmation: '保持任务运行', actionFailed: '无法完成任务操作。' },
-      detail: { title: '任务详情', description: '重连或刷新后会重新读取受限的本地状态。不会显示日志字段、任务载荷、执行者身份或路径。', refresh: '刷新详情', refreshing: '正在刷新详情…', loading: '正在加载任务详情…', unavailable: '无法获取任务详情，可安全重试。', items: '任务项', itemsLimited: (shown: number, total: number) => `显示 ${shown} / ${total} 个任务项。`, noItems: '该任务没有已记录的任务项。', logs: '最近日志', noLogs: '没有已记录的受限日志。', lease: '执行租约', leaseActive: '有效', leaseInactive: '无效', expires: '到期时间', attempts: '尝试次数', errorClass: '错误类别', refreshed: '最近刷新' }
+      detail: { title: '任务详情', description: '重连或刷新后会重新读取受限的本地状态。不会显示日志字段、任务载荷、执行者身份或路径。', refresh: '刷新详情', refreshing: '正在刷新详情…', loading: '正在加载任务详情…', unavailable: '无法获取任务详情，可安全重试。', items: '任务项', itemsLimited: (shown: number, total: number) => `显示 ${shown} / ${total} 个任务项。`, noItems: '该任务没有已记录的任务项。', logs: '最近日志', noLogs: '没有已记录的受限日志。', lease: '执行租约', leaseActive: '有效', leaseInactive: '无效', expires: '到期时间', attempts: '尝试次数', errorClass: '错误类别', refreshed: '最近刷新', attention: '需要处理的任务项', reason: '原因', impact: '影响', nextAction: '下一步', retryAction: '重试此任务以继续处理受影响的工作。', refreshAction: '刷新此任务以查看最新本地状态。', networkReason: '本地工作区无法连接到所需服务。', unknownReason: '无法完成此任务项。', itemNotCompleted: '受影响的任务项尚未完成。', technicalDetails: '技术详情', jobID: '任务 ID', profile: '配置档案', copyID: '复制 ID', copyValue: '复制值' }
     },
     savedQueries: {
       title: '已保存查询',

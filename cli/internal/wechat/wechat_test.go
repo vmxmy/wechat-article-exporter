@@ -385,7 +385,10 @@ func TestPersistedSessionSurvivesClientAndProcessRuntimeRecreation(t *testing.T)
 }
 
 func TestCompleteLoginPersistsTokenCookieAttributesAndIdentity(t *testing.T) {
-	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	// The HTTP cookie jar evaluates Expires against the real clock, so use a
+	// real future expiry rather than a fixed calendar date that eventually
+	// becomes expired while the client test clock still considers it valid.
+	now := time.Now().UTC().Truncate(time.Second)
 	expires := now.Add(48 * time.Hour)
 	store := secrets.NewMemoryStore()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

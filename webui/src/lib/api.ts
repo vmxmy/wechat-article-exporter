@@ -41,6 +41,23 @@ export interface PageParams {
   readonly direction?: 'asc' | 'desc'
 }
 
+/**
+ * Bounded numbered pagination shared by local selector endpoints. Selector
+ * values are intentionally small browser-safe projections rather than the
+ * full account or album resource records.
+ */
+export interface SelectorPageParams {
+  readonly page: number
+  readonly pageSize: number
+  readonly search?: string
+}
+
+export interface AlbumSelectorPageParams extends SelectorPageParams {
+  readonly accountId?: string
+}
+
+export type ArticleSelectorPageParams = SelectorPageParams
+
 export interface AlbumPageParams {
   readonly page: number
   readonly pageSize: number
@@ -95,6 +112,14 @@ export interface AccountRecord {
   readonly syncCompleted?: boolean
 }
 
+/** Safe, bounded projection returned by GET /selectors/accounts. */
+export interface AccountOption {
+  readonly id: string
+  readonly displayName?: string
+  readonly displayNameAvailable: boolean
+  readonly alias?: string
+}
+
 export type AccountSyncMode = 'incremental' | 'full'
 
 export interface ArticleRecord {
@@ -102,12 +127,21 @@ export interface ArticleRecord {
   readonly title: string
   readonly accountId?: string
   readonly accountName?: string
+  readonly accountNameAvailable: boolean
   readonly author?: string
   readonly publishedAt: string | null
   readonly state?: string
   readonly status?: string
   readonly hasContent?: boolean
   readonly hasComments?: boolean
+}
+
+/** Safe, bounded projection returned by GET /selectors/articles. */
+export interface ArticleOption {
+  readonly id: string
+  readonly title: string
+  readonly accountName?: string
+  readonly accountNameAvailable: boolean
 }
 
 export type ArticleDownloadKind = 'article' | 'metadata' | 'comments' | 'resources'
@@ -163,15 +197,28 @@ export interface ArticleComments {
 export interface AlbumRecord {
   readonly id: string
   readonly accountId?: string
+  readonly accountName?: string
+  readonly accountNameAvailable: boolean
   readonly name: string
   readonly description?: string
   readonly articleCount: number
   readonly paid?: boolean
 }
 
+/** Safe, bounded projection returned by GET /selectors/albums. */
+export interface AlbumOption {
+  readonly id: string
+  readonly accountId?: string
+  readonly displayName?: string
+  readonly displayNameAvailable: boolean
+  readonly accountName?: string
+  readonly accountNameAvailable: boolean
+}
+
 export interface JobRecord {
   readonly id: string
   readonly kind: string
+  readonly label: string
   readonly state: string
   readonly profile?: string
   readonly createdAt: string
@@ -382,6 +429,8 @@ export interface AccountManifestImportResult { readonly report: AccountManifestI
 export interface CredentialMetadata {
   readonly id: string
   readonly accountId: string
+  readonly accountName?: string
+  readonly accountNameAvailable: boolean
   readonly kind: string
   readonly status: string
   readonly validatedAt?: string
@@ -472,12 +521,37 @@ export interface DiagnosticBundleReceipt { readonly handle: string; readonly cre
 
 export interface ArticlePageParams extends PageParams, ArticleQuery {}
 
+/**
+ * Browser-local display metadata accompanying an export action contract. It
+ * deliberately carries no identifiers: stable IDs and validated queries stay
+ * exclusively in ExportSelection, while this shape lets the next route render
+ * a human-readable scope without re-querying arbitrary selector pages.
+ */
+export interface ExportHandoffPresentation {
+  readonly articles?: readonly ExportHandoffArticlePresentation[]
+  readonly matching?: ExportHandoffMatchingPresentation
+}
+
+export interface ExportHandoffArticlePresentation {
+  readonly title: string
+  readonly accountName?: string
+}
+
+export interface ExportHandoffMatchingPresentation {
+  readonly total: number
+  readonly accountName?: string
+  readonly albumName?: string
+}
+
 export interface ExportHandoff {
   readonly selection: ExportSelection
   readonly label: string
+  readonly presentation?: ExportHandoffPresentation
 }
 
 const exportHandoffStorageKey = 'wechat-article.export-handoff.v1'
+let pendingExportHandoffForStrictMount: ExportHandoff | undefined
+let hasPendingExportHandoffForStrictMount = false
 const articleQueryHandoffStorageKey = 'wechat-article.article-query-handoff.v1'
 
 export async function getRuntimeStatus(signal?: AbortSignal): Promise<RuntimeStatus> {
@@ -513,6 +587,20 @@ export async function switchAccount(id: string): Promise<SessionStatus> {
   return mutate<SessionStatus>(`session/accounts/${encodeURIComponent(id)}/switch`, 'POST', {})
 }
 export async function searchAccounts(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<AccountRecord>> { return getPage<AccountRecord>('accounts/search', params, signal) }
+export async function getAccountSelectorPage(params: SelectorPageParams, signal?: AbortSignal): Promise<PaginatedResponse<AccountOption>> {
+  const response = await request<PaginatedResponse<AccountOption> | WorkspacePageResponse<AccountOption>>(`${apiBase}/selectors/accounts?${selectorPageQuery(params).toString()}`, { signal })
+  return projectPage(normalizePage(response), projectAccountSelectorOption)
+}
+export async function getAlbumSelectorPage(params: AlbumSelectorPageParams, signal?: AbortSignal): Promise<PaginatedResponse<AlbumOption>> {
+  const searchParams = selectorPageQuery(params)
+  if (params.accountId?.trim()) searchParams.set('accountId', params.accountId.trim())
+  const response = await request<PaginatedResponse<AlbumOption> | WorkspacePageResponse<AlbumOption>>(`${apiBase}/selectors/albums?${searchParams.toString()}`, { signal })
+  return projectPage(normalizePage(response), projectAlbumSelectorOption)
+}
+export async function getArticleSelectorPage(params: ArticleSelectorPageParams, signal?: AbortSignal): Promise<PaginatedResponse<ArticleOption>> {
+  const response = await request<PaginatedResponse<ArticleOption> | WorkspacePageResponse<ArticleOption>>(`${apiBase}/selectors/articles?${selectorPageQuery(params).toString()}`, { signal })
+  return projectPage(normalizePage(response), projectArticleSelectorOption)
+}
 export async function saveAccount(input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>('accounts', 'POST', input) }
 export async function updateAccount(id: string, input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>(`accounts/${encodeURIComponent(id)}`, 'PATCH', input) }
 export async function deleteAccounts(ids: readonly string[], confirmation: string): Promise<void> { await mutate('accounts', 'DELETE', { ids, confirm: confirmation }) }
@@ -687,6 +775,18 @@ export function getDiagnosticBundleDownloadURL(handle: string): string { return 
 export async function planGarbageCollection(): Promise<GarbageCollectionPlan> { return mutate('maintenance/gc/plan', 'POST', {}) }
 export async function applyGarbageCollection(planId: string, confirmation: string): Promise<GarbageCollectionResult> { return mutate('maintenance/gc/apply', 'POST', { planId, confirmation }) }
 
+const selectorMaximumPageSize = 100
+
+function selectorPageQuery(params: SelectorPageParams): URLSearchParams {
+  if (!Number.isSafeInteger(params.page) || params.page < 1) throw new RangeError('selector page must be a positive safe integer')
+  if (!Number.isSafeInteger(params.pageSize) || params.pageSize < 1 || params.pageSize > selectorMaximumPageSize) {
+    throw new RangeError(`selector page size must be between 1 and ${selectorMaximumPageSize}`)
+  }
+  const searchParams = new URLSearchParams({ page: String(params.page), page_size: String(params.pageSize) })
+  if (params.search?.trim()) searchParams.set('search', params.search.trim())
+  return searchParams
+}
+
 async function getPage<T>(resource: string, params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<T>> {
   const searchParams = new URLSearchParams({
     offset: String((params.page - 1) * params.pageSize),
@@ -777,7 +877,14 @@ export function parseArticleQuery(value: unknown): ArticleQuery {
 }
 
 export function saveExportHandoff(handoff: ExportHandoff): void {
-  try { window.sessionStorage.setItem(exportHandoffStorageKey, JSON.stringify(handoff)) } catch { /* Browser storage can be unavailable. */ }
+  // A new navigation supersedes any handoff retained only for the current
+  // route's Strict Mode render pair. This prevents a rapid second handoff
+  // from being shadowed by an already-mounted export route.
+  clearExportHandoffForMount()
+  try {
+    const safeHandoff = projectExportHandoff(handoff)
+    if (safeHandoff) window.sessionStorage.setItem(exportHandoffStorageKey, JSON.stringify(safeHandoff))
+  } catch { /* Browser storage can be unavailable. */ }
 }
 
 export function consumeExportHandoff(): ExportHandoff | undefined {
@@ -785,9 +892,25 @@ export function consumeExportHandoff(): ExportHandoff | undefined {
     const raw = window.sessionStorage.getItem(exportHandoffStorageKey)
     window.sessionStorage.removeItem(exportHandoffStorageKey)
     if (!raw) return undefined
-    const value = JSON.parse(raw) as Partial<ExportHandoff>
-    return value.selection && typeof value.label === 'string' ? value as ExportHandoff : undefined
+    return projectExportHandoff(JSON.parse(raw))
   } catch { return undefined }
+}
+
+/**
+ * React development Strict Mode renders a new route twice before effects run.
+ * Keep one already-validated, single-use handoff in memory for that render
+ * pair; the session-storage value is still consumed exactly once.
+ */
+export function consumeExportHandoffForMount(): ExportHandoff | undefined {
+  if (hasPendingExportHandoffForStrictMount) return pendingExportHandoffForStrictMount
+  pendingExportHandoffForStrictMount = consumeExportHandoff()
+  hasPendingExportHandoffForStrictMount = true
+  return pendingExportHandoffForStrictMount
+}
+
+export function clearExportHandoffForMount(): void {
+  pendingExportHandoffForStrictMount = undefined
+  hasPendingExportHandoffForStrictMount = false
 }
 
 export function saveArticleQueryHandoff(query: ArticleQuery): void {
@@ -804,6 +927,90 @@ export function consumeArticleQueryHandoff(): ArticleQuery | undefined {
   } catch { return undefined }
 }
 
+function projectExportHandoff(value: unknown): ExportHandoff | undefined {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return undefined
+  const input = value as { readonly selection?: unknown; readonly label?: unknown; readonly presentation?: unknown }
+  if (typeof input.label !== 'string') return undefined
+  const selection = projectExportSelection(input.selection)
+  if (!selection) return undefined
+  const presentation = projectExportHandoffPresentation(input.presentation, selection)
+  return {
+    selection,
+    label: input.label,
+    ...(presentation ? { presentation } : {})
+  }
+}
+
+function projectExportSelection(value: unknown): ExportSelection | undefined {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return undefined
+  const selection = value as { readonly kind?: unknown; readonly articleIds?: unknown; readonly accountId?: unknown; readonly albumId?: unknown; readonly albumIds?: unknown; readonly savedQueryId?: unknown; readonly query?: unknown }
+  switch (selection.kind) {
+    case 'explicit_ids': {
+      const articleIds = safeHandoffIDs(selection.articleIds)
+      return articleIds ? { kind: 'explicit_ids', articleIds } : undefined
+    }
+    case 'account': return safeHandoffID(selection.accountId) ? { kind: 'account', accountId: selection.accountId } : undefined
+    case 'album': return safeHandoffID(selection.albumId) ? { kind: 'album', albumId: selection.albumId } : undefined
+    case 'album_ids': {
+      const albumIds = safeHandoffIDs(selection.albumIds)
+      return albumIds ? { kind: 'album_ids', albumIds } : undefined
+    }
+    case 'saved_query': return safeHandoffID(selection.savedQueryId) ? { kind: 'saved_query', savedQueryId: selection.savedQueryId } : undefined
+    case 'all_matching': {
+      try { return { kind: 'all_matching', query: parseArticleQuery(selection.query) } } catch { return undefined }
+    }
+    default: return undefined
+  }
+}
+
+function projectExportHandoffPresentation(value: unknown, selection: ExportSelection): ExportHandoffPresentation | undefined {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return undefined
+  const input = value as { readonly articles?: unknown; readonly matching?: unknown }
+  if (selection.kind === 'explicit_ids') {
+    if (!Array.isArray(input.articles) || input.articles.length !== selection.articleIds.length) return undefined
+    const articles = input.articles.map(projectExportHandoffArticlePresentation)
+    return articles.every((article): article is ExportHandoffArticlePresentation => article !== undefined) ? { articles } : undefined
+  }
+  if (selection.kind === 'all_matching') {
+    const matching = projectExportHandoffMatchingPresentation(input.matching)
+    return matching ? { matching } : undefined
+  }
+  return undefined
+}
+
+function projectExportHandoffArticlePresentation(value: unknown): ExportHandoffArticlePresentation | undefined {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return undefined
+  const item = value as { readonly title?: unknown; readonly accountName?: unknown }
+  const title = safeHandoffDisplayText(item.title)
+  if (!title) return undefined
+  const accountName = safeHandoffDisplayText(item.accountName)
+  return { title, ...(accountName ? { accountName } : {}) }
+}
+
+function projectExportHandoffMatchingPresentation(value: unknown): ExportHandoffMatchingPresentation | undefined {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return undefined
+  const item = value as { readonly total?: unknown; readonly accountName?: unknown; readonly albumName?: unknown }
+  const total = item.total
+  if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0) return undefined
+  const accountName = safeHandoffDisplayText(item.accountName)
+  const albumName = safeHandoffDisplayText(item.albumName)
+  return { total, ...(accountName ? { accountName } : {}), ...(albumName ? { albumName } : {}) }
+}
+
+function safeHandoffIDs(value: unknown): readonly string[] | undefined {
+  return Array.isArray(value) && value.length > 0 && value.every(safeHandoffID) ? [...value] : undefined
+}
+
+function safeHandoffID(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '' && value.length <= 256
+}
+
+function safeHandoffDisplayText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const text = value.trim()
+  return text && text.length <= 512 ? text : undefined
+}
+
 function normalizePage<T>(response: PaginatedResponse<T> | WorkspacePageResponse<T>): PaginatedResponse<T> {
   if ('data' in response) {
     return { data: response.data, pagination: response.pagination }
@@ -816,6 +1023,52 @@ function normalizePage<T>(response: PaginatedResponse<T> | WorkspacePageResponse
       total: response.total
     }
   }
+}
+
+function projectPage<Input, Output>(page: PaginatedResponse<Input>, project: (item: Input) => Output): PaginatedResponse<Output> {
+  return { data: page.data.map(project), pagination: page.pagination }
+}
+
+function projectAccountSelectorOption(value: AccountOption): AccountOption {
+  const option = value as Partial<AccountOption>
+  const result: AccountOption = {
+    id: requiredSelectorID(option.id),
+    displayNameAvailable: option.displayNameAvailable === true
+  }
+  if (typeof option.displayName === 'string') return { ...result, displayName: option.displayName, ...(typeof option.alias === 'string' ? { alias: option.alias } : {}) }
+  return typeof option.alias === 'string' ? { ...result, alias: option.alias } : result
+}
+
+function projectAlbumSelectorOption(value: AlbumOption): AlbumOption {
+  const option = value as Partial<AlbumOption>
+  const result: AlbumOption = {
+    id: requiredSelectorID(option.id),
+    displayNameAvailable: option.displayNameAvailable === true,
+    accountNameAvailable: option.accountNameAvailable === true
+  }
+  return {
+    ...result,
+    ...(typeof option.accountId === 'string' ? { accountId: option.accountId } : {}),
+    ...(typeof option.displayName === 'string' ? { displayName: option.displayName } : {}),
+    ...(typeof option.accountName === 'string' ? { accountName: option.accountName } : {})
+  }
+}
+
+function projectArticleSelectorOption(value: ArticleOption): ArticleOption {
+  const option = value as Partial<ArticleOption>
+  const id = requiredSelectorID(option.id)
+  if (typeof option.title !== 'string' || !option.title.trim()) throw new Error('selector response contains an invalid article title')
+  return {
+    id,
+    title: option.title,
+    accountNameAvailable: option.accountNameAvailable === true,
+    ...(typeof option.accountName === 'string' ? { accountName: option.accountName } : {})
+  }
+}
+
+function requiredSelectorID(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error('selector response contains an invalid identifier')
+  return value
 }
 
 async function requestWorkspacePage<T>(path: string, signal?: AbortSignal): Promise<WorkspacePageResponse<T>> {

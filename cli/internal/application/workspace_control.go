@@ -30,9 +30,22 @@ type WorkspaceJobPermissionProvider interface {
 
 func (workspace *Workspace) workspaceJob(job domain.Job) WorkspaceJob {
 	return WorkspaceJob{
-		ID: job.ID, Kind: job.Kind, State: job.State, Profile: job.Profile, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
+		ID: job.ID, Kind: job.Kind, Label: workspaceJobLabel(job.Kind), State: job.State, Profile: job.Profile, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
 		Counts: job.Counts, PermittedActions: workspace.permittedJobActions(job.State),
 	}
+}
+
+func workspaceJobLabel(kind string) string {
+	words := strings.FieldsFunc(strings.TrimSpace(kind), func(character rune) bool {
+		return character == '_' || character == '-'
+	})
+	for index, word := range words {
+		if word == "" {
+			continue
+		}
+		words[index] = strings.ToUpper(word[:1]) + word[1:]
+	}
+	return strings.Join(words, " ")
 }
 
 func (workspace *Workspace) permittedJobActions(state domain.JobState) []WorkspaceJobAction {

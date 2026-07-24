@@ -143,6 +143,7 @@ jobs:
           set -euo pipefail
           openspec validate replace-web-with-local-go-cli --strict
           openspec validate local-browser-workspace --strict
+          openspec validate improve-local-browser-workspace-ux --strict
 
       - name: Clean-room receipt validator tests
         working-directory: cli

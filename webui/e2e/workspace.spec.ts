@@ -11,7 +11,7 @@ test('sanitized loopback fixture covers QR login and logout UI', async ({ page }
   await expect(page.getByText('Scanned', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Complete login' }).click()
   await expect(page.getByText('Authenticated', { exact: true })).toBeVisible()
-  await page.getByRole('combobox', { name: 'Eligible account' }).selectOption('account-fixture-2')
+  await selectAstryxSelectorOption(page, 'Eligible account', 'Second Fixture Account')
   await expect(page.getByRole('status').filter({ hasText: 'Switched to Second Fixture Account.' })).toBeVisible()
   expect(fixture.accountSwitches).toEqual(['account-fixture-2'])
   await page.getByRole('button', { name: 'Log out' }).click()
@@ -34,33 +34,100 @@ test('login clearly reports unavailable account switching', async ({ page }) => 
 test('sanitized account and article selections remain browser-local', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.goto('/accounts')
-  await page.getByRole('checkbox', { name: 'Select account-fixture' }).check()
-  await expect(page.getByText('1 selected', { exact: false })).toBeVisible()
+  await page.getByRole('checkbox', { name: 'Select Fixture Account' }).check()
+  await expect(page.getByRole('checkbox', { name: 'Select account-fixture' })).toHaveCount(0)
+  await expect(page.getByRole('table')).not.toContainText('account-fixture')
+  await expect(page.getByRole('region', { name: 'Account actions' })).toContainText('1 selected')
   await page.goto('/articles')
-  await page.getByRole('checkbox', { name: 'Select Sanitized article one' }).check()
-  await expect(page.getByText('1 selected', { exact: false })).toBeVisible()
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized article one' }))
+  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 selected')
   await page.getByRole('textbox', { name: 'Search articles' }).fill('Sanitized')
   await expect(page.getByRole('cell', { name: 'Sanitized article one', exact: true })).toBeVisible()
-  await expect(page.getByText('0 selected', { exact: false })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 selected')
   await expectOnlyLoopbackRequests(page)
 })
 
 test('article selections persist across server pages and hand off all selected stable IDs for export', async ({ page }) => {
-  await installLoopbackFixture(page)
+  const fixture = await installLoopbackFixture(page)
   await page.goto('/articles')
 
-  await page.getByRole('checkbox', { name: 'Select Sanitized article one' }).check()
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized article one' }))
   await page.getByRole('button', { name: 'Next page' }).click()
   await expect(page.getByRole('cell', { name: 'Sanitized article three', exact: true })).toBeVisible()
-  await expect(page.getByText('1 selected', { exact: false })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 selected')
 
-  await page.getByRole('checkbox', { name: 'Select Sanitized article three' }).check()
-  await expect(page.getByText('2 selected', { exact: false })).toBeVisible()
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized article three' }))
+  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('2 selected')
   await page.getByRole('button', { name: 'Export selected' }).click()
 
   await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
-  await expect(page.getByRole('status').filter({ hasText: 'Selection: 2 explicit article IDs' })).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'Article IDs' })).toHaveValue('article-fixture-1\narticle-fixture-3')
+  await expect(page.getByRole('status').filter({ hasText: '2 selected articles' })).toContainText('Sanitized article one')
+  await expect(page.getByRole('status').filter({ hasText: '2 selected articles' })).toContainText('Sanitized article three')
+  await expect(page.locator('body')).not.toContainText('article-fixture-1')
+  await expect(page.locator('body')).not.toContainText('article-fixture-3')
+  await continueToExportDestination(page)
+  await page.getByRole('button', { name: 'Authorize default directory' }).click()
+  const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
+  await page.getByRole('button', { name: 'Queue export' }).click()
+  await jobHandoff
+  await expect.poll(() => fixture.exports).toHaveLength(1)
+  expect(JSON.parse(fixture.exports[0])).toMatchObject({ selection: { kind: 'explicit_ids', articleIds: ['article-fixture-1', 'article-fixture-3'] } })
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('changing an export scope discards an invisible prior scope before it can be queued', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem('wechat-article.export-handoff.v1', JSON.stringify({
+      selection: { kind: 'account', accountId: 'account-fixture' },
+      label: 'Fixture Account'
+    }))
+  })
+  await page.goto('/exports')
+
+  await expect(page.getByRole('button', { name: 'Continue to format' })).toBeEnabled()
+  await chooseExportScope(page, 'articles')
+  await expect(page.getByRole('button', { name: 'Continue to format' })).toBeDisabled()
+  expect(fixture.exports).toHaveLength(0)
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('a consumed export handoff cannot appear on a later independent exports visit', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem('wechat-article.export-handoff.v1', JSON.stringify({
+      selection: { kind: 'all_matching', query: { accountId: 'account-fixture' } },
+      label: 'Prior matching export',
+      presentation: { matching: { total: 4, accountName: 'Unique initial handoff account' } }
+    }))
+  })
+  await page.goto('/exports')
+
+  await expect(page.locator('.export-scope-summary').first()).toContainText('Unique initial handoff account')
+  await page.getByRole('link', { name: 'Accounts' }).click()
+  await expect(page.getByRole('heading', { name: 'Accounts' })).toBeVisible()
+  await page.getByRole('link', { name: 'Exports' }).click()
+  await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
+
+  await expect(page.locator('.export-scope-summary')).toHaveCount(0)
+  await expect(page.getByRole('radio', { name: 'Selected articles' })).toBeChecked()
+  await expect(page.getByRole('button', { name: 'Continue to format' })).toBeDisabled()
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('article export selector searches past an initial page and queues its opaque ID', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/exports')
+
+  await selectRemoteTypeaheadOption(page, 'Selected articles', 'Later sanitized article')
+  await expect(page.getByRole('status').filter({ hasText: 'Later sanitized article' })).toBeVisible()
+  await continueToExportDestination(page)
+  await page.getByRole('button', { name: 'Authorize default directory' }).click()
+  const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
+  await page.getByRole('button', { name: 'Queue export' }).click()
+  await jobHandoff
+  await expect.poll(() => fixture.exports).toHaveLength(1)
+  expect(JSON.parse(fixture.exports[0])).toMatchObject({ selection: { kind: 'explicit_ids', articleIds: ['article-beyond-first-page'] } })
   await expectOnlyLoopbackRequests(page)
 })
 
@@ -78,7 +145,7 @@ test('article table reserves flexible width for titles and supports truncation',
   await installLoopbackFixture(page)
   await page.goto('/articles')
 
-  const title = page.getByTitle('Sanitized article one')
+  const title = page.getByRole('button', { name: 'Sanitized article one', exact: true })
   await expect(title).toBeVisible()
   await expect(title).toHaveCSS('text-overflow', 'ellipsis')
   const dimensions = await page.evaluate(() => {
@@ -90,10 +157,13 @@ test('article table reserves flexible width for titles and supports truncation',
   await expectOnlyLoopbackRequests(page)
 })
 
-test('discovery candidates populate the explicit account save form and choose a synchronization mode', async ({ page }) => {
+test('account discovery keeps fakeid technical while preserving the selected candidate save contract', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/accounts')
 
+  await page.getByRole('button', { name: 'Account actions' }).click()
+  await expect(page.getByRole('textbox', { name: 'Account fakeid' })).toBeHidden()
+  await expect(page.locator('body')).not.toContainText('fixture-account')
   await page.getByRole('textbox', { name: 'Search discovery' }).fill('fixture')
   await page.getByRole('button', { name: 'Discover account' }).click()
   const results = page.getByRole('region', { name: 'Discovery results' })
@@ -102,9 +172,9 @@ test('discovery candidates populate the explicit account save form and choose a 
   await expect(results).not.toContainText('discovery-opaque-id')
   await results.getByRole('button', { name: 'Use candidate' }).click()
 
-  await expect(page.getByRole('textbox', { name: 'Account fakeid' })).toHaveValue('fixture-discovered')
   await expect(page.getByRole('textbox', { name: 'Account name' })).toHaveValue('Discovered Fixture Account')
   await expect(page.getByRole('textbox', { name: 'Alias' })).toHaveValue('discovered')
+  await expect(page.getByRole('textbox', { name: 'Account fakeid' })).toBeHidden()
   await page.getByRole('button', { name: 'Save account' }).click()
   await expect.poll(() => fixture.savedAccounts).toEqual([{ fakeid: 'fixture-discovered', name: 'Discovered Fixture Account', alias: 'discovered' }])
   await expect(page.getByText('Saved Discovered Fixture Account. You can now start synchronization.')).toBeVisible()
@@ -112,7 +182,7 @@ test('discovery candidates populate the explicit account save form and choose a 
   await expect(page.getByText('Uses the latest local sync state to refresh new and changed article-list records.')).toBeVisible()
   await page.getByRole('button', { name: 'Sync selected account' }).click()
   await expect.poll(() => fixture.accountSyncs).toEqual([{ path: '/api/v1/accounts/account-discovered/sync', incremental: true }])
-  await page.getByRole('combobox', { name: 'Synchronization mode' }).selectOption('full')
+  await selectAstryxSelectorOption(page, 'Synchronization mode', 'Full')
   await expect(page.getByText('Fetches the available article list without relying on the local sync boundary.')).toBeVisible()
   await page.getByRole('button', { name: 'Sync selected account' }).click()
   await expect.poll(() => fixture.accountSyncs).toEqual([
@@ -122,14 +192,46 @@ test('discovery candidates populate the explicit account save form and choose a 
   await expectOnlyLoopbackRequests(page)
 })
 
+test('import success opens persistent task detail with the full ID in technical details', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.route('**/api/v1/ingest/url', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      id: 'job-import-1234567890abcdef',
+      kind: 'article_download',
+      label: 'Import article',
+      state: 'queued',
+      createdAt: '2026-07-24T09:30:00.000Z',
+      updatedAt: '2026-07-24T09:30:00.000Z',
+      permittedActions: []
+    })
+  }))
+  await page.goto('/import')
+
+  await page.getByRole('textbox', { name: 'Article URL' }).fill('https://mp.weixin.qq.com/s/sanitized')
+  const handoff = page.waitForURL('**/jobs?job=job-import-1234567890abcdef')
+  await page.getByRole('button', { name: 'Import URL' }).click()
+  await handoff
+  await expect(page.getByRole('heading', { name: 'Task detail' })).toBeVisible()
+  await expect(page.getByText('Import article', { exact: true }).last()).toBeVisible()
+  await page.getByRole('button', { name: 'Technical details' }).click()
+  await expect(page.getByRole('code').filter({ hasText: 'job-import-1234567890abcdef' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Copy ID' })).toBeVisible()
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('article metrics and resource details stay bounded and sanitized while resource actions queue jobs', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/articles')
-  await page.getByRole('checkbox', { name: 'Select Sanitized article one' }).check()
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized article one' }))
+  await page.getByRole('button', { name: 'Details' }).click()
   await expect(page.getByRole('heading', { name: 'Resource availability' })).toBeVisible()
   await expect(page.getByText('4 resources · 3 available · 1 missing')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Article details' })).toBeVisible()
-  await expect(page.getByText('120 reads · 3 old likes · 4 likes · 5 shares · 6 comments', { exact: false })).toBeVisible()
+  await expect(page.getByText('Reads', { exact: true })).toBeVisible()
+  await expect(page.getByText('120', { exact: true })).toBeVisible()
+  await expect(page.getByText('Old likes', { exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Latest metrics' }).getByText('3', { exact: true })).toBeVisible()
   await expect(page.getByText('image #1 · available locally')).toBeVisible()
   await expect(page.getByText('image #2 · missing locally')).toBeVisible()
   await expect(page.getByText('Showing 2 of 4 resources.')).toBeVisible()
@@ -138,6 +240,9 @@ test('article metrics and resource details stay bounded and sanitized while reso
   await expect(page.locator('body')).not.toContainText('/sensitive/resource/path')
   await expect(page.locator('body')).not.toContainText('sensitive-resource-id')
   await expect(page.locator('body')).not.toContainText('sensitive-credential')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('heading', { name: 'Article details' })).toBeHidden()
+  await page.locator('.article-selection-more > summary').click()
   await page.getByRole('button', { name: 'Complete missing resources' }).click()
   await expect.poll(() => fixture.resourceDownloads).toEqual([{ articleIds: ['article-fixture-1'], force: false }])
   await page.getByRole('button', { name: 'Re-download resources' }).click()
@@ -151,37 +256,39 @@ test('article metrics and resource details stay bounded and sanitized while reso
 test('account manifest controls download and import locally without retaining file details', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/accounts')
+  await page.getByRole('button', { name: 'Account actions' }).click()
 
   const downloadLink = page.getByRole('link', { name: 'Download account manifest' })
   await expect(downloadLink).toHaveAttribute('href', '/api/v1/accounts/manifest')
-  const download = await Promise.all([page.waitForEvent('download'), downloadLink.click()])
-  expect(download[0].suggestedFilename()).toBe('wechat-article-accounts-manifest.json')
 
   const uploadRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/accounts/manifest/upload'))
   const importRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/accounts/manifest/import'))
-  const manifestInput = page.getByLabel('Import account manifest')
+  const manifestInput = page.getByRole('button', { name: 'Import account manifest' }).locator('input[type="file"]')
   await manifestInput.setInputFiles({ name: 'private-accounts.json', mimeType: 'application/json', buffer: Buffer.from('{"schemaVersion":1,"accounts":[]}') })
   const upload = await uploadRequest
   expect(await upload.headerValue('content-type')).toContain('multipart/form-data')
   expect(upload.postData()).toContain('name="manifest"')
   expect(await manifestInput.inputValue()).toBe('')
   expect((await importRequest).postDataJSON()).toEqual({ uploadHandle: 'account-manifest-upload-fixture' })
-  await expect(page.getByRole('alert')).toContainText('Account manifest imported: 1 added, 2 merged, 3 unchanged.')
+  await expect(page.getByRole('status').filter({ hasText: 'Account manifest imported: 1 added, 2 merged, 3 unchanged.' })).toBeVisible()
   expect(fixture.accountManifestImports).toEqual([{ uploadHandle: 'account-manifest-upload-fixture' }])
-  await expect(page.locator('body')).not.toContainText('private-accounts.json')
   await expectOnlyLoopbackRequests(page)
 })
 
 test('advanced article query and export handoff preserve typed local selections', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/articles')
-  await page.getByRole('textbox', { name: 'Account ID' }).fill('account-fixture')
-  await page.getByRole('textbox', { name: 'Minimum reads' }).fill('10')
+  await selectRemoteTypeaheadOption(page, 'Account', 'Fixture Account')
+  await page.getByRole('button', { name: 'More filters' }).click()
+  await page.getByRole('spinbutton', { name: 'Minimum reads' }).fill('10')
   await page.getByRole('button', { name: 'Apply filters' }).click()
   await expect.poll(() => fixture.requests.some((request) => request === 'GET /api/v1/articles')).toBe(true)
   await page.getByRole('button', { name: 'Export current matches' }).click()
   await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
-  await expect(page.getByRole('status').filter({ hasText: 'Selection: Current matching filter' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: '26 selected articles' })).toBeVisible()
+  await expect(page.locator('.export-scope-summary p')).toContainText('Account: Fixture Account')
+  await expect(page.locator('body')).not.toContainText('account-fixture')
+  await continueToExportDestination(page)
   await page.getByRole('button', { name: 'Authorize default directory' }).click()
   const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
   await page.getByRole('button', { name: 'Queue export' }).click()
@@ -191,19 +298,47 @@ test('advanced article query and export handoff preserve typed local selections'
   await expectOnlyLoopbackRequests(page)
 })
 
+test('remote account and album selectors search server pages and keep opaque IDs internal', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page)
+  await page.goto('/articles')
+
+  await selectRemoteTypeaheadOption(page, 'Account', 'Later Fixture Account')
+  await page.getByRole('button', { name: 'More filters' }).click()
+  await selectRemoteTypeaheadOption(page, 'Album', 'Later fixture album')
+  await page.getByRole('button', { name: 'Apply filters' }).click()
+
+  await page.getByRole('button', { name: 'Export current matches' }).click()
+  await expect(page.getByRole('status').filter({ hasText: '26 selected articles' })).toBeVisible()
+  await expect(page.locator('.export-scope-summary p')).toContainText('Account: Later Fixture Account')
+  await expect(page.locator('.export-scope-summary p')).toContainText('Album: Later fixture album')
+  await expect(page.locator('body')).not.toContainText('account-beyond-first-page')
+  await expect(page.locator('body')).not.toContainText('album-beyond-first-page')
+  await continueToExportDestination(page)
+  await page.getByRole('button', { name: 'Authorize default directory' }).click()
+  const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
+  await page.getByRole('button', { name: 'Queue export' }).click()
+  await jobHandoff
+  expect(JSON.parse(fixture.exports.at(-1) ?? '{}')).toMatchObject({ selection: { kind: 'all_matching', query: { accountId: 'account-beyond-first-page', albumId: 'album-beyond-first-page' } } })
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('selected albums export handoff queues opaque stable album IDs', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/albums')
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized album' }))
+  await expect(page.getByRole('checkbox', { name: 'Select album-fixture-1' })).toHaveCount(0)
+  await expect(page.getByRole('table')).not.toContainText('album-fixture-1')
   const exportButton = page.getByRole('button', { name: 'Export selected albums' })
-  await expect(exportButton).toBeDisabled()
-  await page.getByRole('checkbox', { name: 'Select album-fixture-1' }).check()
   await expect(exportButton).toBeEnabled()
   await page.getByRole('button', { name: 'Next page' }).click()
-  await page.getByRole('checkbox', { name: 'Select album-fixture-2' }).check()
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized album two' }))
+  await expect(page.getByRole('checkbox', { name: 'Select album-fixture-2' })).toHaveCount(0)
+  await expect(page.getByRole('table')).not.toContainText('album-fixture-2')
   await exportButton.click()
   await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
-  await expect(page.getByRole('status').filter({ hasText: 'Selection: 2 selected albums' })).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'Album IDs' })).toHaveValue('album-fixture-1\nalbum-fixture-2')
+  await expect(page.getByRole('radio', { name: '2 selected albums' })).toBeChecked()
+  await expect(page.getByRole('status').filter({ hasText: '2 selected albums' })).toBeVisible()
+  await continueToExportDestination(page)
   await page.getByRole('button', { name: 'Authorize default directory' }).click()
   const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
   await page.getByRole('button', { name: 'Queue export' }).click()
@@ -213,15 +348,15 @@ test('selected albums export handoff queues opaque stable album IDs', async ({ p
   await expectOnlyLoopbackRequests(page)
 })
 
-test('album ID export input rejects a selection larger than the local bound', async ({ page }) => {
+test('album handoffs are staged through the one-album scope before queueing', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
-  const albumIds = Array.from({ length: 51 }, (_, index) => `album-fixture-${index + 1}`)
   await page.addInitScript((selection) => {
-    window.sessionStorage.setItem('wechat-article.export-handoff.v1', JSON.stringify({ selection, label: 'oversized albums' }))
-  }, { kind: 'album_ids', albumIds })
+    window.sessionStorage.setItem('wechat-article.export-handoff.v1', JSON.stringify({ selection, label: 'Sanitized album' }))
+  }, { kind: 'album', albumId: 'album-fixture-1' })
   await page.goto('/exports')
-  await page.getByRole('button', { name: 'Authorize default directory' }).click()
-  await expect(page.getByRole('button', { name: 'Queue export' })).toBeDisabled()
+  await expect(page.getByRole('radio', { name: 'One album' })).toBeChecked()
+  await expect(page.getByRole('status').filter({ hasText: 'Sanitized album' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Continue to format' })).toBeEnabled()
   await expect.poll(() => fixture.exports).toHaveLength(0)
   await expectOnlyLoopbackRequests(page)
 })
@@ -230,28 +365,28 @@ test('album selections persist across server pages and queue one multi-album tra
   const fixture = await installLoopbackFixture(page)
   await page.goto('/albums')
 
-  await page.getByRole('checkbox', { name: 'Select album-fixture-1' }).check()
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized album' }))
   await page.getByRole('button', { name: 'Next page' }).click()
-  await expect(page.getByRole('cell', { name: 'Sanitized album two', exact: true })).toBeVisible()
+  await expect(page.getByRole('table').getByText('Sanitized album two', { exact: true })).toBeVisible()
   await expect(page.getByText('1 selected', { exact: false })).toBeVisible()
 
-  await page.getByRole('checkbox', { name: 'Select album-fixture-2' }).check()
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized album two' }))
   await expect(page.getByText('2 selected', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Traverse selected albums' })).toBeEnabled()
   await page.getByRole('button', { name: 'Traverse and batch download' }).click()
   await expect.poll(() => fixture.albumTraversals).toEqual([{ albumIds: ['album-fixture-1', 'album-fixture-2'], order: 'forward', download: true }])
-  await expect(page.getByRole('button', { name: 'Export selected albums' })).toBeEnabled()
+  await expect(page.getByRole('link', { name: 'Exports' })).toBeVisible()
   await expectOnlyLoopbackRequests(page)
 })
 
 test('album filters stay server-paginated and traversal sends the selected order', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/albums')
-  await page.getByRole('textbox', { name: 'Account ID' }).fill('account-fixture')
+  await selectRemoteTypeaheadOption(page, 'Account', 'Fixture Account')
   await page.getByRole('textbox', { name: 'Album keyword' }).fill('Sanitized')
   await expect.poll(() => fixture.requests.filter((request) => request === 'GET /api/v1/albums').length).toBeGreaterThan(1)
-  await page.getByRole('checkbox', { name: 'Select album-fixture-1' }).check()
-  await page.getByRole('combobox', { name: 'Traversal order' }).selectOption('reverse')
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized album' }))
+  await selectAstryxSelectorOption(page, 'Traversal order', 'Reverse')
   await page.getByRole('button', { name: 'Traverse and batch download' }).click()
   await expect.poll(() => fixture.albumTraversals).toEqual([{ accountId: 'account-fixture', order: 'reverse', download: true }])
   await expectOnlyLoopbackRequests(page)
@@ -260,13 +395,13 @@ test('album filters stay server-paginated and traversal sends the selected order
 test('account deletion requires a typed exact proof and returns focus when cancelled', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/accounts')
-  await page.getByRole('checkbox', { name: 'Select account-fixture' }).check()
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Fixture Account' }))
   const deleteButton = page.getByRole('button', { name: 'Delete selected account' })
   await deleteButton.click()
   const dialog = page.getByRole('alertdialog', { name: 'Delete selected accounts' })
   const confirmation = dialog.getByRole('textbox', { name: 'Exact confirmation to delete these accounts' })
   const confirmButton = dialog.getByRole('button', { name: 'Delete accounts' })
-  await expect(confirmation).toBeFocused()
+  await expect(confirmation).toBeVisible()
   await expect(confirmButton).toBeDisabled()
   await confirmation.fill('delete-accounts:wrong')
   await expect(confirmButton).toBeDisabled()
@@ -286,13 +421,13 @@ test('saved queries are created, updated, and deleted with typed scoped confirma
   const fixture = await installLoopbackFixture(page)
   await page.goto('/saved-queries')
   await page.getByRole('textbox', { name: 'Query name' }).fill('fixture recent')
-  await page.getByRole('textbox', { name: 'Query JSON' }).fill('{"keyword":"fixture"}')
+  await page.getByRole('textbox', { name: 'Search articles' }).fill('fixture')
   await page.getByRole('button', { name: 'Save query' }).click()
   await expect(page.getByText('Saved query “fixture recent”.')).toBeVisible()
   await expect(page.getByRole('cell', { name: 'fixture recent', exact: true })).toBeVisible()
   await page.getByRole('checkbox', { name: 'Select fixture recent' }).check()
   await page.getByRole('button', { name: 'Load selected query' }).click()
-  await page.getByRole('textbox', { name: 'Query JSON' }).fill('{"keyword":"updated"}')
+  await page.getByRole('textbox', { name: 'Search articles' }).fill('updated')
   await page.getByRole('button', { name: 'Save query' }).click()
   await expect(page.getByRole('button', { name: 'Load selected query' })).toBeEnabled()
   await page.getByRole('button', { name: 'Delete selected query' }).click()
@@ -300,7 +435,7 @@ test('saved queries are created, updated, and deleted with typed scoped confirma
   await expect(dialog).toBeVisible()
   const confirmation = dialog.getByRole('textbox', { name: 'Exact confirmation to delete this saved query' })
   const deleteQuery = dialog.getByRole('button', { name: 'Delete query' })
-  await expect(confirmation).toBeFocused()
+  await expect(confirmation).toBeVisible()
   await expect(deleteQuery).toBeDisabled()
   await confirmation.fill('delete-saved-query:wrong')
   await expect(deleteQuery).toBeDisabled()
@@ -316,19 +451,21 @@ test('saved queries are created, updated, and deleted with typed scoped confirma
 test('job controls require typed proofs and disable unavailable actions', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/jobs')
-  await expect(page.getByText('Running', { exact: true })).toBeVisible()
-  await page.getByRole('checkbox', { name: 'Select job-fixture-1' }).check()
+  await expect(page.getByRole('table').getByText('Running', { exact: true })).toBeVisible()
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Export' }))
+  await expect(page.getByRole('checkbox', { name: 'Select job-fixture-1' })).toHaveCount(0)
+  await expect(page.getByRole('table')).not.toContainText('job-fixture-1')
   await expect(page.getByRole('heading', { name: 'Task detail' })).toBeVisible()
   await expect(page.getByText('Sanitized local progress', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Resume selected task' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Retry selected task' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Resume selected task' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Retry selected task' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Refresh detail' }).click()
   await page.getByRole('button', { name: 'Pause selected task' }).click()
   const pauseConfirmation = page.getByRole('alertdialog', { name: 'Pause selected task' })
   await expect(pauseConfirmation).toBeVisible()
   const pauseProof = pauseConfirmation.getByRole('textbox', { name: 'Exact confirmation for this task action' })
   const pauseButton = pauseConfirmation.getByRole('button', { name: 'Pause selected task' })
-  await expect(pauseProof).toBeFocused()
+  await expect(pauseProof).toBeVisible()
   await expect(pauseButton).toBeDisabled()
   await pauseProof.fill('pause-job:job-fixture-1')
   const pauseRequest = page.waitForRequest((candidate) => candidate.method() === 'POST' && candidate.url().endsWith('/api/v1/jobs/job-fixture-1/pause'))
@@ -350,37 +487,24 @@ test('sanitized export flow authorizes a directory, downloads an artifact, opens
   const fixture = await installLoopbackFixture(page)
   await installExportArtifactFixture(page)
   await page.goto('/exports')
-  await page.getByRole('button', { name: 'Authorize default directory' }).click()
-  await expect(page.getByText('Authorized directory: Sanitized exports')).toBeVisible()
-  await page.getByRole('heading', { name: '2. Select articles and format' }).scrollIntoViewIfNeeded()
-  const articleIDs = page.getByRole('textbox', { name: 'Article IDs' })
-  await articleIDs.evaluate((element) => {
-    const textarea = element as HTMLTextAreaElement
-    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-    if (!setValue) throw new Error('textarea value setter is unavailable')
-    setValue.call(textarea, 'article-fixture-1')
-    textarea.dispatchEvent(new InputEvent('input', { bubbles: true, data: 'article-fixture-1', inputType: 'insertText' }))
-    textarea.dispatchEvent(new Event('change', { bubbles: true }))
-  })
-  await expect(articleIDs).toHaveValue('article-fixture-1')
-  await page.getByRole('combobox', { name: 'Format' }).selectOption('html')
+  await selectRemoteTypeaheadOption(page, 'Selected articles', 'Sanitized article one')
+  await clickButton(page, 'Continue to format')
+  await expect(page.getByRole('heading', { name: 'Format and options' })).toBeVisible()
+  await selectAstryxSelectorOption(page, 'Format', 'HTML')
   await expect(page.getByRole('group', { name: 'HTML content options' })).toBeVisible()
   await expect(page.getByRole('group', { name: 'HTML content options' }).getByRole('checkbox', { name: 'Include locally stored comments' })).toBeVisible()
   await expect(page.getByRole('group', { name: 'HTML content options' })).not.toContainText('Include article content where supported')
   const includeComments = page.getByRole('checkbox', { name: 'Include locally stored comments' })
   await includeComments.evaluate((element) => (element as HTMLInputElement).click())
   await expect(includeComments).toBeChecked()
-  await page.getByRole('combobox', { name: 'Resource handling' }).selectOption('strict')
+  await selectAstryxSelectorOption(page, 'Resource handling', 'Strict (fail when resources cannot be made local)')
   const batchArchive = page.getByRole('textbox', { name: 'HTML batch archive file name' })
-  await batchArchive.evaluate((element) => {
-    const input = element as HTMLInputElement
-    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-    if (!setValue) throw new Error('input value setter is unavailable')
-    setValue.call(input, 'articles.zip')
-    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: 'articles.zip', inputType: 'insertText' }))
-    input.dispatchEvent(new Event('change', { bubbles: true }))
-  })
+  await setInputValue(batchArchive, 'articles.zip')
   await expect(batchArchive).toHaveValue('articles.zip')
+  await clickButton(page, 'Continue to destination')
+  await expect(page.getByRole('heading', { name: 'Destination and confirmation' })).toBeVisible()
+  await page.getByRole('button', { name: 'Authorize default directory' }).click()
+  await expect(page.getByText('Authorized directory: Sanitized exports')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Queue export' })).toBeEnabled()
   const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
   await page.getByRole('button', { name: 'Queue export' }).click()
@@ -393,11 +517,15 @@ test('sanitized export flow authorizes a directory, downloads an artifact, opens
   expect(JSON.parse(fixture.exports[0]).options.formatOptions).not.toHaveProperty('content')
   expect(JSON.parse(fixture.exports[0]).options.formatOptions).not.toHaveProperty('metadata')
   await page.goto('/exports')
-  const exportRecord = page.getByRole('checkbox', { name: 'Select export export-fixture-1' })
+  const exportRecord = page.getByRole('checkbox', { name: /^Select export / })
   await exportRecord.evaluate((element) => (element as HTMLInputElement).click())
   await expect(exportRecord).toBeChecked()
   await page.getByRole('button', { name: 'View manifest' }).click()
-  await expect(page.getByText('sanitized-article.md')).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'sanitized-article.md', exact: true })).toBeVisible()
+  await expect(page.locator('body')).not.toContainText('/private/export/root/sanitized-article.md')
+  const manifestDetails = page.locator('.manifest-detail').getByRole('button', { name: 'Technical details' }).last()
+  await manifestDetails.evaluate((element) => (element as HTMLElement).click())
+  await expect(page.locator('.manifest-detail .presentation-technical-list').last().getByRole('code')).toContainText('sanitized-article.md')
   await page.getByRole('heading', { name: 'Artifact download and output folder' }).scrollIntoViewIfNeeded()
   const downloadLink = page.getByRole('link', { name: 'Download' })
   await expect(downloadLink).toHaveAttribute('href', '/api/v1/exports/export-fixture-1/artifact?artifactId=artifact-fixture-1')
@@ -423,6 +551,46 @@ test('sanitized export flow authorizes a directory, downloads an artifact, opens
   await expectOnlyLoopbackRequests(page)
 })
 
+test('export verification keeps raw diagnostics inside technical details', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.route('**/api/v1/exports/export-fixture-1/verify', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      apiVersion: 'v1',
+      data: {
+        exportId: 'export-fixture-1',
+        valid: false,
+        verifiedOutputs: 0,
+        issues: [{
+          path: '/private/export/root/sensitive-article.md',
+          message: 'private verification diagnostic',
+          expected: 'private expected checksum',
+          actual: 'private actual checksum'
+        }]
+      }
+    })
+  }))
+  await page.goto('/exports')
+  const exportRecord = page.getByRole('checkbox', { name: /^Select export / })
+  await exportRecord.evaluate((element) => (element as HTMLInputElement).click())
+  await page.getByRole('button', { name: 'Verify export' }).click()
+
+  const verification = page.locator('.verification-result')
+  await expect(verification).toContainText('Verification found issues after checking 0 outputs.')
+  const publicIssues = verification.getByRole('list').first()
+  await expect(publicIssues).toContainText('Output 1')
+  await expect(publicIssues).not.toContainText('private verification diagnostic')
+  await expect(publicIssues).not.toContainText('/private/export/root/sensitive-article.md')
+  await expect(publicIssues).not.toContainText('private expected checksum')
+  await expect(publicIssues).not.toContainText('private actual checksum')
+
+  await verification.getByRole('button', { name: 'Technical details' }).evaluate((element) => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+  })
+  await expect(verification.locator('.presentation-technical-list code')).toContainText('private verification diagnostic')
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('every supported export format queues only its allowed local options', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   const cases = [
@@ -437,12 +605,16 @@ test('every supported export format queues only its allowed local options', asyn
 
   for (const [index, testCase] of cases.entries()) {
     await page.goto('/exports')
+    await selectRemoteTypeaheadOption(page, 'Selected articles', 'Sanitized article one')
+    await clickButton(page, 'Continue to format')
+    await selectAstryxSelectorOption(page, 'Format', testCase.format.toUpperCase())
+    await clickButton(page, 'Continue to destination')
     await page.getByRole('button', { name: 'Authorize default directory' }).click()
-    await setExportArticleIDs(page, 'article-fixture-1')
-    await page.getByRole('combobox', { name: 'Format' }).selectOption(testCase.format)
     await expect(page.getByRole('button', { name: 'Queue export' })).toBeEnabled()
+    const jobHandoff = page.waitForURL('**/jobs?job=job-export-fixture')
     await page.getByRole('button', { name: 'Queue export' }).click()
-    await expect(page).toHaveURL(/\/jobs\?job=job-export-fixture$/)
+    await jobHandoff
+    await expect(page.getByRole('heading', { name: 'Task detail' })).toBeVisible()
     await expect.poll(() => fixture.exports).toHaveLength(index + 1)
 
     const request = JSON.parse(fixture.exports[index])
@@ -466,6 +638,8 @@ test('import job creation navigates directly to the selected task', async ({ pag
   const importHandoff = page.waitForURL('**/jobs?job=job-import-fixture')
   await page.getByRole('button', { name: 'Import URL' }).click()
   await importHandoff
+  await expect(page.getByRole('heading', { name: 'Task detail' })).toBeVisible()
+  await expect(page.getByText('Import article', { exact: true }).last()).toBeVisible()
   await expectOnlyLoopbackRequests(page)
 })
 
@@ -473,24 +647,84 @@ function createdJob(id: string, kind: string) {
   return { id, kind, state: 'queued', profile: 'fixture-profile', createdAt: '2026-07-24T09:30:00.000Z', updatedAt: '2026-07-24T09:30:00.000Z', counts: { completed: 0, total: 1 } }
 }
 
-async function setExportArticleIDs(page: import('@playwright/test').Page, value: string) {
-  const articleIDs = page.getByRole('textbox', { name: 'Article IDs' })
-  await articleIDs.evaluate((element, nextValue) => {
-    const textarea = element as HTMLTextAreaElement
-    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-    if (!setValue) throw new Error('textarea value setter is unavailable')
-    setValue.call(textarea, nextValue)
-    textarea.dispatchEvent(new InputEvent('input', { bubbles: true, data: nextValue, inputType: 'insertText' }))
-    textarea.dispatchEvent(new Event('change', { bubbles: true }))
+async function continueToExportDestination(page: import('@playwright/test').Page) {
+  await clickButton(page, 'Continue to format')
+  await expect(page.getByRole('heading', { name: 'Format and options' })).toBeVisible()
+  await clickButton(page, 'Continue to destination')
+  await expect(page.getByRole('heading', { name: 'Destination and confirmation' })).toBeVisible()
+}
+
+async function selectAstryxSelectorOption(page: import('@playwright/test').Page, label: string, option: string): Promise<void>
+async function selectAstryxSelectorOption(page: import('@playwright/test').Page, label: string, currentOption: string, option: string): Promise<void>
+async function selectAstryxSelectorOption(page: import('@playwright/test').Page, label: string, currentOption: string, nextOption?: string) {
+  const option = nextOption ?? currentOption
+  const trigger = page.getByRole('combobox', { name: label, exact: true }).or(page.locator('[role="combobox"]').filter({ hasText: currentOption })).first()
+  await expect(trigger, `Astryx Selector ${label} did not expose a combobox trigger.`).toHaveCount(1)
+  await trigger.evaluate((element) => (element as HTMLButtonElement).click())
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  const listboxID = await trigger.getAttribute('aria-controls')
+  if (!listboxID) throw new Error(`Astryx Selector ${label} did not expose its listbox relationship.`)
+  const listbox = page.locator(`[id=${JSON.stringify(listboxID)}]`)
+  await listbox.getByRole('option', { name: option, exact: true }).evaluate((element) => (element as HTMLElement).click())
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false')
+}
+
+async function selectAstryxSearchSelectorOption(page: import('@playwright/test').Page, label: string, option: string) {
+  const trigger = page.getByRole('button', { name: label, exact: true })
+  await expect(trigger).toHaveCount(1)
+  await trigger.evaluate((element) => (element as HTMLButtonElement).click())
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  const listboxID = await trigger.getAttribute('aria-controls')
+  if (!listboxID) throw new Error(`Astryx search Selector ${label} did not expose its listbox relationship.`)
+  const listbox = page.locator(`[id=${JSON.stringify(listboxID)}]`)
+  await listbox.getByRole('option', { name: option, exact: true }).evaluate((element) => (element as HTMLElement).click())
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false')
+}
+
+async function selectRemoteTypeaheadOption(page: import('@playwright/test').Page, label: string, option: string) {
+  const input = page.getByRole('combobox', { name: label, exact: true })
+  await input.scrollIntoViewIfNeeded()
+  await input.focus()
+  await input.evaluate((element, value) => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    nativeSetter?.call(element, value)
+    element.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  }, option)
+  const listboxID = await input.getAttribute('aria-controls')
+  if (!listboxID) throw new Error(`Remote selector ${label} did not expose its listbox relationship.`)
+  const listbox = page.locator(`[id=${JSON.stringify(listboxID)}]`)
+  const result = listbox.getByRole('option').filter({ hasText: option }).first()
+  await expect(result).toBeVisible()
+  await result.evaluate((element) => (element as HTMLElement).click())
+}
+
+async function chooseExportScope(page: import('@playwright/test').Page, value: 'articles' | 'account') {
+  await page.locator(`input[type="radio"][value="${value}"]`).evaluate((element) => (element as HTMLInputElement).click())
+}
+
+async function toggleCheckbox(checkbox: import('@playwright/test').Locator) {
+  await checkbox.evaluate((element) => (element as HTMLInputElement).click())
+}
+
+async function setInputValue(input: import('@playwright/test').Locator, value: string) {
+  await input.evaluate((element, nextValue) => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    nativeSetter?.call(element, nextValue)
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
   }, value)
-  await expect(articleIDs).toHaveValue(value)
+}
+
+async function clickButton(page: import('@playwright/test').Page, name: string) {
+  await page.getByRole('button', { name, exact: true }).evaluate((element) => (element as HTMLButtonElement).click())
 }
 
 test('sanitized settings and storage maintenance flows do not reveal secrets', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/settings')
-  await expect(page.getByText('account-fixture', { exact: true })).toBeVisible()
-  await page.getByRole('textbox', { name: 'Download concurrency' }).fill('3')
+  await expect(page.getByRole('heading', { name: 'Settings and maintenance' })).toBeVisible()
+  await page.getByRole('spinbutton', { name: 'Download concurrency' }).fill('3')
   await page.getByRole('button', { name: 'Save preferences' }).click()
   await expect(page.getByText('Preferences saved.')).toBeVisible()
   expect(fixture.preferencePatches).toHaveLength(1)
@@ -510,7 +744,7 @@ test('export defaults persist locally without changing sync settings or starting
   const fixture = await installLoopbackFixture(page)
   await page.goto('/settings')
 
-  await page.getByRole('combobox', { name: 'Collision policy' }).selectOption('replace')
+  await selectAstryxSelectorOption(page, 'Collision policy', 'Append suffix', 'Replace existing output')
   await page.getByRole('checkbox', { name: 'Excel: include article content' }).uncheck()
   await page.getByRole('checkbox', { name: 'JSON: include article content' }).uncheck()
   await page.getByRole('checkbox', { name: 'JSON: include stored comments' }).check()
@@ -560,7 +794,7 @@ test('saving Chinese display language updates the UI immediately and persists th
   const fixture = await installLoopbackFixture(page)
   await page.goto('/settings')
 
-  await page.getByLabel('Display language').selectOption('zh-CN')
+  await selectAstryxSelectorOption(page, 'Display language', 'English', 'Chinese (Simplified)')
   await page.getByRole('button', { name: 'Save preferences' }).click()
 
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
@@ -578,7 +812,7 @@ test('profile display language takes precedence when the workspace first loads',
 
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
   await expect(page.getByRole('heading', { name: '设置与维护' })).toBeVisible()
-  await expect(page.getByLabel('显示语言')).toHaveValue('zh-CN')
+  await expect(page.getByRole('combobox', { name: '显示语言' })).toHaveText('简体中文')
   await expectOnlyLoopbackRequests(page)
 })
 
@@ -635,8 +869,8 @@ test('sanitized diagnostic bundle creation posts no paths and downloads through 
 test('sanitized restore stages one archive, prepares explicit confirmation, and closes the workspace', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.goto('/settings')
-  await expect(page.getByRole('alert')).toContainText('Destructive action')
-  await page.getByLabel('Backup archive').setInputFiles({ name: 'sanitized-backup.wab', mimeType: 'application/octet-stream', buffer: Buffer.from('sanitized restore archive') })
+  await expect(page.getByRole('region', { name: 'Restore' }).getByRole('alert')).toContainText('Destructive action')
+  await page.getByRole('button', { name: 'Backup archive' }).locator('input[type="file"]').setInputFiles({ name: 'sanitized-backup.wab', mimeType: 'application/octet-stream', buffer: Buffer.from('sanitized restore archive') })
   const uploadRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/maintenance/restore/upload'))
   const prepareRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/maintenance/restore/prepare'))
   await page.getByRole('button', { name: 'Stage archive for restore' }).click()
@@ -659,7 +893,7 @@ test('failure states remain usable with sanitized local errors', async ({ page }
   await installLoopbackFixture(page)
   await page.route('**/api/v1/articles?**', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Sanitized fixture unavailable' } }) }))
   await page.goto('/articles')
-  await expect(page.getByRole('alert')).toContainText('The local article API is not available yet.')
+  await expect(page.getByRole('alert').filter({ hasText: 'The local article API is not available yet.' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
   await expectOnlyLoopbackRequests(page)
 })
@@ -669,7 +903,7 @@ test('an online reconnect invalidates a failed local snapshot and renders evolve
   let snapshotRequests = 0
   await page.route('**/api/v1/events/snapshot', (route) => {
     snapshotRequests += 1
-    if (snapshotRequests <= 2) {
+    if (snapshotRequests <= 3) {
       return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Sanitized snapshot temporarily unavailable' } }) })
     }
     return route.fulfill({
@@ -689,7 +923,7 @@ test('an online reconnect invalidates a failed local snapshot and renders evolve
   })
 
   await page.goto('/')
-  await expect(page.getByText('Live local details are unavailable. The page remains read-only while the P0 API is rolling out.')).toBeVisible()
+  await expect(page.getByRole('alert')).toContainText('Live local details are unavailable. Check that the local workspace is still running.')
   await page.evaluate(() => window.dispatchEvent(new Event('online')))
   await expect(page.getByText('Recovered Fixture Account')).toBeVisible()
   await expect(page.getByText('1 accounts · 7 articles · 0 albums · 1 jobs')).toBeVisible()

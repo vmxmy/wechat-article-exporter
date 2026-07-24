@@ -93,8 +93,8 @@ both styles in the same request is a `400 invalid_argument`.
 | Numbered page | `page`, `page_size` | `page` is a required positive integer, one-based. `page_size` defaults to `50` if omitted. Internally converted to `offset = (page-1) * page_size`. |
 
 Shared rules, enforced identically across every paginated route
-(`accounts`, `accounts/search`, `articles`, `albums`, `saved-queries`,
-`jobs`, `articles/{id}/detail`, `articles/{id}/comments`, and
+(`accounts`, `accounts/search`, `selectors/accounts`, `articles`, `selectors/articles`, `albums`,
+`selectors/albums`, `saved-queries`, `jobs`, `articles/{id}/detail`, `articles/{id}/comments`, and
 `articles/{id}/comments/{commentId}/replies`):
 
 - Default page size (no pagination parameters at all): **50** items
@@ -187,6 +187,54 @@ embedded browser SPA and any external MCP/automation client) MUST:
   applies to what the server returns, not to what it accepts.
 - Treat an unrecognized `error.code` as an unclassified failure (safe to
   surface `error.message`) rather than crashing or silently retrying.
+
+### 5.2 Human-readable projections and bounded selectors
+
+The browser workspace uses display fields as presentation data only. Stable
+local IDs remain the values submitted to mutations and are available through
+explicit technical-detail UI; display fields MUST NOT replace an action's
+existing stable-ID request contract.
+
+`GET /api/v1/selectors/accounts`, `GET /api/v1/selectors/articles`, and
+`GET /api/v1/selectors/albums` are additive, authenticated, paginated read
+routes. They use the standard page envelope (§2.2) and the same default/max
+page limits and mutually exclusive pagination styles in §3. They accept the
+normal list-route `search` alias for `keyword`; article selectors retain the
+validated article-filter query vocabulary, while album selectors also accept
+optional `accountId`. Unsupported or repeated query keys, mixed pagination
+styles, invalid page values, and a page size above 100 return
+`400 invalid_argument`. These routes return local saved-resource choices only;
+they do not discover upstream accounts or load an unbounded library into the
+client.
+
+| Route | Page-item projection | Deliberately absent |
+| --- | --- | --- |
+| `GET /selectors/accounts` | `id`, `displayName` when available, `displayNameAvailable`, and optional local `alias` | fakeid, description, avatar URL, sync cursor, credentials, storage locations, and upstream payloads |
+| `GET /selectors/articles` | `id`, non-empty `title`, `accountName` when locally available, and `accountNameAvailable` | account ID, article body/digest/URL, author, metrics, message/upstream IDs, resource data, credentials, and paths |
+| `GET /selectors/albums` | `id`, `accountId`, `displayName` when available, `displayNameAvailable`, `accountName` when available, and `accountNameAvailable` | upstream album ID, description, article count, article/content data, credentials, and paths |
+
+`displayNameAvailable` and `accountNameAvailable` distinguish a missing local
+name from an empty string. A missing display name is not an error and does
+not change the stable ID; clients render a localized explained fallback and
+may offer the exact ID only in technical details. `accountId` remains in the
+album selector because album actions may require both stable local identities.
+
+The following fields were added additively to existing safe projections and
+do not alter existing request or identity semantics:
+
+| Existing route family | Additive presentation fields | Compatibility and redaction rule |
+| --- | --- | --- |
+| `GET /articles` | `accountName`, `accountNameAvailable` | Article rows continue to use article `id`; the normal projection does not expose `accountId`. |
+| `GET /albums` | `accountName`, `accountNameAvailable` | Existing album fields, including `id`, `accountId`, and v1-compatible `upstreamId`, retain their previous meaning. New selectors are the minimized option projection. |
+| `GET /jobs`, job controls, and job detail | `label` | `kind`, state, job ID, and permitted-action semantics remain unchanged; `label` is a local human-readable convenience, not a new job identity. |
+| `GET /settings/credentials` | `accountName`, `accountNameAvailable` | Credential metadata remains secret-free; account IDs stay available only as metadata/technical detail and no credential value is returned. |
+
+All name fields derive from current local profile data and may be absent. They
+MUST NOT cause a list request to fail merely because an optional name lookup
+is unavailable, except where the existing route already requires that local
+data for its primary result. Responses MUST continue to omit secrets,
+filesystem paths, opaque storage handles, upstream request state, and any
+fields excluded above.
 
 ## 6. Breaking-change, version-bump, and deprecation process
 

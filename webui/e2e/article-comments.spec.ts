@@ -5,6 +5,7 @@ test('article details expose bounded stored comments and keyboard-expandable pag
   await installLoopbackFixture(page)
   await page.goto('/articles')
   await page.getByRole('checkbox', { name: 'Select Sanitized article one' }).check()
+  await page.getByRole('button', { name: 'Details' }).click()
 
   await expect(page.getByRole('heading', { name: 'Stored comments' })).toBeVisible()
   await expect(page.getByText('Sanitized stored comment')).toBeVisible()

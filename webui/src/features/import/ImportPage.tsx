@@ -1,4 +1,5 @@
 import { Button } from '@astryxdesign/core/Button'
+import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { useState } from 'react'
 import type { MessageCatalog } from '../../i18n'
@@ -8,7 +9,7 @@ import { useWorkspaceMutations } from '../../lib/queries'
 export function ImportPage({ messages }: { readonly messages: MessageCatalog }) {
   const [url, setUrl] = useState('')
   const [force, setForce] = useState(false)
-  const [result, setResult] = useState<string>()
+  const [error, setError] = useState<string>()
   const mutations = useWorkspaceMutations()
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -16,10 +17,10 @@ export function ImportPage({ messages }: { readonly messages: MessageCatalog }) 
     if (!trimmedURL || mutations.ingestURL.isPending) return
     mutations.ingestURL.mutate({ url: trimmedURL, force }, {
       onSuccess: (job) => {
-        setResult(messages.import.queued(job.id))
+        setError(undefined)
         handoffCreatedJob(job)
       },
-      onError: (reason) => setResult(reason instanceof Error ? reason.message : messages.import.failed)
+      onError: (reason) => setError(reason instanceof Error ? reason.message : messages.import.failed)
     })
   }
   return (
@@ -35,10 +36,10 @@ export function ImportPage({ messages }: { readonly messages: MessageCatalog }) 
         <div><h2 id="import-form-title">{messages.import.title}</h2><p>{messages.import.note}</p></div>
         <form className="import-form" onSubmit={submit}>
           <TextInput label={messages.import.url} value={url} placeholder={messages.import.placeholder} onChange={setUrl} />
-          <label className="force-control"><input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} /> {messages.import.force}</label>
+          <CheckboxInput label={messages.import.force} value={force} onChange={setForce} />
           <Button label={messages.import.submit} type="submit" variant="primary" isLoading={mutations.ingestURL.isPending} isDisabled={!url.trim()} />
         </form>
-        {result ? <p role="status">{result}</p> : null}
+        {error ? <p role="status">{error}</p> : null}
       </section>
     </section>
   )
