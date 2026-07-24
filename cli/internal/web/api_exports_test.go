@@ -13,6 +13,7 @@ import (
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
 )
 
 type exportAPIService struct {
@@ -52,6 +53,121 @@ func (service *exportAPIService) DownloadArtifact(context.Context, application.W
 func (service *exportAPIService) OpenExportOutput(_ context.Context, exportID string) error {
 	service.openID = exportID
 	return nil
+}
+
+type exportListRecords struct {
+	page     domain.Page[library.ExportRecord]
+	requests []application.WorkspacePageRequest
+}
+
+func (records *exportListRecords) QueryExportRecords(_ context.Context, offset, limit int) (domain.Page[library.ExportRecord], error) {
+	records.requests = append(records.requests, application.WorkspacePageRequest{Offset: offset, Limit: limit})
+	return records.page, nil
+}
+
+func (*exportListRecords) GetExport(context.Context, domain.ExportID) (library.ExportRecord, error) {
+	return library.ExportRecord{}, nil
+}
+
+func (*exportListRecords) ListExportFiles(context.Context, domain.ExportID) ([]library.ExportFileRecord, error) {
+	return nil, nil
+}
+
+func TestExportListAPIUsesAuthenticatedSafePagedWorkspaceDTO(t *testing.T) {
+	completed := time.Date(2026, 7, 24, 10, 30, 0, 0, time.UTC)
+	records := &exportListRecords{page: domain.Page[library.ExportRecord]{
+		Items: []library.ExportRecord{{
+			ID:                   "export-1",
+			JobID:                "11111111-1111-1111-1111-111111111111",
+			Format:               "markdown",
+			State:                "completed",
+			CreatedAt:            completed.Add(-time.Minute),
+			CompletedAt:          completed,
+			OutputRoot:           "/private/export-root/local-temp-path",
+			ProvenancePath:       "/private/export-root/export-manifest.json",
+			ProvenanceSHA256:     "digest-secret",
+			ProvenanceState:      "ready",
+			ProvenanceGeneration: 2,
+		}},
+		Total: 7, Offset: 6, Limit: 3,
+	}}
+	server, client := startExportAPIServer(t, application.NewWorkspaceExports(nil, records))
+	base := authorizeAPI(t, client, server.URL())
+
+	response := get(t, client, base+"/api/v1/exports?offset=6&limit=3")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	var page struct {
+		APIVersion string            `json:"apiVersion"`
+		Data       []json.RawMessage `json:"data"`
+		Total      int               `json:"total"`
+		Offset     int               `json:"offset"`
+		Limit      int               `json:"limit"`
+	}
+	body := readResponse(t, response)
+	if err := json.Unmarshal([]byte(body), &page); err != nil {
+		response.Body.Close()
+		t.Fatal(err)
+	}
+	if page.APIVersion != apiVersion || page.Total != 7 || page.Offset != 6 || page.Limit != 3 || len(page.Data) != 1 {
+		t.Fatalf("list envelope=%#v", page)
+	}
+	if !reflect.DeepEqual(records.requests, []application.WorkspacePageRequest{{Offset: 6, Limit: 3}}) {
+		t.Fatalf("list request=%#v", records.requests)
+	}
+	var record application.WorkspaceExportRecord
+	if err := json.Unmarshal(page.Data[0], &record); err != nil {
+		t.Fatal(err)
+	}
+	if got := record; got.OutputDirectory != "local export directory" {
+		t.Fatalf("unsafe output directory=%q", got.OutputDirectory)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(page.Data[0], &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{
+		"id", "jobId", "format", "state", "createdAt", "completedAt", "provenanceState", "provenanceGeneration", "outputDirectory",
+	} {
+		if _, ok := fields[field]; !ok {
+			t.Fatalf("export list DTO omitted safe field %q: %s", field, page.Data[0])
+		}
+	}
+	if len(fields) != 9 {
+		t.Fatalf("export list DTO has unsafe extra fields: %s", page.Data[0])
+	}
+	for _, forbidden := range []string{"/private/export-root", "local-temp-path", "digest", "secret"} {
+		if strings.Contains(strings.ToLower(body), forbidden) {
+			t.Fatalf("list response leaked %q: %s", forbidden, body)
+		}
+	}
+
+	response = get(t, client, base+"/api/v1/exports?limit=101")
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid limit status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "invalid_argument")
+	response = get(t, client, base+"/api/v1/exports?offset=0&page=1")
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("mixed pagination status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "invalid_argument")
+	if len(records.requests) != 1 {
+		t.Fatalf("invalid queries reached export service: %#v", records.requests)
+	}
+
+}
+
+func TestExportListAPIIsUnavailableWithoutExportService(t *testing.T) {
+	server, client := startExportAPIServer(t, nil)
+	base := authorizeAPI(t, client, server.URL())
+
+	response := get(t, client, base+"/api/v1/exports")
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("list status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "unavailable")
 }
 
 func TestExportAPIUsesOpaqueCapabilitiesAndFacadeOnly(t *testing.T) {

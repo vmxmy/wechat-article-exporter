@@ -38,7 +38,7 @@ presence or absence of at least one asserting test per cell.
 | `GET /jobs/{id}/detail` | ✓ | ✓ | ✓ (query params rejected) | ✓ (`checkpoint`/`leaseOwner`/`fields`/`/private`/`secret` absence assertions) | `TestJobDetailAPIUsesSafeBoundedWorkspaceDTO` |
 | `GET /storage` | ✓ | ✓ | – | – | `TestReadAPIProvidesVersionedBoundedWorkspaceData` |
 | `GET /events/snapshot`, `/snapshot` | ✓ | ✓ | – | ✓ (`/private`/`Paths` absence assertion) | `TestReadAPIProvidesVersionedBoundedWorkspaceData`, `TestSnapshotPollingRevisionAdvancesOnlyForObservedStateChanges` |
-| `GET /exports` (list) | ✓ (shared middleware) | – | – | – | none found directly for the list route; exercised indirectly through export handler tests below |
+| `GET /exports` (list) | ✓ (authenticated browser session) | ✓ (v1 page envelope; explicit `offset`/`limit` passed to the export facade) | ✓ (`limit=101` and mixed `offset`/`page` rejected before the export facade) | ✓ (safe `WorkspaceExportRecord` fields only; `outputDirectory` is `local export directory`, with configured path, temporary path, digest, and secret fixture values absent) | `TestExportListAPIUsesAuthenticatedSafePagedWorkspaceDTO`, `TestExportListAPIIsUnavailableWithoutExportService` (`503 unavailable`) |
 | Generic internal-error leak protection | – | – | – | ✓ | `TestReadAPIErrorModelDoesNotLeakApplicationFailures` |
 
 ## Mutation routes (`cli/internal/web/api_control.go`)
@@ -92,10 +92,10 @@ presence or absence of at least one asserting test per cell.
 
 ## Known gaps (do not claim these are covered)
 
-- `GET /accounts/manifest` (read path) and `GET /exports` (list) have no
-  test found that specifically targets the bare read route in isolation;
-  only their control-plane siblings (`/accounts/manifest/upload`,
-  `/accounts/manifest/import`) and export sub-resources are directly tested.
+- `GET /accounts/manifest` (read path) has no test found that specifically
+  targets the bare read route in isolation; its control-plane siblings
+  (`/accounts/manifest/upload`, `/accounts/manifest/import`) are directly
+  tested.
 - No test in this package directly asserts the exact `error.code` value for
   every code in the §4 vocabulary of
   `docs/release/browser-api-contract.md`; several codes (`unavailable`,
