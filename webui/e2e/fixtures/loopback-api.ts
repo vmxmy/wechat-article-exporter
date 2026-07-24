@@ -20,7 +20,7 @@ export interface LoopbackFixture {
   readonly albumTraversals: readonly unknown[]
 }
 
-export async function installLoopbackFixture(page: Page): Promise<LoopbackFixture> {
+export async function installLoopbackFixture(page: Page, options: { readonly displayLanguage?: 'en' | 'zh-CN' } = {}): Promise<LoopbackFixture> {
   const requests: string[] = []
   const controls: Array<{ path: string; confirmation?: string }> = []
   const accountDeletions: unknown[] = []
@@ -74,9 +74,10 @@ export async function installLoopbackFixture(page: Page): Promise<LoopbackFixtur
       onLoginState: (state) => { loginState = state },
       onDirectory: (next) => { directory = next },
       onBackupID: (id) => { backupID = id },
-      onGCPlan: (next) => { gcPlan = next }
-      ,savedQueries
-      ,onSavedQueries: (next) => { savedQueries = next }
+      onGCPlan: (next) => { gcPlan = next },
+      displayLanguage: options.displayLanguage,
+      savedQueries,
+      onSavedQueries: (next) => { savedQueries = next }
     })
   })
   return { requests, controls, accountDeletions, savedAccounts, accountSyncs, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, credentialValidations, proxyRemovals, resourceDownloads, albumTraversals }
@@ -98,6 +99,7 @@ interface State {
   readonly directory: { readonly token: string; readonly label: string }
   readonly backupID: string
   readonly gcPlan: boolean
+  readonly displayLanguage?: 'en' | 'zh-CN'
   readonly controls: Array<{ path: string; confirmation?: string }>
   readonly accountDeletions: unknown[]
   readonly savedAccounts: unknown[]
@@ -215,7 +217,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
     state.proxyRemovals.push(body)
     return json(route, { id: 'proxy-fixture', name: 'Sanitized proxy', endpoint: 'https://proxy.fixture/?token=%5BREDACTED%5D', authorizationConfigured: true, trust: 'public-only', classes: ['public_content'], priority: 0, enabled: true, health: { state: 'healthy' }, createdAt: now, updatedAt: now })
   }
-  if (url.pathname === '/api/v1/settings/preferences' && method === 'GET') return json(route, preferences())
+  if (url.pathname === '/api/v1/settings/preferences' && method === 'GET') return json(route, preferences(state.displayLanguage))
   if (url.pathname === '/api/v1/settings/preferences' && method === 'PATCH') { state.preferencePatches.push(body); return json(route, body) }
   if (url.pathname === '/api/v1/maintenance/integrity') return json(route, { checkedAt: now, issues: [] })
   if (url.pathname === '/api/v1/maintenance/diagnostics') return json(route, { collectedAt: now, checks: [{ name: 'loopback', status: 'ok', summary: 'Sanitized local fixture' }] })
@@ -235,5 +237,5 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
 function json(route: Route, body: unknown) { return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) }) }
 function page(route: Route, data: readonly unknown[], total = data.length) { return json(route, { data, pagination: { page: 1, pageSize: 25, total } }) }
 function storage() { return { databaseAvailable: true, objectStoreReady: true, accounts: 1, articles: 2, albums: 0, jobs: 1, objects: 2, objectBytes: 84 } }
-function preferences() { return { sync: { range: 'all', pageDelay: 1, jitter: 0, pageSize: 20, incremental: true, unsafePacingSaved: false }, download: { concurrency: 2, forceContent: false, metadataOverridesContent: false }, export: { namingTemplate: '{title}', maximumNameBytes: 180, collisionPolicy: 'suffix', excelIncludeContent: true, jsonIncludeContent: true, jsonIncludeComments: false, htmlIncludeComments: false }, display: { noColor: false, ascii: false, plain: false, hideDeleted: false, language: 'en' }, proxy: { directFirst: true, fallbackEnabled: false } } }
+function preferences(displayLanguage: 'en' | 'zh-CN' = 'en') { return { sync: { range: 'all', pageDelay: 1, jitter: 0, pageSize: 20, incremental: true, unsafePacingSaved: false }, download: { concurrency: 2, forceContent: false, metadataOverridesContent: false }, export: { namingTemplate: '{title}', maximumNameBytes: 180, collisionPolicy: 'suffix', excelIncludeContent: true, jsonIncludeContent: true, jsonIncludeComments: false, htmlIncludeComments: false }, display: { noColor: false, ascii: false, plain: false, hideDeleted: false, language: displayLanguage }, proxy: { directFirst: true, fallbackEnabled: false } } }
 function gc() { return { id: 'gc-fixture', generatedAt: now, expiresAt: '2026-07-24T10:30:00.000Z', unreferencedObjects: { count: 1, bytes: 42 }, temporaryFiles: { count: 0, bytes: 0 }, expiredDebugCaptures: { count: 0, bytes: 0 }, completedJobLogs: { count: 0, bytes: 0 }, confirmation: 'apply-gc-fixture' } }

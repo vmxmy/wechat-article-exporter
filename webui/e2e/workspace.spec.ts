@@ -440,12 +440,8 @@ test('saving Chinese display language updates the UI immediately and persists th
 })
 
 test('profile display language takes precedence when the workspace first loads', async ({ page }) => {
-  await installLoopbackFixture(page)
   await page.addInitScript(() => window.localStorage.setItem('wechat-article.display.language', 'en'))
-  await page.route('**/api/v1/settings/preferences', (route) => {
-    if (route.request().method() !== 'GET') return route.continue()
-    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ apiVersion: 'v1', data: { sync: { range: 'all', pageDelay: 1, jitter: 0, pageSize: 20, incremental: true, unsafePacingSaved: false }, download: { concurrency: 2, forceContent: false, metadataOverridesContent: false }, export: { namingTemplate: '{title}', maximumNameBytes: 180, collisionPolicy: 'suffix', excelIncludeContent: true, jsonIncludeContent: true, jsonIncludeComments: false, htmlIncludeComments: false }, display: { noColor: false, ascii: false, plain: false, hideDeleted: false, language: 'zh-CN' }, proxy: { directFirst: true, fallbackEnabled: false } } }) })
-  })
+  await installLoopbackFixture(page, { displayLanguage: 'zh-CN' })
   await page.goto('/settings')
 
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
