@@ -789,8 +789,7 @@ func (workspace *Workspace) ArticleCommentReplies(ctx context.Context, id domain
 	if err != nil {
 		return WorkspacePage[WorkspaceArticleReply]{}, err
 	}
-	commentID = strings.TrimSpace(commentID)
-	if !validWorkspaceOpaqueID(commentID) {
+	if strings.TrimSpace(commentID) != commentID || !validWorkspaceOpaqueID(commentID) {
 		return WorkspacePage[WorkspaceArticleReply]{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "comment identifier is invalid"}
 	}
 	replies, ok := workspace.application.(interface {

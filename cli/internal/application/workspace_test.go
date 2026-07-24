@@ -238,9 +238,22 @@ func TestWorkspaceArticleCommentsAreBoundedSafeAndMarkPendingReplies(t *testing.
 	if library.repliesID != articleID || library.repliesComment != "comment-1" || library.repliesLimit != 1 {
 		t.Fatalf("replies query = article=%q comment=%q limit=%d", library.repliesID, library.repliesComment, library.repliesLimit)
 	}
-	for _, input := range []struct{ articleID, commentID string }{{" article:efc3a405910aa8d4dd98bb2e095017b6", "comment-1"}, {"article one", "comment-1"}, {"article:xyz", "comment-1"}, {"article:efc3a405910aa8d4dd98bb2e095017b6/../secret", "comment-1"}, {"article-1", "comment one"}} {
+	for _, input := range []struct{ articleID, commentID string }{
+		{" article:efc3a405910aa8d4dd98bb2e095017b6", "comment-1"},
+		{"article one", "comment-1"},
+		{"article:xyz", "comment-1"},
+		{"article:efc3a405910aa8d4dd98bb2e095017b6/../secret", "comment-1"},
+		{"article-1", "comment one"},
+		{string(articleID), " comment-1"},
+		{string(articleID), "comment-1 "},
+	} {
 		if _, err := workspace.ArticleCommentReplies(context.Background(), domain.ArticleID(input.articleID), input.commentID, WorkspacePageRequest{}); err == nil {
-			t.Fatalf("expected invalid identifiers for %#v", input)
+			t.Fatalf("expected WorkspaceErrorInvalidArgument for identifiers %#v", input)
+		} else {
+			var workspaceErr *WorkspaceError
+			if !errors.As(err, &workspaceErr) || workspaceErr.Code != WorkspaceErrorInvalidArgument {
+				t.Fatalf("expected WorkspaceErrorInvalidArgument for identifiers %#v, got %v", input, err)
+			}
 		}
 	}
 }
