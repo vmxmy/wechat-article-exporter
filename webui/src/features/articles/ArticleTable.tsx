@@ -83,16 +83,18 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
         />
       )
     },
-    { accessorKey: 'title', header: messages.articles.columns.title },
-    { accessorKey: 'accountName', header: messages.articles.columns.account, enableSorting: false, cell: ({ getValue }) => getValue<string | undefined>()?.trim() || '—' },
+    { accessorKey: 'title', header: messages.articles.columns.title, meta: { className: 'article-title-cell' }, cell: ({ getValue }) => <span className="article-title-text" title={getValue<string>()}>{getValue<string>()}</span> },
+    { accessorKey: 'accountName', header: messages.articles.columns.account, enableSorting: false, meta: { className: 'article-account-cell' }, cell: ({ getValue }) => getValue<string | undefined>()?.trim() || '—' },
     {
       accessorKey: 'publishedAt',
       header: messages.articles.columns.published,
+      meta: { className: 'article-published-cell' },
       cell: ({ getValue }) => formatDate(getValue<string | null>(), locale)
     },
     {
       accessorKey: 'status',
       header: messages.articles.columns.status,
+      meta: { className: 'article-status-cell' },
       cell: ({ row }) => <ArticleStatus status={row.original.state ?? row.original.status ?? ''} locale={locale} />
     }
   ], [locale, messages])
@@ -229,7 +231,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id}>
                   {headerGroup.headers.map((header) => (
-                    <th key={header.id} scope="col" aria-sort={header.column.getCanSort() ? getSortLabel(header.column.getIsSorted()) : undefined}>
+                    <th key={header.id} scope="col" className={columnClassName(header.column.columnDef)} aria-sort={header.column.getCanSort() ? getSortLabel(header.column.getIsSorted()) : undefined}>
                       {header.isPlaceholder ? null : header.column.getCanSort() ? (
                         <button
                           className="sort-button"
@@ -248,7 +250,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
               {table.getRowModel().rows.map((row) => (
                 <tr key={row.id} data-selected={row.getIsSelected() || undefined}>
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+                    <td key={cell.id} className={columnClassName(cell.column.columnDef)}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
                   ))}
                 </tr>
               ))}
@@ -283,6 +285,11 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
       </section>
     </section>
   )
+}
+
+function columnClassName(column: ColumnDef<ArticleRecord>) {
+  const meta = column.meta as { readonly className?: string } | undefined
+  return meta?.className
 }
 
 function ArticleDetail({ detail, articleID, messages, locale }: { readonly detail: ReturnType<typeof useArticleDetail>; readonly articleID: string; readonly messages: MessageCatalog; readonly locale: Locale }) {

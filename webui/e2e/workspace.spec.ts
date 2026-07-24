@@ -74,6 +74,22 @@ test('article table presents account names rather than internal account IDs', as
   await expectOnlyLoopbackRequests(page)
 })
 
+test('article table reserves flexible width for titles and supports truncation', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/articles')
+
+  const title = page.getByTitle('Sanitized article one')
+  await expect(title).toBeVisible()
+  await expect(title).toHaveCSS('text-overflow', 'ellipsis')
+  const dimensions = await page.evaluate(() => {
+    const titleCell = document.querySelector('.article-title-cell')?.getBoundingClientRect().width ?? 0
+    const accountCell = document.querySelector('.article-account-cell')?.getBoundingClientRect().width ?? 0
+    return { titleCell, accountCell }
+  })
+  expect(dimensions.titleCell).toBeGreaterThan(dimensions.accountCell)
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('discovery candidates populate the explicit account save form and choose a synchronization mode', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/accounts')
