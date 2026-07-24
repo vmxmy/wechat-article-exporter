@@ -1,6 +1,6 @@
 ## 1. Shared presentation foundation
 
-- [ ] 1.1 Inventory every normal-flow occurrence of raw IDs, fakeid, RFC3339, JSON, snake_case enums, paths, hashes, duplicate local/read-only badges, and page-specific formatters.
+- [x] 1.1 Inventory every normal-flow occurrence of raw IDs, fakeid, RFC3339, JSON, snake_case enums, paths, hashes, duplicate local/read-only badges, and page-specific formatters. See [the browser workspace humanization inventory](../../../docs/release/browser-ux-humanization-inventory.md) for the surface-by-surface findings, formatter consolidation targets, responsive gaps, and shared-file integration order.
 - [ ] 1.2 Add shared locale-aware formatters for status, job kind, date/time, duration, bytes, counts, empty values, identifiers, paths, and hashes with unit tests.
 - [ ] 1.3 Add shared semantic status and technical-details components with copyable exact values and accessible labels.
 - [ ] 1.4 Define resource column roles and derive alignment, truncation, responsive metadata, and accessible full-value behavior from them.
