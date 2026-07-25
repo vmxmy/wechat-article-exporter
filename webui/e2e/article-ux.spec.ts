@@ -47,6 +47,32 @@ async function toggleCheckbox(checkbox: import('@playwright/test').Locator) {
   await checkbox.evaluate((element) => (element as HTMLInputElement).click())
 }
 
+test('article applied view is canonical, reloadable, shareable, and history-restorable', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/articles?keyword=Sanitized&page=2&sort=title%3Aasc&dialog=secret&foreign=kept')
+
+  await expect(page.getByRole('textbox', { name: 'Search articles' })).toHaveValue('Sanitized')
+  await expect(page.getByText('Page 2 of 2', { exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/keyword=Sanitized/)
+  await expect(page).toHaveURL(/page=2/)
+  await expect(page).toHaveURL(/sort=title%3Aasc/)
+  await expect(page).toHaveURL(/foreign=kept/)
+  await expect(page).not.toHaveURL(/dialog=/)
+
+  await page.reload()
+  await expect(page.getByRole('textbox', { name: 'Search articles' })).toHaveValue('Sanitized')
+  await expect(page.getByText('Page 2 of 2', { exact: true })).toBeVisible()
+
+  await page.getByRole('textbox', { name: 'Search articles' }).fill('Fixture')
+  await page.getByRole('button', { name: 'Apply filters' }).click()
+  await expect(page).toHaveURL(/keyword=Fixture/)
+  await expect(page).not.toHaveURL(/page=2/)
+  await page.goBack()
+  await expect(page.getByRole('textbox', { name: 'Search articles' })).toHaveValue('Sanitized')
+  await expect(page.getByText('Page 2 of 2', { exact: true })).toBeVisible()
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('legacy saved-query route uses visual filters and only reveals raw JSON in technical mode', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.goto('/saved-queries')

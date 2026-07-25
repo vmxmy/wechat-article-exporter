@@ -1,5 +1,12 @@
 # WeChat Article Local Workspace Design System
 
+## 0. Source hierarchy
+
+- The repository-root `DESIGN.md` is the upstream visual reference for UI work. Preserve its 4 px spacing scale, 1280 px container discipline, single-accent color strategy, compact controls, hairline boundaries, and restrained surface hierarchy.
+- This file is the product-workspace adaptation of that reference. When the root document describes marketing-only behavior—such as a dark-only canvas, screenshot-led hero sections, or 96 px campaign-section spacing—this file takes precedence for the local application shell.
+- Astryx semantic tokens remain the implementation source of truth. Do not copy root-document hex values or proprietary font names directly into feature CSS.
+- New UI must consume the shared layout primitives and semantic spacing tokens documented below; one-off feature spacing requires a product reason recorded here.
+
 ## 1. Visual theme and atmosphere
 
 The browser UI is a local-first professional workspace: quiet, exact, and operational. It should feel like a dependable desktop tool rather than a hosted SaaS dashboard. The visual memory is a cool paper-like canvas, a compact command rail, and crisp data surfaces that gain depth only when interaction or hierarchy requires it.
@@ -39,10 +46,24 @@ The browser UI is a local-first professional workspace: quiet, exact, and operat
 
 - Desktop content width is capped at 1280 px and aligned to one consistent grid.
 - Main content uses 24–32 px desktop gutters and 16 px mobile gutters.
+- Page rhythm is tokenized: `--space-page-top`, `--space-page-bottom`, `--space-section`, `--space-subsection`, and `--space-cluster`. Pages must not invent one-off top-level gaps.
+- Use the shared layout primitives for new work: `PageStack` for page regions, `SectionStack` for related sections, `ContentCluster` for wrapping controls, `ReadingMeasure` for readable copy, and `DenseRegion` for tables and their controls.
+- Group-internal relationships stay tight while transitions between business sections stay loose: label-to-control 4–8 px, copy-to-action 16–20 px, and section-to-section 32–56 px.
+- Reading copy is capped at 60 characters; descriptive page copy is capped at 44 rem and form columns at 36 rem.
 - The header is a compact command rail integrated with the page canvas.
 - The home page has one primary task panel followed by a compact workspace facts strip.
 - Data pages prioritize the title column and compress metadata, numeric, date, and status columns to content width.
 - Settings use persistent local navigation on desktop and horizontal overflow navigation on narrow screens.
+- Dense tables keep 44–48 px rows; breathing room belongs around the table toolbar, table frame, and pagination rather than inside every row.
+
+### Layout primitive contract
+
+- `PageStack`: only for first-level page regions. Default gap is `--space-section`.
+- `SectionStack`: for related sections inside a page or panel. Select `section`, `subsection`, or `cluster` based on semantic distance.
+- `ContentCluster`: for controls and actions that wrap together; never use it for prose paragraphs.
+- `ReadingMeasure`: applies semantic line-length limits; use `reading`, `description`, or `form`, never an arbitrary width.
+- `DenseRegion`: binds controls, a data surface, and pagination into one compact visual unit. Do not increase table row padding to create page-level breathing room.
+- Feature CSS may refine alignment and responsive collapse, but must consume these tokens instead of introducing competing spacing scales.
 
 ## 6. Depth and hierarchy
 

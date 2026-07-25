@@ -97,6 +97,20 @@
 
 loopback listener、bootstrap/session、Host/Origin/CSRF、安全头、敏感日志脱敏、credential transport policy、staging、opaque file capability、路径校验和 exact confirmation 全部保持。前端仍为静态嵌入 SPA，不加载 CDN、字体、analytics 或项目域名。
 
+### 15. 浏览器状态采用安全分层持久化
+
+文章页只把已经应用的筛选、排序和页码规范化到 URL；未应用草稿、行选择、弹窗和通知仍是临时组件状态。URL 解析与序列化集中在一个共享边界，默认值省略、非法值安全回退，用户可感知视图变化使用 history entry，机械规范化使用 replace。
+
+导出向导只把阶段、范围类型和格式等非敏感状态放入 URL；需要刷新恢复但不适合共享的非敏感草稿使用有界 session storage。目录 capability、路径、精确确认、凭据和文章正文禁止进入任何浏览器持久化。恢复时验证状态机前置条件，缺失时回到最早有效阶段，完成或明确重置后清除草稿。
+
+### 16. 未保存偏好由中央导航保护
+
+偏好编辑器以最近成功加载或保存的规范化可编辑值为基线计算 dirty 状态。共享导航边界拦截内部链接、程序化跳转和浏览器历史；页面关闭与刷新只使用原生 beforeunload。站内确认使用 Astryx 可访问对话框，取消恢复焦点，确认丢弃后只恢复一次原目标。保存成功更新基线，保存失败保留草稿与 dirty 状态，全部恢复原值则自动清除。
+
+### 17. 原生语义由共享控件边界补齐
+
+继续以 Astryx 提供视觉、标签、焦点和错误呈现，在共享边界补充稳定 name、URL type/input mode 和明确 autocomplete 策略。二维码声明固有尺寸但保持响应式 CSS；文档为明暗模式提供 theme-color；精确技术值集中标记 `translate="no"`；数值格式统一走当前应用 locale，加载和占位文案统一使用单字符省略号。
+
 ## Risks / Trade-offs
 
 - [名称缺失或重名导致误选] → 显示辅助标签，动作始终提交稳定 ID，技术详情可核对完整标识。

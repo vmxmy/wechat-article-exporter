@@ -8,10 +8,11 @@ import { Selector } from '@astryxdesign/core/Selector'
 import { Section } from '@astryxdesign/core/Section'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { PageHeader, Status, TechnicalDetails } from '../../components/presentation'
+import { PageHeader, PageStack, Status, TechnicalDetails } from '../../components/presentation'
 import { isLocale, messages as localeMessages, persistLocale, type Locale, type MessageCatalog } from '../../i18n'
 import { formatBytes, formatCount, formatDateTime, formatHash, formatStatus } from '../../lib/presentation'
 import { getBackupArtifactDownloadURL, getDiagnosticBundleDownloadURL, getProxyDisclosure, type BackupReceipt, type CredentialImportInput, type CredentialValidation, type DiagnosticBundleReceipt, type GarbageCollectionPlan, type Preferences, type ProxyInput, type ProxyRequestClass, type ProxyTrust, type RestoreCompletion, type RestoreConflictPolicy, type RestorePreparation } from '../../lib/api'
+import { isPreferencesDirty, navigationGuard, reconcileLoadedPreferences, reconcileSavedPreferences } from '../../lib/navigationGuard'
 import { useCredentials, useDiagnostics, useIntegrity, usePreferences, useProxies, useWorkspaceMutations } from '../../lib/queries'
 import './settings.css'
 
@@ -47,25 +48,29 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
     void diagnostics.refetch()
   }
   const failure = (reason: unknown) => setNotice(reason instanceof Error ? reason.message : copy.actionFailed)
-  const savePreferences = (value: Partial<Preferences>) => mutations.patchPreferences.mutate(value, {
-    onSuccess: (saved) => {
+  const savePreferences = async (value: Preferences) => {
+    try {
+      const saved = await mutations.patchPreferences.mutateAsync({ download: value.download, export: value.export, display: value.display, proxy: value.proxy })
       const language = isLocale(saved.display?.language) ? saved.display.language : value.display?.language
       if (isLocale(language)) {
         persistLocale(language)
         setNotice(localeMessages[language].settings.preferences.saved)
-        return
+      } else {
+        setNotice(copy.preferences.saved)
       }
-      setNotice(copy.preferences.saved)
-    },
-    onError: failure
-  })
+      return saved
+    } catch (reason) {
+      failure(reason)
+      throw reason
+    }
+  }
 
   return (
-    <section className="settings-page" aria-labelledby="settings-title">
+    <PageStack className="settings-page" aria-labelledby="settings-title">
       <PageHeader eyebrow={messages.navigation.operations} title={copy.title} titleId="settings-title" description={copy.description} />
       {error ? <Banner status="error" title={copy.unavailable} endContent={<Button label={copy.retry} variant="secondary" onClick={refreshing} />} /> : null}
       {notice ? <Banner status="success" title={notice} isDismissable onDismiss={() => setNotice(undefined)} /> : null}
-      <PreferencesDraftProvider key={JSON.stringify(preferences.data)} value={preferences.data} pending={mutations.patchPreferences.isPending} onSave={savePreferences}>
+      <PreferencesDraftProvider value={preferences.data} pending={mutations.patchPreferences.isPending} onSave={savePreferences}>
       <div className="settings-layout">
         <SettingsNavigation messages={messages} />
         <div className="settings-content">
@@ -139,7 +144,7 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
         </div>
       </div>
       </PreferencesDraftProvider>
-    </section>
+    </PageStack>
   )
 }
 
@@ -178,7 +183,7 @@ function SettingsNavigation({ messages }: { readonly messages: MessageCatalog })
           </li>
         ))}
       </ul>
-      <Button label={messages.settings.preferences.save} variant="primary" isLoading={preferences?.pending} isDisabled={!preferences} onClick={() => preferences?.save()} />
+      <Button label={messages.settings.preferences.save} variant="primary" isLoading={preferences?.pending} isDisabled={!preferences || preferences.pending} onClick={() => preferences?.save()} />
     </nav>
   )
 }
@@ -206,20 +211,50 @@ type PreferencesDraftContextValue = {
 
 const PreferencesDraftContext = createContext<PreferencesDraftContextValue | undefined>(undefined)
 
-function PreferencesDraftProvider({ value, pending, onSave, children }: { readonly value?: Preferences; readonly pending: boolean; readonly onSave: (value: Partial<Preferences>) => void; readonly children: ReactNode }) {
+function PreferencesDraftProvider({ value, pending, onSave, children }: { readonly value?: Preferences; readonly pending: boolean; readonly onSave: (value: Preferences) => Promise<Preferences>; readonly children: ReactNode }) {
   return value
-    ? <PreferencesDraftEditor key={JSON.stringify(value)} value={value} pending={pending} onSave={onSave}>{children}</PreferencesDraftEditor>
+    ? <PreferencesDraftEditor value={value} pending={pending} onSave={onSave}>{children}</PreferencesDraftEditor>
     : <>{children}</>
 }
 
-function PreferencesDraftEditor({ value, pending, onSave, children }: { readonly value: Preferences; readonly pending: boolean; readonly onSave: (value: Partial<Preferences>) => void; readonly children: ReactNode }) {
-  const [draft, setDraft] = useState(value)
+function PreferencesDraftEditor({ value, pending, onSave, children }: { readonly value: Preferences; readonly pending: boolean; readonly onSave: (value: Preferences) => Promise<Preferences>; readonly children: ReactNode }) {
+  const [preferences, setPreferences] = useState({ draft: value, baseline: value })
+  const dirty = isPreferencesDirty(preferences.draft, preferences.baseline)
+
+  useEffect(() => {
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) setPreferences((current) => reconcileLoadedPreferences(current.draft, current.baseline, value))
+    })
+    return () => { cancelled = true }
+  }, [value])
+
+  useEffect(() => {
+    navigationGuard.setBlocker(() => dirty)
+    const preventUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', preventUnload)
+    return () => {
+      navigationGuard.setBlocker(undefined)
+      window.removeEventListener('beforeunload', preventUnload)
+    }
+  }, [dirty])
+
   const context = useMemo<PreferencesDraftContextValue>(() => ({
-    draft,
+    draft: preferences.draft,
     pending,
-    update: (patch) => setDraft((current) => ({ ...current, ...patch })),
-    save: () => onSave({ download: draft.download, export: draft.export, display: draft.display, proxy: draft.proxy })
-  }), [draft, onSave, pending])
+    update: (patch) => setPreferences((current) => ({ ...current, draft: { ...current.draft, ...patch } })),
+    save: () => {
+      if (pending) return
+      const submitted = preferences.draft
+      void onSave(submitted).then((saved) => {
+        setPreferences((current) => reconcileSavedPreferences(current.draft, submitted, saved))
+      }).catch(() => undefined)
+    }
+  }), [onSave, pending, preferences.draft])
   return <PreferencesDraftContext.Provider value={context}>{children}</PreferencesDraftContext.Provider>
 }
 
@@ -334,14 +369,14 @@ function CredentialsPanel({ locale, messages, data, loading, pending, validation
       <div className="settings-field-group" aria-labelledby="credential-import-title">
         <h3 id="credential-import-title">{copy.importTitle}</h3>
         <div className="settings-form">
-          <TextInput label={copy.nickname} value={nickname} onChange={changed(setNickname)} isOptional />
-          <TextInput label={copy.biz} value={biz} onChange={changed(setBiz)} type="password" />
-          <TextInput label={copy.uin} value={uin} onChange={changed(setUIN)} type="password" />
-          <TextInput label={copy.key} value={key} onChange={changed(setKey)} type="password" />
-          <TextInput label={copy.passTicket} value={passTicket} onChange={changed(setPassTicket)} type="password" />
-          <TextInput label={copy.wapSid2} value={wapSid2} onChange={changed(setWapSID2)} type="password" />
-          <TextInput label={copy.appMsgToken} value={appMsgToken} onChange={changed(setAppMsgToken)} type="password" />
-          <TextInput label={copy.cookie} value={cookie} onChange={changed(setCookie)} type="password" isOptional />
+          <TextInput label={copy.nickname} value={nickname} htmlName="credential-nickname" onChange={changed(setNickname)} isOptional />
+          <TextInput label={copy.biz} value={biz} htmlName="credential-biz" onChange={changed(setBiz)} type="password" />
+          <TextInput label={copy.uin} value={uin} htmlName="credential-uin" onChange={changed(setUIN)} type="password" />
+          <TextInput label={copy.key} value={key} htmlName="credential-key" onChange={changed(setKey)} type="password" />
+          <TextInput label={copy.passTicket} value={passTicket} htmlName="credential-pass-ticket" onChange={changed(setPassTicket)} type="password" />
+          <TextInput label={copy.wapSid2} value={wapSid2} htmlName="credential-wap-sid2" onChange={changed(setWapSID2)} type="password" />
+          <TextInput label={copy.appMsgToken} value={appMsgToken} htmlName="credential-appmsg-token" onChange={changed(setAppMsgToken)} type="password" />
+          <TextInput label={copy.cookie} value={cookie} htmlName="credential-cookie" onChange={changed(setCookie)} type="password" isOptional />
           <p className="settings-hint">{copy.validationHint}</p>
           <div className="settings-action-row"><Button label={copy.validate} variant="secondary" isLoading={validationPending} isDisabled={pending || validationPending} onClick={validate} /><Button label={copy.import} variant="primary" isLoading={pending} isDisabled={!validated || validationPending} onClick={submit} /></div>
           <FileInput label={copy.file} value={null} onChange={(file) => { void upload(file) }} accept="application/json,.json" description={copy.fileHint} isDisabled={pending || validationPending} isLoading={pending || validationPending} />
@@ -409,22 +444,22 @@ function ProxiesPanel({ locale, messages, data, loading, pending, onAdd, onRemov
       <div className="settings-field-group" aria-labelledby="proxy-add-title">
         <h3 id="proxy-add-title">{copy.addTitle}</h3>
         <div className="settings-form settings-proxy-form">
-          <TextInput label={copy.name} value={name} onChange={(next) => { invalidateDisclosure(); setName(next) }} />
-          <TextInput label={copy.endpoint} value={endpoint} onChange={(next) => { invalidateDisclosure(); setEndpoint(next) }} placeholder={copy.endpointPlaceholder} />
-          <TextInput label={copy.authorization} value={authorization} onChange={setAuthorization} type="password" isOptional />
-          <Selector label={copy.trust} options={[{ value: 'public-only', label: copy.publicOnly }, { value: 'credential-trusted', label: copy.credentialTrusted }]} value={trust} onChange={(next) => { invalidateDisclosure(); setTrust(next as ProxyTrust) }} />
-          <NumberInput label={copy.priority} value={Number(priority) || 0} onChange={(next) => { invalidateDisclosure(); setPriority(String(next ?? 0)) }} step={1} isIntegerOnly />
+          <TextInput label={copy.name} value={name} htmlName="proxy-name" onChange={(next) => { invalidateDisclosure(); setName(next) }} />
+          <TextInput label={copy.endpoint} value={endpoint} htmlName="proxy-endpoint" onChange={(next) => { invalidateDisclosure(); setEndpoint(next) }} placeholder={copy.endpointPlaceholder} />
+          <TextInput label={copy.authorization} value={authorization} htmlName="proxy-authorization" onChange={setAuthorization} type="password" isOptional />
+          <Selector label={copy.trust} options={[{ value: 'public-only', label: copy.publicOnly }, { value: 'credential-trusted', label: copy.credentialTrusted }]} value={trust} htmlName="proxy-trust" onChange={(next) => { invalidateDisclosure(); setTrust(next as ProxyTrust) }} />
+          <NumberInput label={copy.priority} value={Number(priority) || 0} htmlName="proxy-priority" onChange={(next) => { invalidateDisclosure(); setPriority(String(next ?? 0)) }} step={1} isIntegerOnly />
           <fieldset><legend>{copy.classes}</legend>{proxyClasses.map((item) => <CheckboxInput key={item} label={humanizeIdentifier(item, locale)} value={classes.includes(item)} onChange={(checked) => { invalidateDisclosure(); setClasses(checked ? [...classes, item] : classes.filter((value) => value !== item)) }} />)}</fieldset>
           <ProxyTrustExplanation trust={trust} copy={copy} />
           {trust === 'credential-trusted' ? <Button label={copy.disclosure} variant="secondary" onClick={disclose} /> : null}
-          {disclosure?.required ? <div className="confirmation-proof"><span>{copy.disclosureRequired}{disclosure.secrets?.map((secret) => humanizeIdentifier(secret, locale)).join(', ')}</span><code>{disclosure.confirmation}</code><p>{copy.confirmationHint}</p><TextInput label={copy.confirmation} value={confirm} onChange={setConfirm} /></div> : null}
+          {disclosure?.required ? <div className="confirmation-proof"><span>{copy.disclosureRequired}{disclosure.secrets?.map((secret) => humanizeIdentifier(secret, locale)).join(', ')}</span><code translate="no">{disclosure.confirmation}</code><p>{copy.confirmationHint}</p><TextInput label={copy.confirmation} value={confirm} htmlName="proxy-confirmation" onChange={setConfirm} /></div> : null}
           <div className="settings-action-row"><Button label={copy.add} variant="primary" isLoading={pending} isDisabled={!name || !endpoint || (trust === 'credential-trusted' && (!disclosure?.confirmation || confirm !== disclosure.confirmation))} onClick={add} /></div>
         </div>
       </div>
       <div className="settings-field-group" aria-labelledby="proxy-list-title">
         <h3 id="proxy-list-title">{copy.listTitle}</h3>
         {loading ? <LoadingSettings messages={messages} /> : null}
-        {data?.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>{copy.columns.name}</th><th>{copy.columns.endpoint}</th><th>{copy.columns.trust}</th><th>{copy.columns.priority}</th><th>{copy.columns.health}</th><th>{copy.columns.state}</th><th>{copy.columns.actions}</th></tr></thead><tbody>{data.map((route) => <tr key={route.id}><td>{route.name}</td><td><code className="settings-code">{route.endpoint}</code></td><td><div className="settings-trust-cell"><span>{proxyTrustLabel(route.trust, copy)}</span><small>{proxyTrustSummary(route.trust, copy)}</small></div></td><td>{formatCount(route.priority, locale)}</td><td><Status value={route.health.state} locale={locale} /></td><td><Status value={route.enabled ? 'enabled' : 'disabled'} locale={locale} /></td><td><div className="action-button-group"><Button label={route.enabled ? copy.disable : copy.enable} variant="secondary" size="sm" onClick={() => onToggle(route.id, !route.enabled)} /><Button label={copy.test} variant="secondary" size="sm" onClick={() => onTest(route.id)} /><Button label={copy.remove} variant="secondary" size="sm" isDisabled={pending} onClick={() => { setRemovingID(route.id); setRemovalConfirmation('') }} /></div>{probe?.route.id === route.id ? <small className="settings-probe-result">{copy.probe}: <Status value={probe.responseValid ? 'valid' : 'invalid'} locale={locale} />{probe.errorClass ? ` · ${humanizeIdentifier(probe.errorClass, locale)}` : ''}</small> : null}</td></tr>)}</tbody></table></div> : !loading ? <p className="settings-empty">{copy.empty}</p> : null}
+        {data?.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>{copy.columns.name}</th><th>{copy.columns.endpoint}</th><th>{copy.columns.trust}</th><th>{copy.columns.priority}</th><th>{copy.columns.health}</th><th>{copy.columns.state}</th><th>{copy.columns.actions}</th></tr></thead><tbody>{data.map((route) => <tr key={route.id}><td>{route.name}</td><td><code className="settings-code" translate="no">{route.endpoint}</code></td><td><div className="settings-trust-cell"><span>{proxyTrustLabel(route.trust, copy)}</span><small>{proxyTrustSummary(route.trust, copy)}</small></div></td><td>{formatCount(route.priority, locale)}</td><td><Status value={route.health.state} locale={locale} /></td><td><Status value={route.enabled ? 'enabled' : 'disabled'} locale={locale} /></td><td><div className="action-button-group"><Button label={route.enabled ? copy.disable : copy.enable} variant="secondary" size="sm" onClick={() => onToggle(route.id, !route.enabled)} /><Button label={copy.test} variant="secondary" size="sm" onClick={() => onTest(route.id)} /><Button label={copy.remove} variant="secondary" size="sm" isDisabled={pending} onClick={() => { setRemovingID(route.id); setRemovalConfirmation('') }} /></div>{probe?.route.id === route.id ? <small className="settings-probe-result">{copy.probe}: <Status value={probe.responseValid ? 'valid' : 'invalid'} locale={locale} />{probe.errorClass ? ` · ${humanizeIdentifier(probe.errorClass, locale)}` : ''}</small> : null}</td></tr>)}</tbody></table></div> : !loading ? <p className="settings-empty">{copy.empty}</p> : null}
         {removingID ? <RemovalConfirmation copy={copy} expected={copy.removeConfirmation(removingID)} value={removalConfirmation} pending={pending} onChange={setRemovalConfirmation} onCancel={cancelRemoval} onRemove={remove} /> : null}
       </div>
     </div>
@@ -457,7 +492,7 @@ function proxyTrustSummary(trust: ProxyTrust, copy: MessageCatalog['settings']['
 type RemovalConfirmationCopy = { readonly removeConfirmationLabel: string; readonly removeConfirmationHint: string; readonly confirmRemove: string; readonly cancelRemove: string }
 
 function RemovalConfirmation({ copy, expected, value, pending, onChange, onCancel, onRemove }: { readonly copy: RemovalConfirmationCopy; readonly expected: string; readonly value: string; readonly pending: boolean; readonly onChange: (value: string) => void; readonly onCancel: () => void; readonly onRemove: () => void }) {
-  return <section className="confirmation-proof" aria-label={copy.removeConfirmationLabel}><strong>{copy.removeConfirmationLabel}</strong><code>{expected}</code><p>{copy.removeConfirmationHint}</p><TextInput label={copy.removeConfirmationLabel} value={value} onChange={onChange} /><div className="settings-action-row"><Button label={copy.confirmRemove} variant="destructive" isLoading={pending} isDisabled={value !== expected} onClick={onRemove} /><Button label={copy.cancelRemove} variant="secondary" isDisabled={pending} onClick={onCancel} /></div></section>
+  return <section className="confirmation-proof" aria-label={copy.removeConfirmationLabel}><strong>{copy.removeConfirmationLabel}</strong><code translate="no">{expected}</code><p>{copy.removeConfirmationHint}</p><TextInput label={copy.removeConfirmationLabel} value={value} htmlName="removal-confirmation" onChange={onChange} /><div className="settings-action-row"><Button label={copy.confirmRemove} variant="destructive" isLoading={pending} isDisabled={value !== expected} onClick={onRemove} /><Button label={copy.cancelRemove} variant="secondary" isDisabled={pending} onClick={onCancel} /></div></section>
 }
 
 function StorageMaintenancePanel({ locale, messages, backup, backupID, backupDownloadURL, plan, confirmation, mutations, integrity, integrityLoading, onBackupIDChange, onCreateBackup, onVerifyBackup, onPlanGarbageCollection, onConfirmationChange, onApplyGarbageCollection, onFailure }: { readonly locale: Locale; readonly messages: MessageCatalog; readonly backup?: BackupReceipt; readonly backupID: string; readonly backupDownloadURL?: string; readonly plan?: GarbageCollectionPlan; readonly confirmation: string; readonly mutations: RestoreMutations; readonly integrity?: { readonly checkedAt: string; readonly issues: readonly { readonly kind: string; readonly message: string; readonly repairable: boolean; readonly recommendation?: string }[] }; readonly integrityLoading: boolean; readonly onBackupIDChange: (value: string) => void; readonly onCreateBackup: () => void; readonly onVerifyBackup: () => void; readonly onPlanGarbageCollection: () => void; readonly onConfirmationChange: (value: string) => void; readonly onApplyGarbageCollection: () => void; readonly onFailure: (reason: unknown) => void }) {

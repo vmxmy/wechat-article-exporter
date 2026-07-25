@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { ActiveFilterSummary } from '../src/components/presentation/ActiveFilterSummary'
+import { ContentCluster, DenseRegion, PageStack, ReadingMeasure, SectionStack } from '../src/components/presentation/LayoutRhythm'
 import { MobileResourceRow } from '../src/components/presentation/MobileResourceRow'
 import { PageHeader } from '../src/components/presentation/PageHeader'
 import { SelectionActionBar } from '../src/components/presentation/SelectionActionBar'
@@ -9,6 +10,24 @@ import { Status } from '../src/components/presentation/Status'
 import { TechnicalDetails } from '../src/components/presentation/TechnicalDetails'
 
 describe('presentation component accessibility', () => {
+  it('renders shared layout rhythm primitives with semantic classes', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PageStack, { gap: 'subsection' },
+        createElement(ReadingMeasure, { size: 'description' }, 'Readable copy'),
+        createElement(SectionStack, { as: 'section', gap: 'cluster' },
+          createElement(ContentCluster, { justify: 'between' }, createElement('span', null, 'Actions')),
+          createElement(DenseRegion, { 'aria-label': 'Results' }, createElement('span', null, 'Rows'))
+        )
+      )
+    )
+    expect(markup).toContain('layout-page-stack--subsection')
+    expect(markup).toContain('layout-reading-measure--description')
+    expect(markup).toContain('layout-section-stack--cluster')
+    expect(markup).toContain('layout-content-cluster--justify-between')
+    expect(markup).toContain('layout-dense-region')
+    expect(markup).toContain('aria-label="Results"')
+  })
+
   it('renders a unique page heading and contextual description', () => {
     const markup = renderToStaticMarkup(createElement(PageHeader, { title: 'Articles', description: 'Browse saved content' }))
     expect(markup.match(/<h1/g)).toHaveLength(1)
@@ -38,6 +57,7 @@ describe('presentation component accessibility', () => {
     expect(markup).toContain(exact)
     expect(markup).toContain('Copy job ID')
     expect(markup).toContain('<code')
+    expect(markup).toContain('translate="no"')
   })
 
   it('labels active-filter removal and clear-all controls', () => {

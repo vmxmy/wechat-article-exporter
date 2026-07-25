@@ -80,6 +80,33 @@ async function selectAstryxSelectorOption(page: import('@playwright/test').Page,
   await listbox.getByRole('option', { name: option, exact: true }).click()
 }
 
+test('settings protects unsaved preferences and clears the guard after save', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/settings')
+
+  await selectAstryxSelectorOption(page, 'Collision policy', 'Replace existing output')
+  const articlesLink = page.getByRole('link', { name: 'Articles', exact: true })
+  await articlesLink.click()
+  const guard = page.getByRole('alertdialog', { name: 'Unsaved preference changes' })
+  await expect(guard).toBeVisible()
+  await guard.getByRole('button', { name: 'Stay on settings' }).click()
+  await expect(page).toHaveURL(/\/settings$/)
+  await expect(articlesLink).toBeFocused()
+
+  await articlesLink.click()
+  await guard.getByRole('button', { name: 'Discard changes' }).click()
+  await expect(page).toHaveURL(/\/articles$/)
+
+  await page.goto('/settings')
+  await selectAstryxSelectorOption(page, 'Collision policy', 'Replace existing output')
+  await page.getByRole('button', { name: 'Save preferences' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Preferences saved.' })).toBeVisible()
+  await page.getByRole('link', { name: 'Articles', exact: true }).click()
+  await expect(page).toHaveURL(/\/articles$/)
+  await expect(guard).toBeHidden()
+  await expectOnlyLoopbackRequests(page)
+})
+
 test('diagnostic bundle summary humanizes size, shortens the checksum, and keeps the opaque download handle', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.goto('/settings')

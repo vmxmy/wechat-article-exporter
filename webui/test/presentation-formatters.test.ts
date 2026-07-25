@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { en } from '../src/i18n/messages.en'
+import { zhCN } from '../src/i18n/messages.zh-CN'
 import {
   EMPTY_VALUE,
   formatBytes,
@@ -26,6 +28,33 @@ describe('presentation formatters', () => {
     expect(formatCount(1234567, 'en')).toBe('1,234,567')
     expect(formatCount(1234567, 'zh-CN')).toBe('1,234,567')
     expect(formatBytes(1536000, 'en')).toBe('1.54 MB')
+    expect(formatBytes(12345, 'en')).toBe('12.3 KB')
+    expect(formatBytes(12345, 'zh-CN')).toBe('12.3 KB')
+  })
+
+  it('keeps catalog number formatting and ongoing copy bound to the selected locale', () => {
+    expect(en.settings.common.bytes(1234567)).toBe('1,234,567 B')
+    expect(zhCN.settings.common.bytes(1234567)).toBe('1,234,567 B')
+    expect(en.settings.common.countBytes(1234, 5678)).toBe('1,234 items · 5,678 B')
+    expect(zhCN.settings.common.countBytes(1234, 5678)).toBe('1,234 项 · 5,678 B')
+
+    const ongoingCopy = [
+      en.connection.checking,
+      zhCN.connection.checking,
+      en.exports.childPlaceholder,
+      zhCN.exports.childPlaceholder,
+      en.exports.selection.savedQueryPlaceholder,
+      zhCN.exports.selection.savedQueryPlaceholder,
+      en.articles.searchPlaceholder,
+      zhCN.articles.searchPlaceholder,
+      en.articles.ux.savedViewsPlaceholder,
+      zhCN.articles.ux.savedViewsPlaceholder,
+      en.articles.ux.messageTypePlaceholder,
+      zhCN.articles.ux.messageTypePlaceholder,
+      en.settings.proxies.endpointPlaceholder,
+      zhCN.settings.proxies.endpointPlaceholder
+    ]
+    expect(ongoingCopy.every((value) => value.endsWith('…') && !value.includes('...'))).toBe(true)
   })
 
   it('formats dates and rejects invalid temporal values', () => {

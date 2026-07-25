@@ -5,6 +5,7 @@ import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
+import { PageStack } from '../../../components/presentation'
 import type { Locale, MessageCatalog } from '../../../i18n'
 import { consumeArticleQueryHandoff, parseArticleQuery, type ArticleQuery, type SavedQueryRecord } from '../../../lib/api'
 import { formatDateTime } from '../../../lib/presentation'
@@ -83,7 +84,7 @@ export function SavedQueriesPage({ messages, locale }: { readonly messages: Mess
     setQueryPendingDeletion(selectedQuery.name)
   }
 
-  return <>
+  return <PageStack as="div">
     <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.savedQueries} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
     <section className="saved-query-editor" aria-labelledby="saved-query-editor-title">
       <div><h2 id="saved-query-editor-title">{copy.savedQuery.visualEditor}</h2><p>{copy.savedQuery.visualDescription}</p></div>
@@ -101,7 +102,7 @@ export function SavedQueriesPage({ messages, locale }: { readonly messages: Mess
       {notice ? <p role="status">{notice}</p> : null}
     </section>
     {queryPendingDeletion ? <TypedConfirmationDialog isOpen onOpenChange={(isOpen) => { if (!isOpen) { setQueryPendingDeletion(undefined); setDeleteConfirmation('') } }} title={actions.deleteTitle} description={actions.deleteConfirm(queryPendingDeletion)} expected={actions.deleteConfirmation(queryPendingDeletion)} inputLabel={actions.deleteConfirmationLabel} inputHint={actions.deleteConfirmationHint} actionLabel={actions.confirmDelete} cancelLabel={actions.cancelDelete} confirmation={deleteConfirmation} onConfirmationChange={setDeleteConfirmation} isActionLoading={mutations.deleteSavedQuery.isPending} onAction={() => mutations.deleteSavedQuery.mutate({ name: queryPendingDeletion, confirmation: deleteConfirmation }, { onSuccess: () => { setSelected([]); setNotice(actions.deleted(queryPendingDeletion)); setQueryPendingDeletion(undefined); setDeleteConfirmation('') }, onError: () => setNotice(actions.actionFailed) })} /> : null}
-  </>
+  </PageStack>
 }
 
 function TypedConfirmationDialog({ isOpen, onOpenChange, title, description, expected, inputLabel, inputHint, actionLabel, cancelLabel, confirmation, onConfirmationChange, isActionLoading, onAction }: {

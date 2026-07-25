@@ -12,7 +12,10 @@ test('keyboard-only navigation preserves skip focus and live login status', asyn
 
   await focusWithKeyboard(page, page.getByRole('button', { name: 'Start QR login' }))
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('img', { name: 'QR-code login' })).toBeVisible()
+  const qrCode = page.getByRole('img', { name: 'QR-code login' })
+  await expect(qrCode).toBeVisible()
+  await expect(qrCode).toHaveAttribute('width', '256')
+  await expect(qrCode).toHaveAttribute('height', '256')
 
   await focusWithKeyboard(page, page.getByRole('button', { name: 'Poll login status' }))
   await page.keyboard.press('Enter')
@@ -50,14 +53,14 @@ test('article and album export handoffs use SPA navigation and focus the export 
   await page.goto('/articles')
 
   await page.getByRole('button', { name: 'Export current matches' }).click()
-  await expect(page).toHaveURL(/\/exports$/)
+  await expect(page).toHaveURL(/\/exports\?flow=[a-f0-9]{32}&scope=matching$/)
   await expect(page.getByRole('heading', { name: 'Export articles', level: 1 })).toBeFocused()
 
   await page.goto('/albums')
   await page.getByRole('checkbox', { name: 'Select Sanitized album' }).check()
   await expect(page.getByRole('checkbox', { name: 'Select album-fixture-1' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Export selected albums' }).click()
-  await expect(page).toHaveURL(/\/exports$/)
+  await expect(page).toHaveURL(/\/exports\?flow=[a-f0-9]{32}&scope=album$/)
   await expect(page.getByRole('heading', { name: 'Export articles', level: 1 })).toBeFocused()
   await expect(page.getByRole('main')).toHaveCount(1)
   await expectOnlyLoopbackRequests(page)

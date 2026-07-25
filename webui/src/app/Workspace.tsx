@@ -1,14 +1,16 @@
 import { AppShell } from '@astryxdesign/core/AppShell'
+import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { Button } from '@astryxdesign/core/Button'
 import { MobileNav } from '@astryxdesign/core/MobileNav'
 import { SideNav, SideNavHeading, SideNavItem } from '@astryxdesign/core/SideNav'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
-import { Component, lazy, Suspense, useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
+import { Component, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { type Locale, type MessageCatalog, useMessages } from '../i18n'
 import { useRuntimeStatus } from '../lib/queries'
+import { navigationGuard } from '../lib/navigationGuard'
 import { HomePage } from '../features/home/HomePage'
 import { SessionControl } from './SessionControl'
-import { getNavigationItem, navigationEvent, navigationGroups, navigationItems } from './navigation'
+import { getClientNavigationHref, getNavigationItem, listenForNavigation, navigateTo, navigationGroups, navigationItems } from './navigation'
 
 const ArticleTable = lazy(() => import('../features/articles/ArticleTable').then(({ ArticleTable }) => ({ default: ArticleTable })))
 const ImportPage = lazy(() => import('../features/import/ImportPage').then(({ ImportPage }) => ({ default: ImportPage })))
@@ -30,6 +32,8 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
   const [path, setPath] = useState(window.location.pathname)
   const [navigationID, setNavigationID] = useState(0)
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
+  const [navigationBlocked, setNavigationBlocked] = useState(navigationGuard.hasPendingNavigation())
+  const blockedNavigationTrigger = useRef<HTMLElement | null>(null)
   const runtime = useRuntimeStatus()
 
   useEffect(() => {
@@ -40,14 +44,46 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
     const updatePath = () => {
       setPath(window.location.pathname)
       setNavigationID((current) => current + 1)
+      setMobileNavigationOpen(false)
+      blockedNavigationTrigger.current = null
     }
-    window.addEventListener('popstate', updatePath)
-    window.addEventListener(navigationEvent, updatePath)
-    return () => {
-      window.removeEventListener('popstate', updatePath)
-      window.removeEventListener(navigationEvent, updatePath)
-    }
+    return listenForNavigation(updatePath)
   }, [])
+
+  useEffect(() => navigationGuard.subscribe(() => {
+    const blocked = navigationGuard.hasPendingNavigation()
+    if (blocked && !blockedNavigationTrigger.current && document.activeElement instanceof HTMLElement) {
+      blockedNavigationTrigger.current = document.activeElement
+    }
+    setNavigationBlocked(blocked)
+  }), [])
+
+  useEffect(() => {
+    const interceptWorkspaceLink = (event: MouseEvent) => {
+      if (!(event.target instanceof Element)) return
+      const anchor = event.target.closest<HTMLAnchorElement>('a[href]')
+      if (!anchor || anchor.hasAttribute('data-wechat-router-link')) return
+      const href = getClientNavigationHref(anchor, event)
+      if (!href) return
+      event.preventDefault()
+      blockedNavigationTrigger.current = anchor
+      navigateTo(href)
+    }
+    document.addEventListener('click', interceptWorkspaceLink)
+    return () => document.removeEventListener('click', interceptWorkspaceLink)
+  }, [])
+
+  const stayOnSettings = () => {
+    navigationGuard.stay()
+    const trigger = blockedNavigationTrigger.current
+    blockedNavigationTrigger.current = null
+    window.requestAnimationFrame(() => trigger?.focus())
+  }
+
+  const discardAndNavigate = () => {
+    navigationGuard.discard()
+    blockedNavigationTrigger.current = null
+  }
 
   useEffect(() => {
     let firstFrame = 0
@@ -174,6 +210,15 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
           </Suspense>
         </PageErrorBoundary>
       </div>
+      <AlertDialog
+        isOpen={navigationBlocked}
+        onOpenChange={(isOpen) => { if (!isOpen) stayOnSettings() }}
+        title={messages.settings.unsaved.title}
+        description={messages.settings.unsaved.description}
+        cancelLabel={messages.settings.unsaved.stay}
+        actionLabel={messages.settings.unsaved.discard}
+        onAction={discardAndNavigate}
+      />
     </AppShell>
   )
 }

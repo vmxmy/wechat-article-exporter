@@ -1,7 +1,5 @@
 .settings-page {
-  display: grid;
-  gap: var(--spacing-5);
-  padding-block-end: var(--spacing-8);
+  padding-block-end: 0;
 }
 
 .settings-layout {
@@ -87,7 +85,7 @@
 }
 
 .settings-section-header {
-  max-width: 72ch;
+  max-width: var(--measure-reading);
   gap: var(--spacing-2);
 }
 

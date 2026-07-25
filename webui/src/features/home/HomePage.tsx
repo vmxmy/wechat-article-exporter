@@ -1,4 +1,5 @@
 import { Link } from '@astryxdesign/core/Link'
+import { PageStack, ReadingMeasure } from '../../components/presentation'
 import type { MessageCatalog } from '../../i18n'
 import { useWorkspaceSnapshot } from '../../lib/queries'
 
@@ -18,12 +19,12 @@ export function HomePage({ messages }: { readonly messages: MessageCatalog }) {
   const action = getHomeAction(messages, session?.state, storage?.accounts, storage?.articles, failedJobs)
 
   return (
-    <section className="overview" aria-labelledby="overview-title">
-      <header className="overview-intro">
+    <PageStack className="overview" aria-labelledby="overview-title">
+      <ReadingMeasure size="description" className="overview-intro">
         <p className="eyebrow">{messages.navigation.home}</p>
         <h1 id="overview-title">{messages.overview.title}</h1>
         <p className="lede">{messages.overview.description}</p>
-      </header>
+      </ReadingMeasure>
 
       {snapshot.isLoading ? <p role="status">{messages.connection.checking}</p> : null}
       {snapshot.isError ? <p role="alert">{messages.overview.unavailable}</p> : null}
@@ -60,7 +61,7 @@ export function HomePage({ messages }: { readonly messages: MessageCatalog }) {
           </dl>
         </section>
       </div>
-    </section>
+    </PageStack>
   )
 }
 

@@ -1,6 +1,7 @@
 import { Button } from '@astryxdesign/core/Button'
 import { Selector } from '@astryxdesign/core/Selector'
 import { useCallback, useEffect, useState } from 'react'
+import { PageHeader, PageStack } from '../../components/presentation'
 import type { MessageCatalog } from '../../i18n'
 import { useSessionStatus, useSwitchableAccounts, useWorkspaceMutations } from '../../lib/queries'
 
@@ -52,15 +53,9 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
     onError: (reason) => setError(reason instanceof Error ? reason.message : messages.login.switchUnavailable)
   })
   return (
-    <section aria-labelledby="login-title">
-      <header className="page-heading">
-        <div>
-          <p className="eyebrow">{messages.navigation.system}</p>
-          <h1 id="login-title">{messages.login.title}</h1>
-          <p className="lede">{messages.login.description}</p>
-          <p>{messages.login.legacyDescription}</p>
-        </div>
-      </header>
+    <PageStack aria-labelledby="login-title">
+      <PageHeader eyebrow={messages.navigation.system} title={messages.login.title} titleId="login-title" description={messages.login.description} />
+      <p className="page-supporting-copy">{messages.login.legacyDescription}</p>
       <div className="overview-grid login-grid">
         <section className="workspace-panel" aria-labelledby="session-status-title">
           <h2 id="session-status-title">{messages.login.sessionTitle}</h2>
@@ -86,7 +81,7 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
         <section className="workspace-panel login-flow" aria-labelledby="qr-login-title">
           <h2 id="qr-login-title">{messages.login.qrTitle}</h2>
           <p>{messages.login.qrDescription}</p>
-          {qrCode ? <img className="qr-code" src={`data:image/png;base64,${qrCode}`} alt={messages.login.qrTitle} /> : null}
+          {qrCode ? <img className="qr-code" src={`data:image/png;base64,${qrCode}`} alt={messages.login.qrTitle} width="256" height="256" /> : null}
           {loginState ? <p role="status">{messages.login.states[loginState] ?? messages.login.unknownState}</p> : null}
           {notice ? <p role="status">{notice}</p> : null}
           {error ? <p role="alert">{error}</p> : null}
@@ -97,6 +92,6 @@ export function LoginPage({ messages }: { readonly messages: MessageCatalog }) {
           </div>
         </section>
       </div>
-    </section>
+    </PageStack>
   )
 }

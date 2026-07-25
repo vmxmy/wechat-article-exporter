@@ -87,3 +87,14 @@
 - [x] 10.3 Verify representative redesigned workflows make only same-origin loopback requests and preserve security headers, CSRF, file, secret, and confirmation boundaries.
 - [x] 10.4 Update the browser workspace guide, capability matrix, API contract, screenshots, and release verification evidence for the new information architecture.
 - [x] 10.5 Run strict OpenSpec validation and record the final requirement/scenario/task counts and any intentionally deferred phase items. Final inventory: 12 requirements, 49 scenarios, 60 completed tasks, and no deferred phase items; all three active local-product changes validate in strict mode.
+
+## 11. Vercel guideline completion
+
+- [x] 11.1 Add canonical browser URL state for applied article filters, sorting and pagination with safe invalid-value fallback, default omission, reload, share-link and history restoration.
+- [x] 11.2 Add safe export workflow restoration for stage, scope type and format, using workflow-scoped bounded session state only for non-sensitive draft data and clearing it on completion or reset. Independent bare exports visits start clean, while reload and history within the same opaque workflow restore the draft.
+- [x] 11.3 Add normalized preference dirty-state tracking and an accessible navigation guard for internal navigation, browser history and unload while preserving failed drafts and clearing successful or reverted edits.
+- [x] 11.4 Regroup the article filter, applied-summary, saved-view, results and pagination flow using the documented section and dense-region layout contracts.
+- [x] 11.5 Complete native form semantics for import, credential and proxy inputs, including stable names and the URL/autocomplete behavior supported by Astryx 0.1.6. The upstream TextInput currently does not expose `type`, `inputMode`, or `autoComplete`; the implementation preserves its shared accessible presentation rather than replacing it with one-off native fields.
+- [x] 11.6 Add QR intrinsic dimensions, light/dark theme-color metadata, non-translatable exact technical values, active-locale number formatting and bilingual ellipsis consistency.
+- [x] 11.7 Add unit and Playwright behavior coverage for canonical URL restoration, safe export recovery, dirty navigation protection, form/document semantics, keyboard focus, 390 px layout, 200-percent zoom and loopback-only requests. Final evidence: 64 unit tests, 60 sanitized Chromium flows, and one real-Go loopback flow passed.
+- [x] 11.8 Rebuild and synchronize embedded browser assets, then run WebUI checks/tests/build/E2E, Go tests/vet/build, release-size verification and strict OpenSpec validation. Final evidence: WebUI check/build/assets passed; embedded initial JavaScript gzip is 204,369 bytes under the 256,000-byte budget; Go tests/vet and a 28,211,218-byte trimmed binary passed; all three active changes validate in strict mode.

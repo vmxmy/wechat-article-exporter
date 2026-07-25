@@ -61,6 +61,9 @@ test('article selections persist across server pages and hand off all selected s
   await page.getByRole('button', { name: 'Export selected' }).click()
 
   await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
+  await expect(page).toHaveURL(/\/exports\?flow=[a-f0-9]{32}$/)
+  expect(page.url()).not.toContain('article-fixture-1')
+  expect(page.url()).not.toContain('article-fixture-3')
   await expect(page.getByRole('status').filter({ hasText: '2 selected articles' })).toContainText('Sanitized article one')
   await expect(page.getByRole('status').filter({ hasText: '2 selected articles' })).toContainText('Sanitized article three')
   await expect(page.locator('body')).not.toContainText('article-fixture-1')
@@ -104,6 +107,11 @@ test('a consumed export handoff cannot appear on a later independent exports vis
   await page.goto('/exports')
 
   await expect(page.locator('.export-scope-summary').first()).toContainText('Unique initial handoff account')
+  const initialWorkflowURL = page.url()
+  await expect(page).toHaveURL(/\/exports\?flow=[a-f0-9]{32}&scope=matching$/)
+  await page.reload()
+  await expect(page.locator('.export-scope-summary').first()).toContainText('Unique initial handoff account')
+  expect(page.url()).toBe(initialWorkflowURL)
   await page.getByRole('link', { name: 'Accounts' }).click()
   await expect(page.getByRole('heading', { name: 'Accounts' })).toBeVisible()
   await page.getByRole('link', { name: 'Exports' }).click()

@@ -1,6 +1,6 @@
 .export-stage-shell {
   display: grid;
-  gap: var(--spacing-5);
+  gap: var(--space-subsection);
 }
 
 .export-stage-nav {
@@ -76,8 +76,7 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--spacing-2);
-  margin-block-start: var(--spacing-5);
-  margin-block-end: var(--spacing-5);
+  margin-block: 0;
 }
 
 .export-notice {

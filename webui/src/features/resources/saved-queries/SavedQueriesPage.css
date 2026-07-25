@@ -7,7 +7,7 @@
   }
 
   .saved-query-editor {
-    margin-block-start: var(--spacing-6);
+    margin-block-start: 0;
     padding: var(--spacing-5);
     border: 0;
     border-radius: var(--radius-element);

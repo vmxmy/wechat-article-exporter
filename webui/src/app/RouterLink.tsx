@@ -1,27 +1,15 @@
 import type { AnchorHTMLAttributes, MouseEvent, PropsWithChildren } from 'react'
-import { navigateTo } from './navigation'
+import { getClientNavigationHref, navigateTo } from './navigation'
 
 export function RouterLink({ children, href, onClick, ...props }: PropsWithChildren<AnchorHTMLAttributes<HTMLAnchorElement>>) {
   function navigate(event: MouseEvent<HTMLAnchorElement>) {
     onClick?.(event)
-    if (
-      event.defaultPrevented
-      || !href?.startsWith('/')
-      || href.startsWith('//')
-      || event.button !== 0
-      || event.metaKey
-      || event.ctrlKey
-      || event.shiftKey
-      || event.altKey
-      || (event.currentTarget.target && event.currentTarget.target !== '_self')
-      || event.currentTarget.hasAttribute('download')
-    ) {
-      return
-    }
+    const target = getClientNavigationHref(event.currentTarget, event.nativeEvent)
+    if (!target) return
 
     event.preventDefault()
-    navigateTo(href)
+    navigateTo(target)
   }
 
-  return <a {...props} href={href} onClick={navigate}>{children}</a>
+  return <a {...props} href={href} data-wechat-router-link="true" onClick={navigate}>{children}</a>
 }

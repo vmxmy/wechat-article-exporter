@@ -2,14 +2,13 @@ import { Button } from '@astryxdesign/core/Button'
 import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog'
 import { Selector } from '@astryxdesign/core/Selector'
 import { TextInput } from '@astryxdesign/core/TextInput'
-import { AccountRemoteSelector, Status } from '../../components/presentation'
+import { AccountRemoteSelector, ContentCluster, PageStack, SelectionActionBar, Status } from '../../components/presentation'
 import { useMemo, useRef, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { saveExportHandoff, type AccountRecord, type AccountSyncMode, type AlbumTraversalOrder } from '../../lib/api'
 import { getAccountManifestDownloadURL } from '../../lib/api'
 import { useAccountPage, useAccountSearch, useAlbumPage, useWorkspaceMutations } from '../../lib/queries'
-import { SelectionActionBar } from '../../components/presentation'
 import { ResourceTable } from './ResourceTable'
 import { navigateTo } from '../../app/navigation'
 import { handoffCreatedJob } from '../../lib/jobHandoff'
@@ -105,9 +104,9 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
     requestAnimationFrame(() => deleteTriggerRef.current?.focus())
   }
   return (
-    <>
+    <PageStack as="div">
       <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.accounts} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
-      <div className="presentation-actions"><Button label={actions.title} variant="primary" onClick={openNewEntry} /></div>
+      <ContentCluster><Button label={actions.title} variant="primary" onClick={openNewEntry} /></ContentCluster>
       <SelectionActionBar selectedCount={selected.length} countLabel={(count) => `${count} ${messages.resources.accounts.selected}`} toolbarLabel={actions.title} actions={<>
       {one ? <><Button label={actions.edit} variant="secondary" onClick={openEditEntry} /><Selector label={actions.syncMode} options={[{ value: 'incremental', label: actions.incremental }, { value: 'full', label: actions.full }]} value={syncMode} onChange={(next) => setSyncMode(next as AccountSyncMode)} /><Button label={actions.sync} variant="secondary" isLoading={mutations.syncAccount.isPending} onClick={() => mutations.syncAccount.mutate({ id: one, mode: syncMode }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /></> : <p>{actions.selectOne}</p>}
       </>} moreActions={<div role="group" aria-label={actions.deleteTitle}><Button label={actions.remove} variant="destructive" isLoading={mutations.deleteAccounts.isPending} onClick={openDeleteConfirmation} /></div>} />
@@ -115,7 +114,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
       {notice ? <p role="status">{notice}</p> : null}
       {isEntryOpen ? <AccountEntryDrawer isOpen onOpenChange={closeEntry} mode={entryMode} actions={actions} draft={draft} onDraftChange={setDraft} onSubmit={entryMode === 'edit' ? updateAccount : saveAccount} isSubmitting={entryMode === 'edit' ? mutations.updateAccount.isPending : mutations.saveAccount.isPending} search={search} onSearchChange={setSearch} onDiscover={() => { void discovery.refetch() }} isDiscovering={discovery.isFetching} candidates={discovery.data?.data} onCandidateSelect={selectDiscoveryCandidate} manifest={manifest} onManifestChange={setManifest} onManifestImport={importManifest} isManifestImporting={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending} manifestDownloadURL={getAccountManifestDownloadURL()} /> : null}
       {isDeleteConfirmationOpen ? <TypedConfirmationDialog isOpen onOpenChange={closeDeleteConfirmation} title={actions.deleteTitle} description={actions.deleteConfirm} expected={actions.deleteConfirmation(selected)} inputLabel={actions.deleteConfirmationLabel} inputHint={actions.deleteConfirmationHint} actionLabel={actions.confirmDelete} cancelLabel={actions.cancelDelete} confirmation={deleteConfirmation} onConfirmationChange={setDeleteConfirmation} isActionLoading={mutations.deleteAccounts.isPending} onAction={() => mutations.deleteAccounts.mutate({ ids: selected, confirmation: deleteConfirmation }, { onSuccess: () => { setSelected([]); setNotice(undefined); setDeleteConfirmationOpen(false); setDeleteConfirmation('') }, onError: () => setNotice(actions.actionFailed) })} /> : null}
-    </>
+    </PageStack>
   )
 }
 
@@ -160,7 +159,7 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
     setPageIndex(0)
     setSelected([])
   }
-  return <>
+  return <PageStack as="div">
     <section className="workspace-panel" aria-labelledby="album-filters-title">
       <div><h2 id="album-filters-title">{messages.resources.albums.filters.title}</h2><p>{messages.resources.albums.filters.description}</p></div>
       <div className="account-action-form"><AccountRemoteSelector label={messages.resources.accounts.columns.name} value={accountId} onChange={(next) => { setAccountId(next); setPageIndex(0); setSelected([]) }} placeholder={messages.articles.filters.any} copy={{ unavailable: messages.articles.ux.accountUnavailable, noResults: messages.articles.ux.selectorNoResults, duplicate: messages.articles.ux.duplicateSelection }} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={updateFilter(setKeyword)} /></div>
@@ -169,7 +168,7 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
     <SelectionActionBar selectedCount={selected.length} countLabel={(count) => `${count} ${messages.resources.albums.selected}`} toolbarLabel={messages.resources.albums.actions.title} actions={<><Selector label={messages.resources.albums.actions.order} options={[{ value: 'forward', label: messages.resources.albums.actions.forward }, { value: 'reverse', label: messages.resources.albums.actions.reverse }]} value={order} onChange={(next) => setOrder(next as AlbumTraversalOrder)} /><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" onClick={handoffExport} /></>} />
     <AlbumSelectionDetails album={album} messages={messages} />
     {notice ? <p role="status">{notice}</p> : null}
-  </>
+  </PageStack>
 }
 
 type TypedConfirmationDialogProps = {

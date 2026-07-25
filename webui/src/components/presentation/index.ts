@@ -1,6 +1,7 @@
 export * from './ActiveFilterSummary'
 export * from './DetailPanel'
 export * from './EmptyState'
+export * from './LayoutRhythm'
 export * from './MobileResourceRow'
 export * from './PageHeader'
 export * from './RemoteSelectors'

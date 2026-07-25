@@ -1,7 +1,7 @@
 import { Button } from '@astryxdesign/core/Button'
 import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog'
 import { TextInput } from '@astryxdesign/core/TextInput'
-import { DetailPanel, Status, TechnicalDetails } from '../../../components/presentation'
+import { DetailPanel, PageStack, Status, TechnicalDetails } from '../../../components/presentation'
 import { formatCount, formatDateTime, formatDuration, formatJobKind, formatStatus } from '../../../lib/presentation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -78,14 +78,14 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   }
 
   const confirmation = confirmationAction && selectedID ? jobConfirmation(actions, confirmationAction, selectedID) : undefined
-  return <>
+  return <PageStack as="div">
     <ResourceTable eyebrow={messages.navigation.operations} messages={messages.resources.jobs} columns={columns} query={query} pageIndex={pageIndex} onPageChange={changePage} onSelectionChange={updateSelection} />
     {isDetailOpen && selectedID ? <DetailPanel isOpen onOpenChange={setDetailOpen} title={messages.resources.jobs.detail.title} description={messages.resources.jobs.detail.description} footer={<JobControls actions={actions} permittedActions={permittedActions} isLoading={mutations.controlJob.isPending} onControl={control} />}>
       <JobDetailContents detail={detail} messages={messages} locale={locale} />
       {notice ? <p className="jobs-notice" role="alert">{notice}</p> : null}
     </DetailPanel> : null}
     {confirmationAction && confirmation ? <TypedConfirmationDialog isOpen onOpenChange={(isOpen) => { if (!isOpen) closeConfirmation() }} title={confirmation.title} description={confirmation.description} expected={confirmation.confirmation} inputLabel={actions.confirmationLabel} inputHint={actions.confirmationHint} actionLabel={confirmation.actionLabel} cancelLabel={actions.cancelConfirmation} confirmation={confirmationProof} onConfirmationChange={setConfirmationProof} isActionLoading={mutations.controlJob.isPending} onAction={() => { if (selectedID) mutations.controlJob.mutate({ id: selectedID, action: confirmationAction, confirmation: confirmationProof }, { onSuccess: () => { setNotice(undefined); closeConfirmation() }, onError: () => setNotice(actions.actionFailed) }) }} /> : null}
-  </>
+  </PageStack>
 }
 
 function JobLabel({ job, locale }: { readonly job: JobRecord; readonly locale: Locale }) {

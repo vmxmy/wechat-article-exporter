@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ReadingMeasure } from './LayoutRhythm'
 import './presentation.css'
 
 export interface PageHeaderProps {
@@ -12,11 +13,11 @@ export interface PageHeaderProps {
 export function PageHeader({ title, description, eyebrow, actions, titleId }: PageHeaderProps) {
   return (
     <header className="presentation-page-header">
-      <div className="presentation-page-header-copy">
+      <ReadingMeasure size="description" className="presentation-page-header-copy">
         {eyebrow ? <p className="presentation-eyebrow">{eyebrow}</p> : null}
         <h1 id={titleId} className="presentation-heading">{title}</h1>
         {description ? <p className="presentation-description">{description}</p> : null}
-      </div>
+      </ReadingMeasure>
       {actions ? <div className="presentation-actions">{actions}</div> : null}
     </header>
   )

@@ -5,7 +5,8 @@ import { NumberInput } from '@astryxdesign/core/NumberInput'
 import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
 import { Selector } from '@astryxdesign/core/Selector'
 import { TextInput } from '@astryxdesign/core/TextInput'
-import { AccountRemoteSelector, AlbumRemoteSelector, ArticleRemoteMultiSelector, MobileResourceRow, Status, TechnicalDetails } from '../../components/presentation'
+import { AccountRemoteSelector, AlbumRemoteSelector, ArticleRemoteMultiSelector, MobileResourceRow, PageHeader, PageStack, Status, TechnicalDetails } from '../../components/presentation'
+import { navigationEvent } from '../../app/navigation'
 import { formatBytes, formatDateTime, formatShortIdentifier, formatStatus } from '../../lib/presentation'
 import { describeArticleQuery } from '../articles/articleQueryPresentation'
 import { useEffect, useMemo, useState } from 'react'
@@ -28,6 +29,18 @@ import {
   type ExportVerification,
 } from '../../lib/api'
 import { handoffCreatedJob } from '../../lib/jobHandoff'
+import {
+  clearExportBrowserDraft,
+  createExportWorkflowID,
+  earliestValidExportStage,
+  loadExportBrowserDraft,
+  parseExportBrowserView,
+  saveExportBrowserDraft,
+  serializeExportBrowserView,
+  type ExportBrowserView,
+  type ExportScopeType,
+  type ExportStage
+} from '../../lib/browserViewState'
 import { useExportManifest, useExportPage, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 import './export.css'
 
@@ -39,8 +52,8 @@ interface ExportPageProps {
   readonly messages: MessageCatalog
 }
 
-type Stage = 'scope' | 'format' | 'destination'
-type ScopeMode = 'articles' | 'albums' | 'account' | 'album' | 'savedQuery' | 'matching'
+type Stage = ExportStage
+type ScopeMode = ExportScopeType
 
 interface ScopeChoice {
   readonly selection: ExportSelection
@@ -56,33 +69,48 @@ interface ExportVerificationDetail {
 
 export function ExportPage({ locale, messages }: ExportPageProps) {
   const copy = messages.exports
+  const [exportPath] = useState(window.location.pathname)
   // Export handoff is deliberately single-use session state. Capture it once
   // per Strict Mode render pair so query/cache rerenders cannot consume and
   // erase its safe presentation labels after the initial scope is restored.
   const [initialHandoff] = useState(consumeExportHandoffForMount)
-  const [stage, setStage] = useState<Stage>('scope')
-  const [scopeMode, setScopeMode] = useState<ScopeMode>(() => scopeModeFor(initialHandoff?.selection))
-  const [scope, setScope] = useState<ScopeChoice | undefined>(() => initialHandoff ? initialScopeChoice(initialHandoff, copy) : undefined)
+  const [initialBrowserView] = useState(() => parseExportBrowserView(window.location.search))
+  const [workflow] = useState(() => initialBrowserView.state.workflow ?? createExportWorkflowID())
+  const [initialDraft] = useState(() => loadExportBrowserDraft(initialBrowserView.state.workflow))
+  const initialSelection = initialHandoff?.selection ?? initialDraft?.selection
+  const initialScopeMode = initialHandoff
+    ? scopeModeFor(initialHandoff.selection)
+    : initialBrowserView.specified.scope || !initialSelection ? initialBrowserView.state.scope : scopeModeFor(initialSelection)
+  const compatibleInitialSelection = initialSelection && scopeModeFor(initialSelection) === initialScopeMode ? initialSelection : undefined
+  const initialScope = initialHandoff
+    ? initialScopeChoice(initialHandoff, copy)
+    : compatibleInitialSelection ? scopeChoiceFromDraft(compatibleInitialSelection, initialDraft?.selectionLabel, copy) : undefined
+  const initialOptions = initialDraft?.options
+  const initialFormatValid = Number.isInteger(initialOptions?.maximumNameBytes ?? 180) && (initialOptions?.maximumNameBytes ?? 180) > 0
+  const initialStage = earliestValidExportStage(initialBrowserView.state.stage, Boolean(initialScope), initialFormatValid)
+  const [stage, setStage] = useState<Stage>(initialStage)
+  const [scopeMode, setScopeMode] = useState<ScopeMode>(initialScopeMode)
+  const [scope, setScope] = useState<ScopeChoice | undefined>(initialScope)
   // Stable IDs remain exclusively in the export action contract. The handoff
   // presentation has only human-readable names and titles, so it can restore
   // cross-page context without exposing identifiers in the UI.
   const [selectedArticles, setSelectedArticles] = useState<readonly ArticleOption[]>(() => initialHandoff?.selection.kind === 'explicit_ids'
     ? initialHandoff.selection.articleIds.map((id, index) => articleOptionFromHandoff(id, initialHandoff.presentation?.articles?.[index], copy.workflow.selectedArticles))
-    : [])
-  const [albumIDs] = useState<readonly string[]>(() => initialHandoff?.selection.kind === 'album_ids' ? initialHandoff.selection.albumIds : [])
-  const [accountID, setAccountID] = useState(() => initialHandoff?.selection.kind === 'account' ? initialHandoff.selection.accountId : '')
-  const [albumID, setAlbumID] = useState(() => initialHandoff?.selection.kind === 'album' ? initialHandoff.selection.albumId : '')
-  const [savedQueryID, setSavedQueryID] = useState(() => initialHandoff?.selection.kind === 'saved_query' ? initialHandoff.selection.savedQueryId : '')
-  const [matchingScope] = useState(() => initialHandoff?.selection.kind === 'all_matching' ? initialHandoff.selection : undefined)
-  const [format, setFormat] = useState<ExportFormat>('markdown')
+    : initialDraft?.selectedArticles ?? [])
+  const [albumIDs] = useState<readonly string[]>(() => compatibleInitialSelection?.kind === 'album_ids' ? compatibleInitialSelection.albumIds : [])
+  const [accountID, setAccountID] = useState(() => compatibleInitialSelection?.kind === 'account' ? compatibleInitialSelection.accountId : '')
+  const [albumID, setAlbumID] = useState(() => compatibleInitialSelection?.kind === 'album' ? compatibleInitialSelection.albumId : '')
+  const [savedQueryID, setSavedQueryID] = useState(() => compatibleInitialSelection?.kind === 'saved_query' ? compatibleInitialSelection.savedQueryId : '')
+  const [matchingScope] = useState(() => compatibleInitialSelection?.kind === 'all_matching' ? compatibleInitialSelection : undefined)
+  const [format, setFormat] = useState<ExportFormat>(initialBrowserView.state.format)
   const [subdirectory, setSubdirectory] = useState('')
-  const [namingTemplate, setNamingTemplate] = useState('{published}-{title}')
-  const [maximumNameBytes, setMaximumNameBytes] = useState<number | null>(180)
-  const [collisionPolicy, setCollisionPolicy] = useState<'fail' | 'skip' | 'replace' | 'suffix'>('fail')
-  const [includeContent, setIncludeContent] = useState(true)
-  const [includeMetadata, setIncludeMetadata] = useState(true)
-  const [includeComments, setIncludeComments] = useState(false)
-  const [htmlResourcePolicy, setHTMLResourcePolicy] = useState<'best-effort' | 'strict'>('best-effort')
+  const [namingTemplate, setNamingTemplate] = useState(initialOptions?.namingTemplate ?? '{published}-{title}')
+  const [maximumNameBytes, setMaximumNameBytes] = useState<number | null>(initialOptions?.maximumNameBytes ?? 180)
+  const [collisionPolicy, setCollisionPolicy] = useState<'fail' | 'skip' | 'replace' | 'suffix'>(initialOptions?.collisionPolicy ?? 'fail')
+  const [includeContent, setIncludeContent] = useState(initialOptions?.includeContent ?? true)
+  const [includeMetadata, setIncludeMetadata] = useState(initialOptions?.includeMetadata ?? true)
+  const [includeComments, setIncludeComments] = useState(initialOptions?.includeComments ?? false)
+  const [htmlResourcePolicy, setHTMLResourcePolicy] = useState<'best-effort' | 'strict'>(initialOptions?.htmlResourcePolicy ?? 'best-effort')
   const [htmlBatchArchive, setHTMLBatchArchive] = useState('')
   const [directory, setDirectory] = useState<ExportDirectory>()
   const [childName, setChildName] = useState('')
@@ -102,6 +130,58 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   const isScopeValid = Boolean(scope)
   const isFormatValid = Number.isInteger(maximumNameBytes) && (maximumNameBytes ?? 0) > 0
   const isDestinationValid = Boolean(directory)
+
+  function replaceExportURL(view: ExportBrowserView) {
+    const search = serializeExportBrowserView(view)
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${search}${window.location.hash}`)
+  }
+
+  function commitExportView(view: ExportBrowserView, mode: 'push' | 'replace' = 'push') {
+    const validStage = earliestValidExportStage(view.stage, Boolean(scope), isFormatValid)
+    const next = { ...view, ...(workflow ? { workflow } : {}), stage: validStage }
+    const search = serializeExportBrowserView(next)
+    const href = `${window.location.pathname}${search}${window.location.hash}`
+    if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== href) window.history[mode === 'push' ? 'pushState' : 'replaceState'](window.history.state, '', href)
+    setStage(next.stage)
+    setScopeMode(next.scope)
+    setFormat(next.format)
+  }
+
+  useEffect(() => {
+    const canonical = serializeExportBrowserView({ ...(workflow ? { workflow } : {}), stage: initialStage, scope: initialScopeMode, format: initialBrowserView.state.format })
+    if (initialBrowserView.needsReplace || canonical !== window.location.search) window.history.replaceState(window.history.state, '', `${window.location.pathname}${canonical}${window.location.hash}`)
+  }, [initialBrowserView, initialScopeMode, initialStage, workflow])
+
+  useEffect(() => {
+    const restoreFromLocation = () => {
+      if (window.location.pathname !== exportPath) return
+      const parsed = parseExportBrowserView(window.location.search)
+      const sameWorkflow = parsed.state.workflow === workflow
+      const compatibleScope = sameWorkflow && scope && scopeModeFor(scope.selection) === parsed.state.scope ? scope : undefined
+      const validStage = earliestValidExportStage(parsed.state.stage, Boolean(compatibleScope), isFormatValid)
+      if (!compatibleScope && scope) chooseScope(undefined)
+      setScopeMode(parsed.state.scope)
+      setFormat(parsed.state.format)
+      setStage(validStage)
+      const canonical = serializeExportBrowserView({ ...parsed.state, stage: validStage })
+      if (parsed.needsReplace || canonical !== window.location.search) replaceExportURL({ ...parsed.state, stage: validStage })
+    }
+    window.addEventListener('popstate', restoreFromLocation)
+    window.addEventListener(navigationEvent, restoreFromLocation)
+    return () => {
+      window.removeEventListener('popstate', restoreFromLocation)
+      window.removeEventListener(navigationEvent, restoreFromLocation)
+    }
+  }, [exportPath, isFormatValid, scope, workflow])
+
+  useEffect(() => {
+    if (!workflow) return
+    saveExportBrowserDraft(workflow, {
+      ...(scope ? { selection: scope.selection, selectionLabel: scope.label } : {}),
+      ...(scope?.selection.kind === 'explicit_ids' ? { selectedArticles } : {}),
+      options: { namingTemplate, maximumNameBytes: maximumNameBytes ?? 180, collisionPolicy, includeContent, includeMetadata, includeComments, htmlResourcePolicy }
+    })
+  }, [collisionPolicy, htmlResourcePolicy, includeComments, includeContent, includeMetadata, maximumNameBytes, namingTemplate, scope, selectedArticles, workflow])
 
   useEffect(() => {
     setRowSelection((current) => Object.fromEntries(Object.entries(current).filter(([id]) => records.data?.data.some((record) => record.id === id))))
@@ -145,7 +225,8 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
     // A scope is an action contract, not merely a visible summary. Do not let
     // a user queue an invisible prior scope after moving to another scope
     // control; choosing the new control must be explicit.
-    setScopeMode(next)
+    clearExportBrowserDraft(workflow)
+    commitExportView({ stage: 'scope', scope: next, format })
     if (next === 'albums' && albumIDs.length) {
       chooseScope({ selection: { kind: 'album_ids', albumIds: albumIDs }, label: copy.selection.albumsLabel(albumIDs.length) })
       return
@@ -185,12 +266,12 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   function advanceStage() {
     if (stage === 'scope') {
       if (!isScopeValid) return setNotice(copy.invalidSelection)
-      setStage('format')
+      commitExportView({ stage: 'format', scope: scopeMode, format })
       return
     }
     if (stage === 'format') {
       if (!isFormatValid) return setNotice(copy.actionFailed)
-      setStage('destination')
+      commitExportView({ stage: 'destination', scope: scopeMode, format })
       return
     }
     queueExport()
@@ -230,6 +311,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
       }
     }, {
       onSuccess: (result) => {
+        clearExportBrowserDraft(workflow)
         handoffCreatedJob({ id: result.jobId })
       },
       onError: () => setNotice(copy.actionFailed)
@@ -254,16 +336,14 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   const primaryDisabled = stage === 'scope' ? !isScopeValid : stage === 'format' ? !isFormatValid : !isDestinationValid
 
   return (
-    <section aria-labelledby="exports-title">
-      <header className="page-heading">
-        <div><p className="eyebrow">{messages.navigation.operations}</p><h1 id="exports-title">{copy.title}</h1><p className="lede">{copy.description}</p></div>
-      </header>
+    <PageStack aria-labelledby="exports-title">
+      <PageHeader eyebrow={messages.navigation.operations} title={copy.title} titleId="exports-title" description={copy.description} />
 
       <div className="export-stage-shell">
         <ol className="export-stage-nav" aria-label={copy.workflow.stages}>
-          <StageNavigationItem label={copy.workflow.scope} number={1} isActive={stage === 'scope'} isComplete={Boolean(scope)} onClick={() => setStage('scope')} />
-          <StageNavigationItem label={copy.workflow.format} number={2} isActive={stage === 'format'} isComplete={stage === 'destination'} isDisabled={!scope} onClick={() => scope && setStage('format')} />
-          <StageNavigationItem label={copy.workflow.destination} number={3} isActive={stage === 'destination'} isComplete={false} isDisabled={!scope || !isFormatValid} onClick={() => scope && isFormatValid && setStage('destination')} />
+          <StageNavigationItem label={copy.workflow.scope} number={1} isActive={stage === 'scope'} isComplete={Boolean(scope)} onClick={() => commitExportView({ stage: 'scope', scope: scopeMode, format })} />
+          <StageNavigationItem label={copy.workflow.format} number={2} isActive={stage === 'format'} isComplete={stage === 'destination'} isDisabled={!scope} onClick={() => scope && commitExportView({ stage: 'format', scope: scopeMode, format })} />
+          <StageNavigationItem label={copy.workflow.destination} number={3} isActive={stage === 'destination'} isComplete={false} isDisabled={!scope || !isFormatValid} onClick={() => scope && isFormatValid && commitExportView({ stage: 'destination', scope: scopeMode, format })} />
         </ol>
 
         {stage === 'scope' ? (
@@ -291,7 +371,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
           <section className="workspace-panel export-stage" aria-labelledby="export-format-title">
             <div><h2 id="export-format-title">{copy.workflow.format}</h2><p>{copy.workflow.formatDescription}</p></div>
             <FormLayout>
-              <Selector label={copy.format} options={formats.map((item) => ({ value: item, label: item.toUpperCase() }))} value={format} onChange={(value) => setFormat(value as ExportFormat)} />
+              <Selector label={copy.format} options={formats.map((item) => ({ value: item, label: item.toUpperCase() }))} value={format} onChange={(value) => commitExportView({ stage, scope: scopeMode, format: value as ExportFormat })} />
               <FormLayout direction="horizontal">
                 <TextInput label={copy.namingTemplate} value={namingTemplate} onChange={setNamingTemplate} />
                 <NumberInput label={copy.maximumNameBytes} value={maximumNameBytes} onChange={setMaximumNameBytes} min={1} step={1} isIntegerOnly isRequired />
@@ -316,7 +396,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
       </div>
 
       <div className="export-stage-primary" aria-label={copy.workflow.currentAction}>
-        {stage !== 'scope' ? <Button label={copy.workflow.back} variant="secondary" onClick={() => setStage(stage === 'destination' ? 'format' : 'scope')} /> : null}
+        {stage !== 'scope' ? <Button label={copy.workflow.back} variant="secondary" onClick={() => commitExportView({ stage: stage === 'destination' ? 'format' : 'scope', scope: scopeMode, format })} /> : null}
         <Button label={primaryAction} variant="primary" isLoading={stage === 'destination' && mutations.startExport.isPending} isDisabled={primaryDisabled} onClick={advanceStage} />
       </div>
 
@@ -339,7 +419,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
         {selectedID ? <><div className="confirmation-proof"><span>{copy.openConfirmationLabel}</span><code>{expectedOpenConfirmation}</code><p>{copy.openConfirmationHint}</p></div><TextInput label={copy.openConfirmationInput} value={openConfirmation} onChange={setOpenConfirmation} /></> : <p className="field-hint">{copy.selectOne}</p>}
         {outputNotice ? <p className="export-notice" role="status" aria-live="polite">{outputNotice}</p> : null}
       </section>
-    </section>
+    </PageStack>
   )
 }
 
@@ -392,6 +472,17 @@ function initialScopeChoice(handoff: NonNullable<ReturnType<typeof consumeExport
     case 'album_ids': return { selection, label: handoff.label || copy.selection.albumsLabel(selection.albumIds.length) }
     case 'saved_query': return { selection, label: handoff.label || copy.selection.savedQueryLabel(selection.savedQueryId) }
     case 'all_matching': return { selection, label: matchingScopeLabel(handoff.presentation?.matching?.total, copy) }
+  }
+}
+
+function scopeChoiceFromDraft(selection: ExportSelection, label: string | undefined, copy: MessageCatalog['exports']): ScopeChoice {
+  switch (selection.kind) {
+    case 'explicit_ids': return { selection, label: label || copy.workflow.selectedArticlesLabel(selection.articleIds.length) }
+    case 'account': return { selection, label: label || copy.workflow.savedAccountFallback }
+    case 'album': return { selection, label: label || copy.workflow.savedAlbumFallback }
+    case 'album_ids': return { selection, label: label || copy.selection.albumsLabel(selection.albumIds.length) }
+    case 'saved_query': return { selection, label: label || copy.selection.savedQueryLabel(selection.savedQueryId) }
+    case 'all_matching': return { selection, label: label || copy.workflow.matchingSummary }
   }
 }
 

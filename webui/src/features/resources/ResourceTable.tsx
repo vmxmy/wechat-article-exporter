@@ -2,7 +2,7 @@ import { Button } from '@astryxdesign/core/Button'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type Row, type RowSelectionState, type Updater, type VisibilityState } from '@tanstack/react-table'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { MobileResourceRow } from '../../components/presentation'
+import { DenseRegion, MobileResourceRow, PageHeader, SectionStack } from '../../components/presentation'
 import type { MessageCatalog } from '../../i18n'
 import { getResourceColumnPresentation, type ResourceColumnRole } from '../../lib/presentation'
 import type { PaginatedResponse } from '../../lib/api'
@@ -79,58 +79,55 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
   })
   const totalPages = query.data ? Math.max(1, Math.ceil(query.data.pagination.total / query.data.pagination.pageSize)) : 1
   const visibleColumns = useMemo(() => table.getAllLeafColumns().filter((column) => column.id !== 'select'), [table])
+  const titleID = `${eyebrow.toLowerCase().replaceAll(' ', '-')}-title`
 
   return (
-    <section aria-labelledby={`${eyebrow.toLowerCase().replaceAll(' ', '-')}-title`}>
-      <header className="page-heading">
-        <div>
-          <p className="eyebrow">{eyebrow}</p>
-          <h1 id={`${eyebrow.toLowerCase().replaceAll(' ', '-')}-title`}>{messages.title}</h1>
-          <p className="lede">{messages.description}</p>
+    <SectionStack as="section" gap="section" aria-labelledby={titleID}>
+      <PageHeader eyebrow={eyebrow} title={messages.title} titleId={titleID} description={messages.description} />
+      <DenseRegion>
+        <div className="column-controls resource-column-controls" aria-label={messages.visibleColumns}>
+          {visibleColumns.map((column) => (
+            <CheckboxInput key={column.id} label={columnLabel(column)} value={column.getIsVisible()} onChange={() => column.toggleVisibility()} />
+          ))}
         </div>
-      </header>
-      <div className="column-controls resource-column-controls" aria-label={messages.visibleColumns}>
-        {visibleColumns.map((column) => (
-          <CheckboxInput key={column.id} label={columnLabel(column)} value={column.getIsVisible()} onChange={() => column.toggleVisibility()} />
-        ))}
-      </div>
-      {query.isLoading ? <p role="status">{messages.loading}</p> : null}
-      {query.isError ? (
-        <div className="error-state" role="alert">
-          <p>{messages.unavailable}</p>
-          <Button label={messages.retry} variant="secondary" onClick={() => void query.refetch()} />
-        </div>
-      ) : null}
-      {!query.isLoading && !query.isError ? (
-        <div className="data-table-wrap" aria-busy={query.isFetching}>
-          <table className="data-table">
-            <thead>{table.getHeaderGroups().map((group) => <tr key={group.id}>{group.headers.map((header) => <th key={header.id} scope="col" className={resourceColumnClassName(header.column.columnDef)}>{header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead>
-            <tbody>
-              {table.getRowModel().rows.map((row) => <tr key={row.id} data-selected={row.getIsSelected() || undefined}>{row.getVisibleCells().map((cell) => <td key={cell.id} className={resourceColumnClassName(cell.column.columnDef)}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}
-              {table.getRowModel().rows.length === 0 ? <tr><td colSpan={table.getVisibleLeafColumns().length}>{messages.empty}</td></tr> : null}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-      {!query.isLoading && !query.isError ? <div className="resource-table-mobile" aria-label={messages.title}>
-        {table.getRowModel().rows.map((row) => <MobileResourceRow
-          key={row.id}
-          title={resourcePrimaryCell(row, columns)}
-          fullTitle={resourcePrimaryText(row.original, row, columns)}
-          description={resourceSecondaryCell(row, columns)}
-          isSelected={row.getIsSelected()}
-          selectionLabel={messages.selectRow(resourcePrimaryText(row.original, row, columns) || row.id)}
-          onSelectionChange={(selected) => row.toggleSelected(selected)}
-          status={resourceStatusCell(row, columns)}
-          metadata={resourceMetadata(row, columns)}
-        />)}
-      </div> : null}
-      <nav className="pagination" aria-label={messages.pagination}>
-        <Button label={messages.previous} variant="secondary" size="sm" isDisabled={pageIndex === 0} onClick={() => onPageChange(pageIndex - 1)} />
-        <span>{messages.page(pageIndex + 1, totalPages)}</span>
-        <Button label={messages.next} variant="secondary" size="sm" isDisabled={pageIndex + 1 >= totalPages} onClick={() => onPageChange(pageIndex + 1)} />
-      </nav>
-    </section>
+        {query.isLoading ? <p role="status">{messages.loading}</p> : null}
+        {query.isError ? (
+          <div className="error-state" role="alert">
+            <p>{messages.unavailable}</p>
+            <Button label={messages.retry} variant="secondary" onClick={() => void query.refetch()} />
+          </div>
+        ) : null}
+        {!query.isLoading && !query.isError ? (
+          <div className="data-table-wrap" aria-busy={query.isFetching}>
+            <table className="data-table">
+              <thead>{table.getHeaderGroups().map((group) => <tr key={group.id}>{group.headers.map((header) => <th key={header.id} scope="col" className={resourceColumnClassName(header.column.columnDef)}>{header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead>
+              <tbody>
+                {table.getRowModel().rows.map((row) => <tr key={row.id} data-selected={row.getIsSelected() || undefined}>{row.getVisibleCells().map((cell) => <td key={cell.id} className={resourceColumnClassName(cell.column.columnDef)}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}
+                {table.getRowModel().rows.length === 0 ? <tr><td colSpan={table.getVisibleLeafColumns().length}>{messages.empty}</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {!query.isLoading && !query.isError ? <div className="resource-table-mobile" aria-label={messages.title}>
+          {table.getRowModel().rows.map((row) => <MobileResourceRow
+            key={row.id}
+            title={resourcePrimaryCell(row, columns)}
+            fullTitle={resourcePrimaryText(row.original, row, columns)}
+            description={resourceSecondaryCell(row, columns)}
+            isSelected={row.getIsSelected()}
+            selectionLabel={messages.selectRow(resourcePrimaryText(row.original, row, columns) || row.id)}
+            onSelectionChange={(selected) => row.toggleSelected(selected)}
+            status={resourceStatusCell(row, columns)}
+            metadata={resourceMetadata(row, columns)}
+          />)}
+        </div> : null}
+        <nav className="pagination" aria-label={messages.pagination}>
+          <Button label={messages.previous} variant="secondary" size="sm" isDisabled={pageIndex === 0} onClick={() => onPageChange(pageIndex - 1)} />
+          <span>{messages.page(pageIndex + 1, totalPages)}</span>
+          <Button label={messages.next} variant="secondary" size="sm" isDisabled={pageIndex + 1 >= totalPages} onClick={() => onPageChange(pageIndex + 1)} />
+        </nav>
+      </DenseRegion>
+    </SectionStack>
   )
 }
 

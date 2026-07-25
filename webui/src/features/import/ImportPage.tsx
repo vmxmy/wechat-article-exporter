@@ -2,6 +2,7 @@ import { Button } from '@astryxdesign/core/Button'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { useState } from 'react'
+import { PageHeader, PageStack } from '../../components/presentation'
 import type { MessageCatalog } from '../../i18n'
 import { handoffCreatedJob } from '../../lib/jobHandoff'
 import { useWorkspaceMutations } from '../../lib/queries'
@@ -24,23 +25,17 @@ export function ImportPage({ messages }: { readonly messages: MessageCatalog }) 
     })
   }
   return (
-    <section aria-labelledby="import-title">
-      <header className="page-heading">
-        <div>
-          <p className="eyebrow">{messages.navigation.operations}</p>
-          <h1 id="import-title">{messages.import.title}</h1>
-          <p className="lede">{messages.import.description}</p>
-        </div>
-      </header>
+    <PageStack aria-labelledby="import-title">
+      <PageHeader eyebrow={messages.navigation.operations} title={messages.import.title} titleId="import-title" description={messages.import.description} />
       <section className="unavailable-actions" aria-labelledby="import-form-title">
         <div><h2 id="import-form-title">{messages.import.title}</h2><p>{messages.import.note}</p></div>
         <form className="import-form" onSubmit={submit}>
-          <TextInput label={messages.import.url} value={url} placeholder={messages.import.placeholder} onChange={setUrl} />
-          <CheckboxInput label={messages.import.force} value={force} onChange={setForce} />
+          <TextInput label={messages.import.url} value={url} placeholder={messages.import.placeholder} htmlName="article-url" onChange={setUrl} />
+          <CheckboxInput label={messages.import.force} value={force} htmlName="force-download" onChange={setForce} />
           <Button label={messages.import.submit} type="submit" variant="primary" isLoading={mutations.ingestURL.isPending} isDisabled={!url.trim()} />
         </form>
         {error ? <p role="status">{error}</p> : null}
       </section>
-    </section>
+    </PageStack>
   )
 }

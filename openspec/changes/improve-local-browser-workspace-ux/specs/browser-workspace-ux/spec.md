@@ -259,6 +259,73 @@ All restructured workflows SHALL remain equivalent in English and Simplified Chi
 - **WHEN** a keyboard user selects resources and invokes a contextual action
 - **THEN** selection, action controls, dialogs, and focus restoration SHALL be fully keyboard operable with visible focus
 
+### Requirement: Restorable browser view and workflow state
+
+The workspace SHALL represent safe, shareable article view state in the browser URL and SHALL restore safe export workflow progress after navigation or reload. URL and browser-session persistence SHALL NOT contain credentials, local paths, directory capabilities, exact confirmations, article content, or other secret material.
+
+#### Scenario: Restore an article view from its URL
+
+- **WHEN** a user applies article filters, changes sorting or opens another result page and then reloads, shares the URL, or uses browser back and forward
+- **THEN** the workspace SHALL restore the applied query, sort and page, SHALL omit default values from the canonical URL, and SHALL safely discard invalid owned parameters
+
+#### Scenario: Keep article draft state private to the current view
+
+- **WHEN** a user edits filters without applying them, selects rows, or opens a detail dialog
+- **THEN** those ephemeral states SHALL remain outside the URL and SHALL NOT become part of a shared article link
+
+#### Scenario: Restore a safe export workflow draft
+
+- **WHEN** a user advances through export scope and format selection and then reloads or navigates through browser history
+- **THEN** the workspace SHALL restore the latest valid non-sensitive stage and options, or SHALL fall back to the earliest valid stage when prerequisites are missing
+
+#### Scenario: Exclude export capabilities and secrets from browser persistence
+
+- **WHEN** an export destination is authorized or an exact confirmation is displayed
+- **THEN** directory tokens, paths, confirmation strings, credentials and article content SHALL NOT be written to the URL or browser storage and completion SHALL clear the recoverable draft
+
+### Requirement: Protected unsaved settings navigation
+
+The workspace SHALL detect unsaved editable preference changes and SHALL protect them across internal links, programmatic navigation, browser history traversal, reload and tab closure. It SHALL preserve accessible focus behavior and SHALL NOT warn after a successful save or after the draft returns to its saved value.
+
+#### Scenario: Warn before internal navigation with unsaved preferences
+
+- **WHEN** a user changes an editable preference and attempts to leave settings through workspace navigation or browser history
+- **THEN** an accessible confirmation SHALL allow the user to stay or discard changes, cancelling SHALL restore focus, and discarding SHALL resume the requested destination exactly once
+
+#### Scenario: Warn before closing or reloading a dirty settings page
+
+- **WHEN** unsaved preferences exist and the user reloads, closes the tab or exits the browser
+- **THEN** the workspace SHALL register the native unload warning without relying on custom browser-controlled warning text
+
+#### Scenario: Clear or retain dirty state correctly
+
+- **WHEN** a save succeeds or all edited values are restored to the saved baseline
+- **THEN** the workspace SHALL clear the dirty state, while a failed save SHALL preserve both the draft and its dirty state
+
+### Requirement: Complete native form and document semantics
+
+The workspace SHALL expose meaningful native names, input types, input modes and explicit autocomplete behavior for URL, credential and proxy inputs where the underlying control supports them. It SHALL reserve intrinsic QR image space, provide light and dark browser theme colors, protect exact technical values from translation, and use the active application locale for numeric formatting and ongoing-state copy.
+
+#### Scenario: Enter a URL in an appropriate native control
+
+- **WHEN** a user imports an article URL or configures a proxy endpoint
+- **THEN** the control SHALL expose a stable native name and URL-appropriate type/input behavior without abandoning the shared Astryx field presentation
+
+#### Scenario: Enter write-only credential or authorization values
+
+- **WHEN** a user fills a credential or proxy authorization form
+- **THEN** every field SHALL expose a stable native name and an explicit autocomplete policy that does not misrepresent imported WeChat material as an ordinary website login
+
+#### Scenario: Render stable document and technical metadata
+
+- **WHEN** the QR code, browser chrome, or an exact technical value is rendered
+- **THEN** the QR image SHALL declare intrinsic dimensions, light and dark theme colors SHALL match the workspace canvas, and identifiers, hashes, paths, tokens and confirmations SHALL be marked as non-translatable
+
+#### Scenario: Format copy with the active language
+
+- **WHEN** the application formats byte/count values or displays an ongoing check or placeholder example
+- **THEN** formatting SHALL use the selected application locale and English and Simplified Chinese copy SHALL follow the same ellipsis convention
+
 #### Scenario: Switch language
 
 - **WHEN** a user changes between English and Simplified Chinese

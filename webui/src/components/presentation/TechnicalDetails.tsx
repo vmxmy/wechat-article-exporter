@@ -43,7 +43,7 @@ function TechnicalDetail({ item, onCopy }: { readonly item: TechnicalDetailItem;
     <div className="presentation-technical-item">
       <dt className="presentation-technical-label">{item.label}</dt>
       <dd className="presentation-technical-value">
-        <code className="presentation-code">{exactValue || EMPTY_VALUE}</code>
+        <code className="presentation-code" translate="no">{exactValue || EMPTY_VALUE}</code>
         {exactValue ? <Button label={item.copyLabel} variant="ghost" size="sm" clickAction={copy} /> : null}
       </dd>
     </div>
