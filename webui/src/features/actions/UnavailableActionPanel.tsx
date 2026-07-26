@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ActionGroup } from '../../components/presentation'
 import type { MessageCatalog } from '../../i18n'
 
 interface UnavailableActionPanelProps {
@@ -18,9 +19,9 @@ export function UnavailableActionPanel({ messages, title, description, children,
         <h2 id={titleId}>{title}</h2>
         <p>{description}</p>
       </div>
-      <div className="action-button-group" aria-describedby={availabilityNote ? 'unavailable-api-note' : undefined}>
+      <ActionGroup align="start" gap="cluster" stackAt="compact" aria-describedby={availabilityNote ? 'unavailable-api-note' : undefined}>
         {children}
-      </div>
+      </ActionGroup>
       {availabilityNote ? <p id="unavailable-api-note" className="availability-note">{availabilityNote}</p> : null}
       {showConfirmationNote ? <details className="confirmation-note">
         <summary>{messages.unavailableActions.confirmationTitle}</summary>

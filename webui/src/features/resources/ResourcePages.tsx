@@ -1,18 +1,19 @@
-import { Button } from '@astryxdesign/core/Button'
-import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog'
-import { Selector } from '@astryxdesign/core/Selector'
-import { TextInput } from '@astryxdesign/core/TextInput'
-import { AccountRemoteSelector, ContentCluster, PageStack, SelectionActionBar, Status } from '../../components/presentation'
+import { Button } from '@/components/controls/Button'
+import { Selector } from '@/components/controls/Selector'
+import { TextInput } from '@/components/controls/TextInput'
+import { AccountRemoteSelector, EmptyState, FieldHint, PageHeader, PageStack, Panel, SectionHeader, SelectionActionBar, Status, TypedConfirmationDialog } from '../../components/presentation'
 import { useMemo, useRef, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
-import { saveExportHandoff, type AccountRecord, type AccountSyncMode, type AlbumTraversalOrder } from '../../lib/api'
+import { ApiError, resolveAccountFromArticle, resolveAccountName, saveExportHandoff, type AccountRecord, type AccountSyncMode, type AlbumTraversalOrder } from '../../lib/api'
 import { getAccountManifestDownloadURL } from '../../lib/api'
-import { useAccountPage, useAccountSearch, useAlbumPage, useWorkspaceMutations } from '../../lib/queries'
+import { useAccountPage, useAccountSearch, useAlbumPage, useSessionStatus, useWorkspaceMutations } from '../../lib/queries'
+import { usePagedBrowserView } from '../../lib/usePagedBrowserView'
 import { ResourceTable } from './ResourceTable'
 import { navigateTo } from '../../app/navigation'
 import { handoffCreatedJob } from '../../lib/jobHandoff'
-import { AccountEntryDrawer, type AccountDraft, type AccountEntryMode } from './accounts/AccountEntryDrawer'
+import { AccountAddDrawer } from './accounts/AccountAddDrawer'
+import type { AccountDraft, AccountEntryMode } from './accounts/accountEntryTypes'
 import { AlbumSelectionDetails, type AlbumRecordWithAccountName } from './albums/AlbumSelectionDetails'
 export { JobsPage } from './jobs/JobsPage'
 export { SavedQueriesPage } from './saved-queries/SavedQueriesPage'
@@ -21,7 +22,7 @@ const pageSize = 25
 const maximumSelectedAlbumIDs = 50
 
 export function AccountsPage({ messages, locale }: { readonly messages: MessageCatalog; readonly locale: Locale }) {
-  const [pageIndex, setPageIndex] = useState(0)
+  const [pageIndex, setPageIndex] = usePagedBrowserView()
   const [selected, setSelected] = useState<readonly string[]>([])
   const [search, setSearch] = useState('')
   const [draft, setDraft] = useState<AccountDraft>({ fakeid: '', name: '', alias: '' })
@@ -30,12 +31,22 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   const [manifest, setManifest] = useState<File | null>(null)
   const [syncMode, setSyncMode] = useState<AccountSyncMode>('incremental')
   const [notice, setNotice] = useState<string>()
+  const [discoveryError, setDiscoveryError] = useState<string | undefined>()
+  const [articleURL, setArticleURL] = useState('')
+  const [isResolving, setResolving] = useState(false)
+  const [resolveError, setResolveError] = useState<string | undefined>()
+  const [resolvedName, setResolvedName] = useState<string | undefined>()
   const [isDeleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false)
   const [deleteConfirmation, setDeleteConfirmation] = useState('')
   const deleteTriggerRef = useRef<HTMLElement | null>(null)
   const query = useAccountPage({ page: pageIndex + 1, pageSize })
   const discovery = useAccountSearch({ page: 1, pageSize, search })
+  const session = useSessionStatus()
   const mutations = useWorkspaceMutations()
+  // Distinguish "confirmed unauthenticated" from "still loading" so the drawer
+  // never flashes a sign-in prompt while the session query is in flight.
+  const isAuthenticated = session.data?.state === 'authenticated'
+  const isSessionResolved = !session.isLoading && !session.isError
   const columns = useMemo<ColumnDef<AccountRecord>[]>(() => [
     { accessorKey: 'name', header: messages.resources.accounts.columns.name, meta: { role: 'primaryText' } },
     { accessorKey: 'alias', header: messages.resources.accounts.columns.alias, meta: { role: 'secondaryText' }, cell: ({ getValue }) => getValue<string | undefined>() ?? '—' },
@@ -53,6 +64,10 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   }
   const openNewEntry = () => {
     setDraft({ fakeid: '', name: '', alias: '' })
+    setDiscoveryError(undefined)
+    setArticleURL('')
+    setResolveError(undefined)
+    setResolvedName(undefined)
     setEntryMode('create')
     setEntryOpen(true)
   }
@@ -65,6 +80,34 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   const selectDiscoveryCandidate = (account: AccountRecord) => {
     setDraft({ fakeid: account.fakeid?.trim() ?? '', name: account.name, alias: account.alias ?? '' })
     setNotice(actions.candidateSelected(account.name))
+  }
+  const discoverAccounts = async () => {
+    setDiscoveryError(undefined)
+    const result = await discovery.refetch()
+    if (result.status === 'error') {
+      setDiscoveryError(result.error instanceof ApiError && result.error.status === 401 ? actions.discoveryFailedAuth : actions.discoveryFailedGeneric)
+    }
+  }
+  const resolveFromArticle = async () => {
+    const trimmed = articleURL.trim()
+    if (!trimmed) return
+    setResolving(true)
+    setResolveError(undefined)
+    setResolvedName(undefined)
+    try {
+      if (isAuthenticated) {
+        const account = await resolveAccountFromArticle(trimmed)
+        setDraft({ fakeid: account.fakeid?.trim() ?? '', name: account.name, alias: account.alias ?? '' })
+        setNotice(actions.candidateSelected(account.name))
+      } else {
+        const name = await resolveAccountName(trimmed)
+        setResolvedName(name)
+      }
+    } catch (error) {
+      setResolveError(error instanceof ApiError && error.status === 401 ? actions.discoveryFailedAuth : actions.articleLinkFailed)
+    } finally {
+      setResolving(false)
+    }
   }
   const saveAccount = () => {
     mutations.saveAccount.mutate(accountInput, {
@@ -101,19 +144,18 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
     setDeleteConfirmationOpen(isOpen)
     if (isOpen) return
     setDeleteConfirmation('')
-    requestAnimationFrame(() => deleteTriggerRef.current?.focus())
   }
+  const isEmpty = !query.isLoading && !query.isError && (query.data?.data.length ?? 0) === 0
   return (
     <PageStack as="div">
-      <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.accounts} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
-      <ContentCluster><Button label={actions.title} variant="primary" onClick={openNewEntry} /></ContentCluster>
+      <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.accounts} selectorCopy={messages.selectors} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} headerActions={<Button label={actions.addAccount} variant="primary" onClick={openNewEntry} />} emptyState={isEmpty ? <EmptyState title={messages.resources.accounts.emptyState.title} description={messages.resources.accounts.emptyState.description} headingLevel={3} actions={<Button label={messages.resources.accounts.emptyState.addAccount} variant="primary" onClick={openNewEntry} />} /> : undefined} />
       <SelectionActionBar selectedCount={selected.length} countLabel={(count) => `${count} ${messages.resources.accounts.selected}`} toolbarLabel={actions.title} actions={<>
       {one ? <><Button label={actions.edit} variant="secondary" onClick={openEditEntry} /><Selector label={actions.syncMode} options={[{ value: 'incremental', label: actions.incremental }, { value: 'full', label: actions.full }]} value={syncMode} onChange={(next) => setSyncMode(next as AccountSyncMode)} /><Button label={actions.sync} variant="secondary" isLoading={mutations.syncAccount.isPending} onClick={() => mutations.syncAccount.mutate({ id: one, mode: syncMode }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /></> : <p>{actions.selectOne}</p>}
       </>} moreActions={<div role="group" aria-label={actions.deleteTitle}><Button label={actions.remove} variant="destructive" isLoading={mutations.deleteAccounts.isPending} onClick={openDeleteConfirmation} /></div>} />
-      {one ? <p className="field-hint">{syncMode === 'incremental' ? actions.incrementalHint : actions.fullHint}</p> : null}
+      {one ? <FieldHint>{syncMode === 'incremental' ? actions.incrementalHint : actions.fullHint}</FieldHint> : null}
       {notice ? <p role="status">{notice}</p> : null}
-      {isEntryOpen ? <AccountEntryDrawer isOpen onOpenChange={closeEntry} mode={entryMode} actions={actions} draft={draft} onDraftChange={setDraft} onSubmit={entryMode === 'edit' ? updateAccount : saveAccount} isSubmitting={entryMode === 'edit' ? mutations.updateAccount.isPending : mutations.saveAccount.isPending} search={search} onSearchChange={setSearch} onDiscover={() => { void discovery.refetch() }} isDiscovering={discovery.isFetching} candidates={discovery.data?.data} onCandidateSelect={selectDiscoveryCandidate} manifest={manifest} onManifestChange={setManifest} onManifestImport={importManifest} isManifestImporting={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending} manifestDownloadURL={getAccountManifestDownloadURL()} /> : null}
-      {isDeleteConfirmationOpen ? <TypedConfirmationDialog isOpen onOpenChange={closeDeleteConfirmation} title={actions.deleteTitle} description={actions.deleteConfirm} expected={actions.deleteConfirmation(selected)} inputLabel={actions.deleteConfirmationLabel} inputHint={actions.deleteConfirmationHint} actionLabel={actions.confirmDelete} cancelLabel={actions.cancelDelete} confirmation={deleteConfirmation} onConfirmationChange={setDeleteConfirmation} isActionLoading={mutations.deleteAccounts.isPending} onAction={() => mutations.deleteAccounts.mutate({ ids: selected, confirmation: deleteConfirmation }, { onSuccess: () => { setSelected([]); setNotice(undefined); setDeleteConfirmationOpen(false); setDeleteConfirmation('') }, onError: () => setNotice(actions.actionFailed) })} /> : null}
+      {isEntryOpen ? <AccountAddDrawer isOpen onOpenChange={closeEntry} mode={entryMode} actions={actions} closeLabel={messages.a11y.closeDialog} draft={draft} onDraftChange={setDraft} onSubmit={entryMode === 'edit' ? updateAccount : saveAccount} isSubmitting={entryMode === 'edit' ? mutations.updateAccount.isPending : mutations.saveAccount.isPending} isAuthenticated={isAuthenticated} isSessionResolved={isSessionResolved} search={search} onSearchChange={setSearch} onDiscover={() => { void discoverAccounts() }} isDiscovering={discovery.isFetching} discoveryError={discoveryError} candidates={discovery.data?.data} onCandidateSelect={selectDiscoveryCandidate} articleURL={articleURL} onArticleURLChange={setArticleURL} onResolve={() => { void resolveFromArticle() }} isResolving={isResolving} resolveError={resolveError} resolvedName={resolvedName} manifest={manifest} onManifestChange={setManifest} onManifestImport={importManifest} isManifestImporting={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending} manifestDownloadURL={getAccountManifestDownloadURL()} /> : null}
+      {isDeleteConfirmationOpen ? <TypedConfirmationDialog isOpen onOpenChange={closeDeleteConfirmation} triggerRef={deleteTriggerRef} title={actions.deleteTitle} closeLabel={messages.a11y.closeDialog} description={actions.deleteConfirm} expected={actions.deleteConfirmation(selected)} inputLabel={actions.deleteConfirmationLabel} inputHint={actions.deleteConfirmationHint} actionLabel={actions.confirmDelete} cancelLabel={actions.cancelDelete} confirmation={deleteConfirmation} onConfirmationChange={setDeleteConfirmation} isActionLoading={mutations.deleteAccounts.isPending} onAction={() => mutations.deleteAccounts.mutate({ ids: selected, confirmation: deleteConfirmation }, { onSuccess: () => { setSelected([]); setNotice(undefined); setDeleteConfirmationOpen(false); setDeleteConfirmation('') }, onError: () => setNotice(actions.actionFailed) })} /> : null}
     </PageStack>
   )
 }
@@ -160,47 +202,16 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
     setSelected([])
   }
   return <PageStack as="div">
-    <section className="workspace-panel" aria-labelledby="album-filters-title">
-      <div><h2 id="album-filters-title">{messages.resources.albums.filters.title}</h2><p>{messages.resources.albums.filters.description}</p></div>
-      <div className="account-action-form"><AccountRemoteSelector label={messages.resources.accounts.columns.name} value={accountId} onChange={(next) => { setAccountId(next); setPageIndex(0); setSelected([]) }} placeholder={messages.articles.filters.any} copy={{ unavailable: messages.articles.ux.accountUnavailable, noResults: messages.articles.ux.selectorNoResults, duplicate: messages.articles.ux.duplicateSelection }} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={updateFilter(setKeyword)} /></div>
-    </section>
-    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} preserveSelectionAcrossPages maximumSelectedIDs={maximumSelectedAlbumIDs} selectionScope={selectionScope} />
+    <PageHeader eyebrow={messages.navigation.library} title={messages.resources.albums.title} titleId="albums-title" description={messages.resources.albums.description} />
+    <Panel aria-labelledby="album-filters-title">
+      <SectionHeader title={messages.resources.albums.filters.title} titleId="album-filters-title" description={messages.resources.albums.filters.description} />
+      <div className="account-action-form"><AccountRemoteSelector label={messages.resources.accounts.columns.name} value={accountId} onChange={(next) => { setAccountId(next); setPageIndex(0); setSelected([]) }} placeholder={messages.articles.filters.any} copy={messages.selectors} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={updateFilter(setKeyword)} /></div>
+    </Panel>
+    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} selectorCopy={messages.selectors} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} preserveSelectionAcrossPages maximumSelectedIDs={maximumSelectedAlbumIDs} selectionScope={selectionScope} hideHeader />
     <SelectionActionBar selectedCount={selected.length} countLabel={(count) => `${count} ${messages.resources.albums.selected}`} toolbarLabel={messages.resources.albums.actions.title} actions={<><Selector label={messages.resources.albums.actions.order} options={[{ value: 'forward', label: messages.resources.albums.actions.forward }, { value: 'reverse', label: messages.resources.albums.actions.reverse }]} value={order} onChange={(next) => setOrder(next as AlbumTraversalOrder)} /><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" onClick={handoffExport} /></>} />
     <AlbumSelectionDetails album={album} messages={messages} />
     {notice ? <p role="status">{notice}</p> : null}
   </PageStack>
-}
-
-type TypedConfirmationDialogProps = {
-  readonly isOpen: boolean
-  readonly onOpenChange: (isOpen: boolean) => void
-  readonly title: string
-  readonly description: string
-  readonly expected: string
-  readonly inputLabel: string
-  readonly inputHint: string
-  readonly actionLabel: string
-  readonly cancelLabel: string
-  readonly confirmation: string
-  readonly onConfirmationChange: (value: string) => void
-  readonly isActionLoading: boolean
-  readonly onAction: () => void
-}
-
-function TypedConfirmationDialog({ isOpen, onOpenChange, title, description, expected, inputLabel, inputHint, actionLabel, cancelLabel, confirmation, onConfirmationChange, isActionLoading, onAction }: TypedConfirmationDialogProps) {
-  const close = () => onOpenChange(false)
-  const submit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (confirmation === expected) onAction()
-  }
-  return <Dialog isOpen={isOpen} onOpenChange={onOpenChange} purpose="form" role="alertdialog" aria-label={title}>
-    <DialogHeader title={title} subtitle={description} onOpenChange={onOpenChange} />
-    <form className="typed-confirmation-dialog" onSubmit={submit}>
-      <div className="confirmation-proof"><strong>{inputLabel}</strong><code>{expected}</code><p>{inputHint}</p></div>
-      <TextInput label={inputLabel} value={confirmation} onChange={onConfirmationChange} isRequired hasAutoFocus />
-      <div className="action-button-group"><Button label={actionLabel} variant="destructive" type="submit" isLoading={isActionLoading} isDisabled={confirmation !== expected} /><Button label={cancelLabel} variant="secondary" isDisabled={isActionLoading} onClick={close} /></div>
-    </form>
-  </Dialog>
 }
 
 function formatDate(value: string | undefined, locale: Locale) {

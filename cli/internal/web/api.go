@@ -83,6 +83,10 @@ func (server *Server) api(writer http.ResponseWriter, request *http.Request) {
 		server.accountManifestRead(writer, request)
 	case "/api/v1/accounts/search":
 		server.accountSearch(writer, request)
+	case "/api/v1/accounts/resolve":
+		server.accountResolve(writer, request)
+	case "/api/v1/accounts/resolve-name":
+		server.accountResolveName(writer, request)
 	case "/api/v1/articles":
 		server.articles(writer, request)
 	case "/api/v1/selectors/articles":
@@ -188,6 +192,40 @@ func (server *Server) accountSearch(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	writePage(writer, http.StatusOK, value)
+}
+
+// accountResolve returns a complete account (name + fakeid) for an article URL.
+// The authenticated second step requires a WeChat session; without one it
+// returns 401 so the browser can prompt for sign-in.
+func (server *Server) accountResolve(writer http.ResponseWriter, request *http.Request) {
+	articleURL := strings.TrimSpace(request.URL.Query().Get("url"))
+	if articleURL == "" {
+		server.apiError(writer, http.StatusBadRequest, "invalid_argument", "article url is required")
+		return
+	}
+	account, err := server.workspace.ResolveAccountFromArticle(request.Context(), articleURL)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusOK, account)
+}
+
+// accountResolveName returns only the public account name behind an article
+// URL. It needs no WeChat session, so the browser can call it as a degraded
+// preview before the user signs in.
+func (server *Server) accountResolveName(writer http.ResponseWriter, request *http.Request) {
+	articleURL := strings.TrimSpace(request.URL.Query().Get("url"))
+	if articleURL == "" {
+		server.apiError(writer, http.StatusBadRequest, "invalid_argument", "article url is required")
+		return
+	}
+	name, err := server.workspace.ResolveAccountName(request.Context(), articleURL)
+	if err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	writeAPI(writer, http.StatusOK, map[string]string{"name": name})
 }
 
 func (server *Server) runtime(writer http.ResponseWriter, request *http.Request) {

@@ -1,10 +1,10 @@
-import { Collapsible } from '@astryxdesign/core/Collapsible'
-import { DateTimeInput, type ISODateTimeString } from '@astryxdesign/core/DateTimeInput'
-import { MultiSelector } from '@astryxdesign/core/MultiSelector'
-import { NumberInput } from '@astryxdesign/core/NumberInput'
-import { Selector } from '@astryxdesign/core/Selector'
-import { TextInput } from '@astryxdesign/core/TextInput'
-import { AccountRemoteSelector, AlbumRemoteSelector } from '../../components/presentation'
+import { Collapsible } from '@/components/controls/Collapsible'
+import { DateTimeInput, type ISODateTimeString } from '@/components/controls/DateTimeInput'
+import { MultiSelector } from '@/components/controls/MultiSelector'
+import { NumberInput } from '@/components/controls/NumberInput'
+import { Selector } from '@/components/controls/Selector'
+import { TextInput } from '@/components/controls/TextInput'
+import { AccountRemoteSelector, AlbumRemoteSelector, FieldHint, FormGrid, FormGridFullSpan } from '../../components/presentation'
 import type { Locale, MessageCatalog } from '../../i18n'
 import type { AccountOption, AlbumOption, ArticleQuery } from '../../lib/api'
 import { formatStatus } from '../../lib/presentation'
@@ -30,25 +30,29 @@ export function ArticleFilterEditor({ locale, messages, value, onChange, onAccou
 
   return (
     <div className="article-filter-editor" data-testid={`${idPrefix}-editor`}>
-      <div className="article-filter-defaults">
-        <TextInput
-          label={messages.articles.search}
-          value={value.keyword ?? ''}
-          placeholder={messages.articles.searchPlaceholder}
-          hasClear
-          onChange={(next) => update('keyword', next.trim() || undefined)}
-        />
+      <FormGrid columns={2}>
+        <FormGridFullSpan>
+          <TextInput
+            label={messages.articles.search}
+            value={value.keyword ?? ''}
+            placeholder={messages.articles.searchPlaceholder}
+            htmlName="article-keyword"
+            hasClear
+            onChange={(next) => update('keyword', next.trim() || undefined)}
+          />
+        </FormGridFullSpan>
         <AccountRemoteSelector
           label={messages.articles.columns.account}
           description={copy.accountDescription}
           value={value.accountId}
           selectedLabel={selectedAccountLabel}
           onChange={(next, option) => {
-            update('accountId', next)
+            onChange({ ...value, accountId: next, albumId: next === value.accountId ? value.albumId : undefined })
             onAccountOptionChange?.(option)
+            if (next !== value.accountId) onAlbumOptionChange?.(undefined)
           }}
           placeholder={messages.articles.filters.any}
-          copy={{ unavailable: copy.accountUnavailable, noResults: copy.selectorNoResults, duplicate: copy.duplicateSelection }}
+          copy={messages.selectors}
           testID={`${idPrefix}-account`}
         />
         <DateTimeInput
@@ -72,14 +76,16 @@ export function ArticleFilterEditor({ locale, messages, value, onChange, onAccou
           options={stateOptions}
           value={value.state ?? null}
           onChange={(next) => update('state', next || undefined)}
+          htmlName="article-state"
           placeholder={messages.articles.filters.any}
           hasClear
+          clearLabel={messages.selectors.clear(messages.articles.filters.state)}
         />
-      </div>
+      </FormGrid>
       <Collapsible trigger={`${copy.moreFilters}${advancedCount > 0 ? ` (${advancedCount})` : ''}`} defaultIsOpen={advancedCount > 0}>
         <div className="article-filter-more">
-          <p className="field-hint">{copy.moreFilterDescription}</p>
-          <div className="article-filter-advanced-grid">
+          <FieldHint>{copy.moreFilterDescription}</FieldHint>
+          <FormGrid columns={2}>
             <AlbumRemoteSelector
               label={messages.articles.filters.albumId.replace(/\s*ID$/i, '')}
               description={copy.albumDescription}
@@ -91,16 +97,17 @@ export function ArticleFilterEditor({ locale, messages, value, onChange, onAccou
                 onAlbumOptionChange?.(option)
               }}
               placeholder={messages.articles.filters.any}
-              copy={{ unavailable: copy.albumUnavailable, noResults: copy.selectorNoResults, duplicate: copy.duplicateSelection }}
+              copy={messages.selectors}
               testID={`${idPrefix}-album`}
             />
-            <TextInput label={messages.articles.filters.author} value={value.author ?? ''} hasClear onChange={(next) => update('author', next.trim() || undefined)} />
+            <TextInput label={messages.articles.filters.author} value={value.author ?? ''} htmlName="article-author" hasClear onChange={(next) => update('author', next.trim() || undefined)} />
             <MultiSelector
               label={messages.articles.filters.messageTypes.replace(/\s*\([^)]*\)/, '')}
               options={Object.entries(copy.messageTypes).map(([value, label]) => ({ value, label }))}
               value={(value.messageTypes ?? []).map(String)}
               onChange={(next) => update('messageTypes', next.map(Number).filter((type) => Number.isInteger(type) && type >= 0))}
               placeholder={copy.messageTypePlaceholder}
+              copy={messages.selectors}
               triggerDisplay="labels"
               hasClear
             />
@@ -115,13 +122,15 @@ export function ArticleFilterEditor({ locale, messages, value, onChange, onAccou
                 label={messages.articles.filters[label]}
                 value={value[field]}
                 onChange={(next) => update(field, next ?? undefined)}
+                htmlName={`article-${field}`}
+                autoComplete="off"
                 min={0}
                 step={1}
                 isIntegerOnly
                 hasClear
               />
             ))}
-          </div>
+          </FormGrid>
         </div>
       </Collapsible>
     </div>
@@ -129,7 +138,7 @@ export function ArticleFilterEditor({ locale, messages, value, onChange, onAccou
 }
 
 function BooleanFilter({ label, value, onChange, messages }: { readonly label: string; readonly value: boolean | undefined; readonly onChange: (value: boolean | undefined) => void; readonly messages: MessageCatalog }) {
-  return <Selector label={label} options={[{ value: 'true', label: messages.articles.filters.yes }, { value: 'false', label: messages.articles.filters.no }]} value={value === undefined ? null : String(value)} onChange={(next) => onChange(next === null ? undefined : next === 'true')} placeholder={messages.articles.filters.any} hasClear />
+  return <Selector label={label} options={[{ value: 'true', label: messages.articles.filters.yes }, { value: 'false', label: messages.articles.filters.no }]} value={value === undefined ? null : String(value)} onChange={(next) => onChange(next === null ? undefined : next === 'true')} placeholder={messages.articles.filters.any} hasClear clearLabel={messages.selectors.clear(label)} />
 }
 
 function countAdvancedFilters(query: ArticleQuery): number {

@@ -5,7 +5,7 @@
 .settings-layout {
   display: grid;
   grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr);
-  gap: var(--spacing-6);
+  gap: var(--spacing-4);
   align-items: start;
 }
 
@@ -65,8 +65,8 @@
 .settings-section {
   scroll-margin-top: var(--spacing-4);
   display: grid;
-  gap: var(--spacing-5);
-  padding-block: var(--spacing-6);
+  gap: var(--spacing-3);
+  padding-block: var(--spacing-4);
 }
 
 .settings-section:first-child { padding-block-start: 0; }
@@ -84,13 +84,7 @@
   min-width: 0;
 }
 
-.settings-section-header {
-  max-width: var(--measure-reading);
-  gap: var(--spacing-2);
-}
-
-.settings-section-header h2,
-.settings-section-header p,
+.settings-section-header,
 .settings-field-group h3,
 .settings-field-group p,
 .settings-danger-zone h3,
@@ -101,10 +95,7 @@
   margin: 0;
 }
 
-.settings-section-header h2 { font-size: var(--text-heading-3-size); }
-
 .settings-section-header p,
-.settings-hint,
 .settings-empty,
 .settings-loading,
 .settings-summary-line,
@@ -113,27 +104,20 @@
   color: var(--color-text-secondary);
 }
 
-.settings-section-body { gap: var(--spacing-5); }
+.settings-section-body { gap: var(--spacing-3); }
 
 .settings-field-group {
   width: min(100%, 58rem);
-  padding-block-end: var(--spacing-5);
+  padding-block-end: var(--spacing-3);
   border-block-end: 1px solid var(--color-border);
 }
 
 .settings-field-group:last-child { padding-block-end: 0; border-block-end: 0; }
 
-.settings-field-group h3,
-.settings-danger-zone h3 { font-size: var(--text-heading-4-size); }
-
-.settings-field-group h4,
-.settings-danger-zone h4 { font-size: var(--text-heading-5-size); }
-
 .settings-form { margin: 0; }
 
 .settings-form-narrow { width: min(100%, 36rem); }
 
-.settings-action-row,
 .settings-probe-result {
   display: flex;
   flex-wrap: wrap;
@@ -157,23 +141,12 @@
   font: inherit;
 }
 
-.settings-proxy-form {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.settings-proxy-form fieldset,
-.settings-proxy-form .settings-trust-explanation,
-.settings-proxy-form .confirmation-proof,
-.settings-proxy-form .settings-action-row {
-  grid-column: 1 / -1;
-}
-
 .settings-proxy-form fieldset {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--spacing-2) var(--spacing-4);
+  gap: var(--spacing-2) var(--spacing-3);
   margin: 0;
-  padding: var(--spacing-3);
+  padding: var(--spacing-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-inner);
 }
@@ -182,7 +155,7 @@
 
 .settings-trust-explanation {
   margin: 0;
-  padding: var(--spacing-3);
+  padding: var(--spacing-2);
   border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
   border-radius: var(--radius-inner);
   color: var(--color-text-secondary);
@@ -196,7 +169,7 @@
 .settings-code { overflow-wrap: anywhere; font-family: var(--font-family-code); }
 
 .settings-summary {
-  padding: var(--spacing-3);
+  padding: var(--spacing-2);
   border: 0;
   border-radius: var(--radius-inner);
   background: var(--color-background-muted);
@@ -216,7 +189,7 @@
 
 .settings-danger-zone {
   width: min(100%, 58rem);
-  padding: var(--spacing-5);
+  padding: var(--spacing-3);
   border: 1px solid color-mix(in srgb, var(--color-text-danger) 28%, var(--color-border));
   border-radius: var(--radius-element);
   background: color-mix(in srgb, var(--color-text-danger) 4%, var(--color-background-muted));
@@ -225,21 +198,20 @@
 .settings-danger-zone > header { display: grid; gap: var(--spacing-2); }
 
 .settings-danger-action {
-  padding-block-start: var(--spacing-4);
+  padding-block-start: var(--spacing-3);
   border-block-start: 1px solid var(--color-border);
 }
 
-.settings-danger-action .astryx-banner { margin-block-start: var(--spacing-1); }
+.settings-danger-action [data-slot='alert'] { margin-block-start: var(--spacing-1); }
 
-@media (max-width: 800px) {
+@media (max-width: 50rem) {
   .settings-layout { grid-template-columns: minmax(0, 1fr); }
   .settings-secondary-nav { position: static; padding: 0; }
   .settings-secondary-nav ul { display: flex; overflow-x: auto; padding-block-end: var(--spacing-1); }
   .settings-secondary-nav li { flex: 0 0 auto; }
 }
 
-@media (max-width: 640px) {
-  .settings-proxy-form { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 40rem) {
   .settings-summary dl { grid-template-columns: minmax(0, 1fr); }
   .settings-danger-zone { padding: var(--spacing-4); }
 }

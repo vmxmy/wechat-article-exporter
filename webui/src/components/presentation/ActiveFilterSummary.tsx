@@ -1,5 +1,5 @@
-import { Button } from '@astryxdesign/core/Button'
-import { Token } from '@astryxdesign/core/Token'
+import { Button } from '@/components/controls/Button'
+import { Token } from '@/components/controls/Token'
 import './presentation.css'
 
 export interface ActiveFilterItem {

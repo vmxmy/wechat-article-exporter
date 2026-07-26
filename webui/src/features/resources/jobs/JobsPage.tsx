@@ -1,7 +1,5 @@
-import { Button } from '@astryxdesign/core/Button'
-import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog'
-import { TextInput } from '@astryxdesign/core/TextInput'
-import { DetailPanel, PageStack, Status, TechnicalDetails } from '../../../components/presentation'
+import { Button } from '@/components/controls/Button'
+import { ActionGroup, DefinitionList, DetailPanel, PageStack, SectionHeader, Status, TechnicalDetails, TypedConfirmationDialog } from '../../../components/presentation'
 import { formatCount, formatDateTime, formatDuration, formatJobKind, formatStatus } from '../../../lib/presentation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -24,7 +22,7 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   const [notice, setNotice] = useState<string>()
   const [confirmationAction, setConfirmationAction] = useState<JobConfirmationAction>()
   const [confirmationProof, setConfirmationProof] = useState('')
-  const confirmationTrigger = useRef<HTMLElement | undefined>(undefined)
+  const confirmationTrigger = useRef<HTMLElement | null>(null)
   const query = useJobPage({ page: pageIndex + 1, pageSize })
   const selectedID = selected.length === 1 ? selected[0] : undefined
   const detail = useJobDetail(selectedID)
@@ -64,7 +62,7 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
       mutations.controlJob.mutate({ id: selectedID, action }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })
       return
     }
-    confirmationTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+    confirmationTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setConfirmationProof('')
     setConfirmationAction(action)
   }
@@ -72,19 +70,17 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   function closeConfirmation() {
     setConfirmationAction(undefined)
     setConfirmationProof('')
-    const trigger = confirmationTrigger.current
-    confirmationTrigger.current = undefined
-    window.setTimeout(() => trigger?.focus(), 0)
+    confirmationTrigger.current = null
   }
 
   const confirmation = confirmationAction && selectedID ? jobConfirmation(actions, confirmationAction, selectedID) : undefined
   return <PageStack as="div">
-    <ResourceTable eyebrow={messages.navigation.operations} messages={messages.resources.jobs} columns={columns} query={query} pageIndex={pageIndex} onPageChange={changePage} onSelectionChange={updateSelection} />
-    {isDetailOpen && selectedID ? <DetailPanel isOpen onOpenChange={setDetailOpen} title={messages.resources.jobs.detail.title} description={messages.resources.jobs.detail.description} footer={<JobControls actions={actions} permittedActions={permittedActions} isLoading={mutations.controlJob.isPending} onControl={control} />}>
+    <ResourceTable eyebrow={messages.navigation.operations} messages={messages.resources.jobs} selectorCopy={messages.selectors} columns={columns} query={query} pageIndex={pageIndex} onPageChange={changePage} onSelectionChange={updateSelection} />
+    {isDetailOpen && selectedID ? <DetailPanel isOpen onOpenChange={setDetailOpen} title={messages.resources.jobs.detail.title} description={messages.resources.jobs.detail.description} closeLabel={messages.a11y.closeDialog} footer={<JobControls actions={actions} permittedActions={permittedActions} isLoading={mutations.controlJob.isPending} onControl={control} />}>
       <JobDetailContents detail={detail} messages={messages} locale={locale} />
       {notice ? <p className="jobs-notice" role="alert">{notice}</p> : null}
     </DetailPanel> : null}
-    {confirmationAction && confirmation ? <TypedConfirmationDialog isOpen onOpenChange={(isOpen) => { if (!isOpen) closeConfirmation() }} title={confirmation.title} description={confirmation.description} expected={confirmation.confirmation} inputLabel={actions.confirmationLabel} inputHint={actions.confirmationHint} actionLabel={confirmation.actionLabel} cancelLabel={actions.cancelConfirmation} confirmation={confirmationProof} onConfirmationChange={setConfirmationProof} isActionLoading={mutations.controlJob.isPending} onAction={() => { if (selectedID) mutations.controlJob.mutate({ id: selectedID, action: confirmationAction, confirmation: confirmationProof }, { onSuccess: () => { setNotice(undefined); closeConfirmation() }, onError: () => setNotice(actions.actionFailed) }) }} /> : null}
+    {confirmationAction && confirmation ? <TypedConfirmationDialog isOpen triggerRef={confirmationTrigger} onOpenChange={(isOpen) => { if (!isOpen) closeConfirmation() }} title={confirmation.title} closeLabel={messages.a11y.closeDialog} description={confirmation.description} expected={confirmation.confirmation} inputLabel={actions.confirmationLabel} inputHint={actions.confirmationHint} actionLabel={confirmation.actionLabel} cancelLabel={actions.cancelConfirmation} confirmation={confirmationProof} onConfirmationChange={setConfirmationProof} isActionLoading={mutations.controlJob.isPending} onAction={() => { if (selectedID) mutations.controlJob.mutate({ id: selectedID, action: confirmationAction, confirmation: confirmationProof }, { onSuccess: () => { setNotice(undefined); closeConfirmation() }, onError: () => setNotice(actions.actionFailed) }) }} /> : null}
   </PageStack>
 }
 
@@ -114,7 +110,7 @@ function formatJobDuration(job: JobRecord, locale: Locale) {
 function JobControls({ actions, permittedActions, isLoading, onControl }: { readonly actions: MessageCatalog['resources']['jobs']['actions']; readonly permittedActions: readonly JobControlAction[]; readonly isLoading: boolean; readonly onControl: (action: JobControlAction) => void }) {
   if (permittedActions.length === 0) return null
   const actionLabels: Readonly<Record<JobControlAction, string>> = { pause: actions.pause, resume: actions.resume, retry: actions.retry, cancel: actions.cancel }
-  return <div className="jobs-controls" aria-label={actions.title}>{permittedActions.map((action) => <Button key={action} label={actionLabels[action]} variant={action === 'cancel' ? 'destructive' : 'secondary'} isLoading={isLoading} onClick={() => onControl(action)} />)}</div>
+  return <ActionGroup align="start" aria-label={actions.title}>{permittedActions.map((action) => <Button key={action} label={actionLabels[action]} variant={action === 'cancel' ? 'destructive' : 'secondary'} isLoading={isLoading} onClick={() => onControl(action)} />)}</ActionGroup>
 }
 
 function JobDetailContents({ detail, messages, locale }: { readonly detail: ReturnType<typeof useJobDetail>; readonly messages: MessageCatalog; readonly locale: Locale }) {
@@ -131,28 +127,33 @@ function JobDetailData({ detail, messages, locale, refreshing, onRefresh }: { re
   const failures = detail.items.filter((item) => item.state === 'failed' || Boolean(item.errorClass))
   return <div className="jobs-detail" aria-busy={refreshing}>
     <header className="jobs-detail-header"><div><JobLabel job={detail.job} locale={locale} /><Status value={detail.job.state} locale={locale} /></div><Button label={copy.refresh} variant="secondary" isLoading={refreshing} onClick={onRefresh} /></header>
-    <dl className="jobs-summary-list"><div><dt>{messages.resources.jobs.columns.kind}</dt><dd>{jobKind.label}</dd></div><div><dt>{messages.resources.jobs.columns.counts}</dt><dd><JobProgress job={detail.job} locale={locale} /></dd></div><div><dt>{messages.resources.jobs.columns.updated}</dt><dd>{formatJobDuration(detail.job, locale)}</dd></div><div><dt>{copy.refreshed}</dt><dd>{formatDateTime(detail.refreshedAt, locale)}</dd></div></dl>
+    <DefinitionList
+      labelWidth="8rem"
+      rowGap="relaxed"
+      collapseAt="compact"
+      items={[
+        { term: messages.resources.jobs.columns.kind, description: jobKind.label },
+        { term: messages.resources.jobs.columns.counts, description: <JobProgress job={detail.job} locale={locale} /> },
+        { term: messages.resources.jobs.columns.updated, description: formatJobDuration(detail.job, locale) },
+        { term: copy.refreshed, description: formatDateTime(detail.refreshedAt, locale) }
+      ]}
+    />
     {failures.length ? <JobAttentionSummary failures={failures} permittedActions={detail.job.permittedActions} copy={copy} locale={locale} /> : null}
-    <section><h3>{copy.items}</h3>{detail.itemsLimited ? <p>{copy.itemsLimited(detail.items.length, detail.itemsTotal)}</p> : null}{detail.items.length === 0 ? <p>{copy.noItems}</p> : <ul className="jobs-detail-list">{detail.items.map((item) => <li key={item.id}><Status value={item.state} locale={locale} /><span>{copy.attempts}: {formatCount(item.attemptCount, locale)}</span></li>)}</ul>}</section>
-    <section><h3>{copy.logs}</h3>{detail.logs.length === 0 ? <p>{copy.noLogs}</p> : <ul className="jobs-detail-list">{detail.logs.map((log) => <li key={log.id}><span>{formatDateTime(log.createdAt, locale)}</span><span>{log.message}</span></li>)}</ul>}</section>
-    <section><h3>{copy.lease}</h3><dl className="jobs-summary-list"><div><dt>{copy.lease}</dt><dd>{detail.lease.active ? copy.leaseActive : copy.leaseInactive}</dd></div><div><dt>{copy.expires}</dt><dd>{formatDateTime(detail.lease.expiresAt, locale)}</dd></div></dl></section>
-    <TechnicalDetails label={copy.technicalDetails} items={[{ label: copy.jobID, value: detail.job.id, copyLabel: copy.copyID }, { label: copy.profile, value: detail.job.profile, copyLabel: copy.copyValue }, { label: messages.resources.jobs.columns.created, value: detail.job.createdAt, copyLabel: copy.copyValue }, { label: messages.resources.jobs.columns.updated, value: detail.job.updatedAt, copyLabel: copy.copyValue }]} />
+    <section><SectionHeader level={3} title={copy.items} />{detail.itemsLimited ? <p>{copy.itemsLimited(detail.items.length, detail.itemsTotal)}</p> : null}{detail.items.length === 0 ? <p>{copy.noItems}</p> : <ul className="jobs-detail-list">{detail.items.map((item) => <li key={item.id}><Status value={item.state} locale={locale} /><span>{copy.attempts}: {formatCount(item.attemptCount, locale)}</span></li>)}</ul>}</section>
+    <section><SectionHeader level={3} title={copy.logs} />{detail.logs.length === 0 ? <p>{copy.noLogs}</p> : <ul className="jobs-detail-list">{detail.logs.map((log) => <li key={log.id}><span>{formatDateTime(log.createdAt, locale)}</span><span>{log.message}</span></li>)}</ul>}</section>
+    <section><SectionHeader level={3} title={copy.lease} /><DefinitionList labelWidth="8rem" rowGap="relaxed" collapseAt="compact" items={[{ term: copy.lease, description: detail.lease.active ? copy.leaseActive : copy.leaseInactive }, { term: copy.expires, description: formatDateTime(detail.lease.expiresAt, locale) }]} /></section>
+    <TechnicalDetails label={copy.technicalDetails} items={[{ label: copy.jobID, value: detail.job.id, copyLabel: copy.copyID, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }, { label: copy.profile, value: detail.job.profile, copyLabel: copy.copyValue, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }, { label: messages.resources.jobs.columns.created, value: detail.job.createdAt, copyLabel: copy.copyValue, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }, { label: messages.resources.jobs.columns.updated, value: detail.job.updatedAt, copyLabel: copy.copyValue, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }]} />
   </div>
 }
 
 function JobAttentionSummary({ failures, permittedActions, copy, locale }: { readonly failures: readonly JobDetail['items'][number][]; readonly permittedActions: readonly JobControlAction[]; readonly copy: MessageCatalog['resources']['jobs']['detail']; readonly locale: Locale }) {
   const nextAction = permittedActions.includes('retry') ? copy.retryAction : copy.refreshAction
-  return <section className="jobs-failure-summary"><h3>{copy.attention}</h3><ul className="jobs-detail-list">{failures.map((item) => <li key={item.id}><Status value={item.state} locale={locale} /><dl className="jobs-attention-list"><div><dt>{copy.reason}</dt><dd>{failureReason(item.errorClass, copy)}</dd></div><div><dt>{copy.impact}</dt><dd>{copy.itemNotCompleted}</dd></div><div><dt>{copy.nextAction}</dt><dd>{nextAction}</dd></div></dl></li>)}</ul></section>
+  return <section className="jobs-failure-summary"><SectionHeader level={3} title={copy.attention} /><ul className="jobs-detail-list">{failures.map((item) => <li key={item.id}><Status value={item.state} locale={locale} /><DefinitionList labelWidth="6rem" collapseAt="compact" items={[{ term: copy.reason, description: failureReason(item.errorClass, copy) }, { term: copy.impact, description: copy.itemNotCompleted }, { term: copy.nextAction, description: nextAction }]} /></li>)}</ul></section>
 }
 
 function failureReason(errorClass: string | undefined, copy: MessageCatalog['resources']['jobs']['detail']) {
   if (errorClass?.trim().toLowerCase() === 'network') return copy.networkReason
   return copy.unknownReason
-}
-
-function TypedConfirmationDialog({ isOpen, onOpenChange, title, description, expected, inputLabel, inputHint, actionLabel, cancelLabel, confirmation, onConfirmationChange, isActionLoading, onAction }: { readonly isOpen: boolean; readonly onOpenChange: (isOpen: boolean) => void; readonly title: string; readonly description: string; readonly expected: string; readonly inputLabel: string; readonly inputHint: string; readonly actionLabel: string; readonly cancelLabel: string; readonly confirmation: string; readonly onConfirmationChange: (value: string) => void; readonly isActionLoading: boolean; readonly onAction: () => void }) {
-  const submit = (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); if (confirmation === expected) onAction() }
-  return <Dialog isOpen={isOpen} onOpenChange={onOpenChange} purpose="form" role="alertdialog" aria-label={title}><DialogHeader title={title} subtitle={description} onOpenChange={onOpenChange} /><form className="typed-confirmation-dialog" onSubmit={submit}><div className="confirmation-proof"><strong>{inputLabel}</strong><code>{expected}</code><p>{inputHint}</p></div><TextInput label={inputLabel} value={confirmation} onChange={onConfirmationChange} isRequired hasAutoFocus /><div className="jobs-controls"><Button label={actionLabel} variant="destructive" type="submit" isLoading={isActionLoading} isDisabled={confirmation !== expected} /><Button label={cancelLabel} variant="secondary" isDisabled={isActionLoading} onClick={() => onOpenChange(false)} /></div></form></Dialog>
 }
 
 function jobConfirmation(actions: MessageCatalog['resources']['jobs']['actions'], action: JobConfirmationAction, id: string) {

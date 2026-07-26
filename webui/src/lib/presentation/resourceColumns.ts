@@ -1,4 +1,7 @@
+import type { ColumnDef } from '@tanstack/react-table'
+
 export type ResourceColumnRole =
+  | 'selection'
   | 'primaryText'
   | 'secondaryText'
   | 'numeric'
@@ -46,7 +49,13 @@ export interface ResourceMobileProjection {
   readonly actions?: ResourceMobileField
 }
 
+export interface TableColumnMeta {
+  readonly role?: ResourceColumnRole
+  readonly className?: string
+}
+
 const rolePresentation: Readonly<Record<ResourceColumnRole, Omit<ResourceColumnPresentation, 'role'>>> = {
+  selection: { alignment: 'center', mobilePlacement: 'hidden', maxLines: 1, numeric: false, truncate: false, exposeFullValue: false },
   primaryText: { alignment: 'start', mobilePlacement: 'primary', maxLines: 2, numeric: false, truncate: true, exposeFullValue: true },
   secondaryText: { alignment: 'start', mobilePlacement: 'secondary', maxLines: 1, numeric: false, truncate: true, exposeFullValue: true },
   numeric: { alignment: 'end', mobilePlacement: 'metadata', maxLines: 1, numeric: true, truncate: false, exposeFullValue: false },
@@ -59,6 +68,22 @@ const rolePresentation: Readonly<Record<ResourceColumnRole, Omit<ResourceColumnP
 
 export function getResourceColumnPresentation(role: ResourceColumnRole): ResourceColumnPresentation {
   return { role, ...rolePresentation[role] }
+}
+
+export function getTableColumnLabel<T>(column: Pick<ColumnDef<T>, 'id' | 'header'>): string {
+  return typeof column.header === 'string' ? column.header : column.id ?? '—'
+}
+
+export function getTableColumnClassName<T>(column: Pick<ColumnDef<T>, 'meta'>): string {
+  const meta = column.meta as TableColumnMeta | undefined
+  const presentation = getResourceColumnPresentation(meta?.role ?? 'secondaryText')
+  return [
+    meta?.className,
+    'resource-column',
+    `resource-column-${presentation.role}`,
+    `resource-column-${presentation.alignment}`,
+    presentation.truncate ? 'resource-column-truncate' : undefined
+  ].filter(Boolean).join(' ')
 }
 
 export function projectResourceToMobile<Key extends string>(

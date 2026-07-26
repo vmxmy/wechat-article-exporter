@@ -5,7 +5,10 @@ import { ActiveFilterSummary } from '../src/components/presentation/ActiveFilter
 import { ContentCluster, DenseRegion, PageStack, ReadingMeasure, SectionStack } from '../src/components/presentation/LayoutRhythm'
 import { MobileResourceRow } from '../src/components/presentation/MobileResourceRow'
 import { PageHeader } from '../src/components/presentation/PageHeader'
+import { SectionHeader } from '../src/components/presentation/SectionHeader'
 import { SelectionActionBar } from '../src/components/presentation/SelectionActionBar'
+import { StaticResponsiveDataTable } from '../src/components/presentation/ResponsiveDataTable'
+import { getNextVisibleColumnIDs } from '../src/lib/presentation/columnVisibility'
 import { Status } from '../src/components/presentation/Status'
 import { TechnicalDetails } from '../src/components/presentation/TechnicalDetails'
 
@@ -28,10 +31,31 @@ describe('presentation component accessibility', () => {
     expect(markup).toContain('aria-label="Results"')
   })
 
-  it('renders a unique page heading and contextual description', () => {
-    const markup = renderToStaticMarkup(createElement(PageHeader, { title: 'Articles', description: 'Browse saved content' }))
+  it('renders a unique page heading with associated supporting copy', () => {
+    const markup = renderToStaticMarkup(createElement(PageHeader, {
+      title: 'Articles',
+      titleId: 'articles-title',
+      eyebrow: 'Content',
+      description: 'Browse saved content',
+      supportingCopy: 'Search stays on this device.'
+    }))
     expect(markup.match(/<h1/g)).toHaveLength(1)
+    expect(markup).toContain('id="articles-title"')
+    expect(markup).toContain('Content')
     expect(markup).toContain('Browse saved content')
+    expect(markup).toContain('Search stays on this device.')
+  })
+
+  it('renders a semantic section heading with contextual description', () => {
+    const markup = renderToStaticMarkup(createElement(SectionHeader, {
+      title: 'Format and options',
+      titleId: 'format-options-title',
+      description: 'Choose an export format.',
+      level: 2
+    }))
+    expect(markup).toContain('<header')
+    expect(markup).toContain('<h2 id="format-options-title"')
+    expect(markup).toContain('Choose an export format.')
   })
 
   it('pairs semantic status color with visible text and an accessible label', () => {
@@ -97,5 +121,34 @@ describe('presentation component accessibility', () => {
     expect(markup).toContain('Select The complete article title')
     expect(markup).toContain('title="The complete article title"')
     expect(markup).toContain('title="2026-07-24T10:00:00Z"')
+  })
+
+  it('keeps one hideable desktop column visible when a column selection is cleared', () => {
+    expect(getNextVisibleColumnIDs(['name'], ['name'])).toEqual(['name'])
+    expect(getNextVisibleColumnIDs(['name', 'status'], [])).toEqual(['name'])
+    expect(getNextVisibleColumnIDs(['name', 'status'], ['status'])).toEqual(['status'])
+  })
+
+  it('renders one accessible shared table surface with a dynamic empty span', () => {
+    const markup = renderToStaticMarkup(createElement(StaticResponsiveDataTable, {
+      data: [],
+      columns: [{ accessorKey: 'name', header: 'Name', meta: { role: 'primaryText' } }],
+      ariaLabel: 'Example records',
+      visibleColumnsLabel: 'Visible example columns',
+      selectorCopy: {
+        clear: (label: string) => `Clear ${label}`,
+        search: (label: string) => `Search ${label}`,
+        noResults: 'No results',
+        selectAll: 'Select all',
+        selected: (count: number) => `${count} selected`
+      },
+      emptyContent: 'No records',
+      renderMobileRows: () => null
+    }))
+    expect(markup).toContain('presentation-data-table-surface')
+    expect(markup).toContain('aria-label="Example records"')
+    expect(markup).toContain('Visible example columns')
+    expect(markup).toContain('colSpan="1"')
+    expect(markup).toContain('No records')
   })
 })

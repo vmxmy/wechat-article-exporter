@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-07-23.
+Superseded by [ADR-0002](0002-shadcn-base-ui-migration.md) — 2026-07-25. Accepted — 2026-07-23.
 
 ## Decision
 

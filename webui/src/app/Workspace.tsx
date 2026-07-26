@@ -1,16 +1,25 @@
-import { AppShell } from '@astryxdesign/core/AppShell'
-import { AlertDialog } from '@astryxdesign/core/AlertDialog'
-import { Button } from '@astryxdesign/core/Button'
-import { MobileNav } from '@astryxdesign/core/MobileNav'
-import { SideNav, SideNavHeading, SideNavItem } from '@astryxdesign/core/SideNav'
-import { StatusDot } from '@astryxdesign/core/StatusDot'
-import { Component, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { ConfirmDialog } from '@/components/controls/ConfirmDialog'
+import { Button } from '@/components/controls/Button'
+import { StatusDot } from '@/components/controls/StatusDot'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger
+} from '@/components/ui/sidebar'
+import { Icons } from '@/components/icons'
+import { Component, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { type Locale, type MessageCatalog, useMessages } from '../i18n'
 import { useRuntimeStatus } from '../lib/queries'
 import { navigationGuard } from '../lib/navigationGuard'
 import { HomePage } from '../features/home/HomePage'
 import { SessionControl } from './SessionControl'
-import { getClientNavigationHref, getNavigationItem, listenForNavigation, navigateTo, navigationGroups, navigationItems } from './navigation'
+import { getClientNavigationHref, listenForNavigation, navigateTo, navigationGroups, navigationItems } from './navigation'
+import { matchRoute } from './routes'
 
 const ArticleTable = lazy(() => import('../features/articles/ArticleTable').then(({ ArticleTable }) => ({ default: ArticleTable })))
 const ImportPage = lazy(() => import('../features/import/ImportPage').then(({ ImportPage }) => ({ default: ImportPage })))
@@ -21,6 +30,7 @@ const AccountsPage = lazy(() => import('../features/resources/ResourcePages').th
 const AlbumsPage = lazy(() => import('../features/resources/ResourcePages').then(({ AlbumsPage }) => ({ default: AlbumsPage })))
 const JobsPage = lazy(() => import('../features/resources/ResourcePages').then(({ JobsPage }) => ({ default: JobsPage })))
 const SavedQueriesPage = lazy(() => import('../features/resources/ResourcePages').then(({ SavedQueriesPage }) => ({ default: SavedQueriesPage })))
+const NotFoundPage = lazy(() => import('../features/NotFoundPage').then(({ NotFoundPage }) => ({ default: NotFoundPage })))
 
 interface WorkspaceProps {
   readonly locale: Locale
@@ -58,6 +68,7 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
     setNavigationBlocked(blocked)
   }), [])
 
+
   useEffect(() => {
     const interceptWorkspaceLink = (event: MouseEvent) => {
       if (!(event.target instanceof Element)) return
@@ -86,140 +97,176 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
   }
 
   useEffect(() => {
-    let firstFrame = 0
-    let secondFrame = 0
+    let timeout = 0
     const moveFocusToMain = () => {
-      const main = document.getElementById('astryx-app-shell-main')
-      if (!main) return
-      main.tabIndex = -1
-      window.cancelAnimationFrame(firstFrame)
-      window.cancelAnimationFrame(secondFrame)
-      firstFrame = window.requestAnimationFrame(() => {
-        secondFrame = window.requestAnimationFrame(() => main.focus())
-      })
+      window.clearTimeout(timeout)
+      let attempts = 0
+      const claimFocus = () => {
+        const main = document.getElementById('astryx-app-shell-main')
+        if (!main) return
+        if (document.activeElement === main) return
+        main.tabIndex = -1
+        main.focus()
+        attempts += 1
+        if (attempts < 20) timeout = window.setTimeout(claimFocus, 25)
+      }
+      timeout = window.setTimeout(claimFocus, 0)
     }
+    const isSkipLink = (target: EventTarget | null) =>
+      target instanceof Element && target.closest('[data-testid="skip-to-content"], a[href="#astryx-app-shell-main"]')
     const focusMain = (event: MouseEvent) => {
-      if (!(event.target instanceof Element) || !event.target.closest('[data-testid="skip-to-content"], a[href="#astryx-app-shell-main"]')) return
+      if (!isSkipLink(event.target)) return
+      event.preventDefault()
       moveFocusToMain()
     }
     const focusMainFromKeyboard = (event: KeyboardEvent) => {
       if (event.key !== 'Enter') return
-      if (!(event.target instanceof Element) || !event.target.closest('[data-testid="skip-to-content"], a[href="#astryx-app-shell-main"]')) return
+      if (!isSkipLink(event.target)) return
+      event.preventDefault()
       moveFocusToMain()
     }
     document.addEventListener('click', focusMain)
     document.addEventListener('keydown', focusMainFromKeyboard)
     return () => {
-      window.cancelAnimationFrame(firstFrame)
-      window.cancelAnimationFrame(secondFrame)
+      window.clearTimeout(timeout)
       document.removeEventListener('click', focusMain)
       document.removeEventListener('keydown', focusMainFromKeyboard)
     }
   }, [])
 
   const connection = getConnectionState(runtime.isSuccess, runtime.isError, messages)
-  const currentPage = getNavigationItem(path)
-  const navigationSections = (closeAfterNavigation = false) => navigationGroups.map((group) => {
+  const matchedRoute = matchRoute(path)
+  const pageLabel = resolvePageLabel(matchedRoute, path, messages)
+  useDocumentTitle(path, matchedRoute, messages)
+
+  const navigateFromSidebar = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    const target = getClientNavigationHref(event.currentTarget, event.nativeEvent)
+    if (!target) {
+      if (
+        event.button === 0
+        && !event.metaKey
+        && !event.ctrlKey
+        && !event.shiftKey
+        && !event.altKey
+        && event.currentTarget.pathname === window.location.pathname
+        && event.currentTarget.search === window.location.search
+      ) {
+        event.preventDefault()
+        setMobileNavigationOpen(false)
+      }
+      return
+    }
+    event.preventDefault()
+    blockedNavigationTrigger.current = event.currentTarget
+    navigateTo(target)
+  }
+
+  const renderNavGroups = () => navigationGroups.map((group) => {
     const items = navigationItems.filter((item) => item.group === group)
-    const groupSelected = items.some((item) => path === item.href)
     return (
-      <SideNavItem
-        key={group}
-        label={messages.navigation[group]}
-        icon={<NavigationGroupIcon group={group} />}
-        isSelected={groupSelected}
-        collapsible={{ defaultIsCollapsed: false }}
-      >
-        {items.map((item) => (
-          <SideNavItem
-            key={item.href}
-            label={messages.navigation[item.key]}
-            href={item.href}
-            isSelected={path === item.href}
-            onClick={closeAfterNavigation ? () => setMobileNavigationOpen(false) : undefined}
-          />
-        ))}
-      </SideNavItem>
+      <Collapsible key={group} defaultOpen className="workspace-nav-group">
+        <CollapsibleTrigger className="workspace-nav-group-trigger">
+          <NavigationGroupIcon group={group} />
+          <span>{messages.navigation[group]}</span>
+          <Icons.chevronDown className="workspace-nav-group-chev" aria-hidden="true" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <ul className="workspace-nav-items">
+            {items.map((item) => (
+              <li key={item.href}>
+                <a
+                  href={item.href}
+                  aria-current={path === item.href ? 'page' : undefined}
+                  className="workspace-nav-item"
+                  data-wechat-router-link="true"
+                  onClick={navigateFromSidebar}
+                >
+                  {messages.navigation[item.key]}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </CollapsibleContent>
+      </Collapsible>
     )
   })
 
+  const sideNavHeader = (
+    <div className="workspace-side-nav-heading">
+      <div className="workspace-side-nav-super">{messages.product.local}</div>
+      <a href="/" className="workspace-side-nav-title" data-wechat-router-link="true" onClick={navigateFromSidebar}>{messages.product.name}</a>
+      <div className="workspace-side-nav-sub">{messages.a11y.currentPage(pageLabel)}</div>
+    </div>
+  )
+
   return (
-    <AppShell
+    <SidebarProvider
+      mobileOpen={mobileNavigationOpen}
+      onMobileOpenChange={setMobileNavigationOpen}
+      persistOpenState={false}
+      keyboardShortcut={false}
+      mobileTitle={messages.a11y.navigation}
+      mobileDescription={messages.a11y.currentPage(pageLabel)}
+      openLabel={messages.a11y.openNavigation}
+      closeLabel={messages.a11y.closeNavigation}
       className="workspace-shell"
-      height="fill"
-      variant="surface"
-      contentPadding={4}
-      mobileNav={{
-        breakpoint: 'md',
-        isOpen: mobileNavigationOpen,
-        onOpenChange: setMobileNavigationOpen,
-        content: (
-          <MobileNav
-            header={
-              <div>
-                <strong>{messages.a11y.navigation}</strong>
-                <div>{messages.a11y.currentPage(messages.navigation[currentPage.key])}</div>
-              </div>
-            }
-            label={messages.a11y.navigation}
-          >
-            {navigationSections(true)}
-            <p className="workspace-nav-footer">{messages.product.privacy}</p>
-          </MobileNav>
-        )
-      }}
-      sideNav={
-        <SideNav
-          className="workspace-side-nav"
-          collapsible
-          header={
-            <SideNavHeading
-              superheading={messages.product.local}
-              heading={messages.product.name}
-              headingHref="/"
-              subheading={messages.a11y.currentPage(messages.navigation[currentPage.key])}
-            />
-          }
-          footer={<p className="workspace-nav-footer">{messages.product.privacy}</p>}
-        >
-          {navigationSections()}
-        </SideNav>
-      }
     >
-      <header className="workspace-header workspace-command-rail">
-        <div className="connection-state" role="status" aria-live="polite">
-          <StatusDot variant={connection.variant} label={connection.label} isPulsing={runtime.isFetching} />
+      <a href="#astryx-app-shell-main" className="workspace-skip-link" data-testid="skip-to-content" onClick={(event) => { event.preventDefault(); document.getElementById('astryx-app-shell-main')?.focus() }}>{messages.a11y.skip}</a>
+      <Sidebar collapsible="offcanvas" className="workspace-side-nav">
+        <SidebarHeader>{sideNavHeader}</SidebarHeader>
+        <SidebarContent>
+          <nav aria-label={messages.a11y.navigation} className="workspace-side-nav-body">
+            {renderNavGroups()}
+          </nav>
+        </SidebarContent>
+        <SidebarFooter>
+          <p className="workspace-nav-footer">{messages.product.privacy}</p>
+        </SidebarFooter>
+      </Sidebar>
+
+      <SidebarInset id="astryx-app-shell-main" className="workspace-main-column">
+        <header className="workspace-header workspace-command-rail">
+          <div className="workspace-header-inner">
+            <SidebarTrigger target="mobile" className="workspace-mobile-nav-toggle">
+              <Icons.menu2 className="size-5" aria-hidden="true" />
+            </SidebarTrigger>
+            <div className="connection-state" role="status" aria-live="polite">
+              <StatusDot variant={connection.variant} label={connection.label} isPulsing={runtime.isFetching} />
+            </div>
+            <div className="header-actions">
+              <span className="workspace-local-note">{messages.product.localOnly}</span>
+              <SessionControl messages={messages} />
+              <Button
+                label={messages.localeSwitch}
+                variant="secondary"
+                size="sm"
+                onClick={() => onLocaleChange(locale === 'en' ? 'zh-CN' : 'en')}
+              />
+            </div>
+          </div>
+        </header>
+        <div className="workspace-content">
+          <PageErrorBoundary key={path} messages={messages}>
+            <Suspense fallback={<PageLoading messages={messages} />}>
+              <PageFocus key={navigationID} shouldFocus={navigationID > 0}>
+                {renderPage(path, locale, messages)}
+              </PageFocus>
+            </Suspense>
+          </PageErrorBoundary>
         </div>
-        <div className="header-actions">
-          <span className="workspace-local-note">{messages.product.localOnly}</span>
-          <SessionControl messages={messages} />
-          <Button
-            label={messages.localeSwitch}
-            variant="secondary"
-            size="sm"
-            onClick={() => onLocaleChange(locale === 'en' ? 'zh-CN' : 'en')}
-          />
-        </div>
-      </header>
-      <div className="workspace-content">
-        <PageErrorBoundary key={path} messages={messages}>
-          <Suspense fallback={<PageLoading messages={messages} />}>
-            <PageFocus key={navigationID} shouldFocus={navigationID > 0}>
-              {renderPage(path, locale, messages)}
-            </PageFocus>
-          </Suspense>
-        </PageErrorBoundary>
-      </div>
-      <AlertDialog
+      </SidebarInset>
+
+      <ConfirmDialog
         isOpen={navigationBlocked}
         onOpenChange={(isOpen) => { if (!isOpen) stayOnSettings() }}
         title={messages.settings.unsaved.title}
         description={messages.settings.unsaved.description}
+        closeLabel={messages.a11y.closeDialog}
         cancelLabel={messages.settings.unsaved.stay}
         actionLabel={messages.settings.unsaved.discard}
         onAction={discardAndNavigate}
       />
-    </AppShell>
+    </SidebarProvider>
   )
 }
 
@@ -234,22 +281,46 @@ function NavigationGroupIcon({ group }: { readonly group: typeof navigationGroup
 }
 
 function renderPage(path: string, locale: Locale, messages: MessageCatalog) {
-  if (path === '/accounts') return <AccountsPage locale={locale} messages={messages} />
-  if (path === '/login') return <LoginPage messages={messages} />
-  if (path === '/import') return <ImportPage messages={messages} />
-  if (path === '/articles') return <ArticleTable locale={locale} messages={messages} />
-  if (path === '/albums') return <AlbumsPage messages={messages} />
-  if (path === '/saved-queries') return <SavedQueriesPage locale={locale} messages={messages} />
-  if (path === '/jobs') return <JobsPage locale={locale} messages={messages} />
-  if (path === '/exports') return <ExportPage locale={locale} messages={messages} />
-  if (path === '/settings') return <SettingsPage locale={locale} messages={messages} />
-  return <HomePage messages={messages} />
+  const route = matchRoute(path)
+  switch (route?.key) {
+    case 'overview': return <HomePage messages={messages} />
+    case 'login': return <LoginPage messages={messages} />
+    case 'import': return <ImportPage messages={messages} />
+    case 'accounts': return <AccountsPage locale={locale} messages={messages} />
+    case 'articles': return <ArticleTable locale={locale} messages={messages} />
+    case 'albums': return <AlbumsPage messages={messages} />
+    case 'saved-queries': return <SavedQueriesPage locale={locale} messages={messages} />
+    case 'jobs': return <JobsPage locale={locale} messages={messages} />
+    case 'exports': return <ExportPage locale={locale} messages={messages} />
+    case 'settings': return <SettingsPage locale={locale} messages={messages} />
+    default: return <NotFoundPage messages={messages} />
+  }
 }
 
 function getConnectionState(isSuccess: boolean, isError: boolean, messages: MessageCatalog) {
   if (isSuccess) return { label: messages.connection.connected, variant: 'success' as const }
   if (isError) return { label: messages.connection.unavailable, variant: 'error' as const }
   return { label: messages.connection.checking, variant: 'neutral' as const }
+}
+
+function resolvePageLabel(route: ReturnType<typeof matchRoute>, path: string, messages: MessageCatalog): string {
+  if (!route) return messages.notFound.title
+  if (path === '/') return messages.navigation.home
+  return messages.navigation[route.titleKey]
+}
+
+function useDocumentTitle(path: string, route: ReturnType<typeof matchRoute>, messages: MessageCatalog) {
+  useEffect(() => {
+    if (!route) {
+      document.title = messages.documentTitle.notFound
+      return
+    }
+    if (path === '/') {
+      document.title = messages.documentTitle.appName
+      return
+    }
+    document.title = messages.documentTitle.page(messages.navigation[route.titleKey])
+  }, [path, route, messages])
 }
 
 function PageLoading({ messages }: { readonly messages: MessageCatalog }) {
@@ -259,20 +330,28 @@ function PageLoading({ messages }: { readonly messages: MessageCatalog }) {
 function PageFocus({ children, shouldFocus }: { readonly children: ReactNode; readonly shouldFocus: boolean }) {
   useLayoutEffect(() => {
     if (!shouldFocus) return
+    let settled = false
+    let observer: MutationObserver | null = null
     let timeout = 0
-    let attempts = 0
     const focusHeading = () => {
+      if (settled) return
       const heading = document.querySelector<HTMLElement>('#astryx-app-shell-main h1')
-      if (heading) {
-        heading.tabIndex = -1
-        heading.focus()
-        return
-      }
-      attempts += 1
-      if (attempts < 20) timeout = window.setTimeout(focusHeading, 25)
+      if (!heading) return false
+      settled = true
+      heading.tabIndex = -1
+      heading.focus()
+      return true
     }
-    timeout = window.setTimeout(focusHeading, 0)
-    return () => window.clearTimeout(timeout)
+    if (focusHeading()) return
+    observer = new MutationObserver(() => { if (focusHeading()) cleanup() })
+    observer.observe(document.body, { childList: true, subtree: true })
+    timeout = window.setTimeout(cleanup, 3_000)
+    function cleanup() {
+      observer?.disconnect()
+      observer = null
+      window.clearTimeout(timeout)
+    }
+    return cleanup
   }, [shouldFocus])
 
   return <>{children}</>

@@ -1,4 +1,4 @@
-import { StatusDot } from '@astryxdesign/core/StatusDot'
+import { StatusDot } from '@/components/controls/StatusDot'
 import { formatStatus, type PresentationLocale, type SemanticTone } from '../../lib/presentation'
 import './presentation.css'
 

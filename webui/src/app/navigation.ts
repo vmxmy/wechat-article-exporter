@@ -24,10 +24,6 @@ export const navigationItems = [
 export type NavigationGroup = typeof navigationGroups[number]
 export type NavigationItem = typeof navigationItems[number]
 
-export function getNavigationItem(path: string): NavigationItem {
-  return navigationItems.find((item) => item.href === path) ?? navigationItems[0]
-}
-
 export function navigateTo(href: string) {
   const target = parseClientNavigationURL(href)
   if (!target || currentLocation() === clientLocation(target)) return
@@ -38,6 +34,17 @@ export function navigateTo(href: string) {
     window.history.pushState(withHistoryIndex(window.history.state, currentHistoryIndex), '', clientLocation(target))
     window.dispatchEvent(new Event(navigationEvent))
   })
+}
+
+export function replaceLocation(nextLocation: string) {
+  if (nextLocation === currentLocation()) return
+  initializeNavigationHistory()
+  window.history.replaceState(
+    withHistoryIndex(window.history.state, currentHistoryIndex),
+    '',
+    nextLocation,
+  )
+  window.dispatchEvent(new Event(navigationEvent))
 }
 
 export function listenForNavigation(onNavigate: () => void) {
@@ -105,7 +112,7 @@ export function getClientNavigationHref(anchor: HTMLAnchorElement, event: MouseE
   }
 
   const target = parseClientNavigationURL(anchor.href)
-  if (!target || !isWorkspaceRoute(target.pathname)) return
+  if (!target || !isSPANavigable(target.pathname)) return
   if (target.pathname === window.location.pathname && target.search === window.location.search) return
   return clientLocation(target)
 }
@@ -132,10 +139,10 @@ function parseClientNavigationURL(href: string): URL | undefined {
   return target
 }
 
-function isWorkspaceRoute(pathname: string) {
-  return pathname === '/login'
-    || pathname === '/saved-queries'
-    || navigationItems.some((item) => item.href === pathname)
+function isSPANavigable(pathname: string): boolean {
+  if (pathname === '/api' || pathname.startsWith('/api/')) return false
+  if (pathname === '/assets' || pathname.startsWith('/assets/')) return false
+  return true
 }
 
 function readHistoryIndex(state: unknown): number | undefined {

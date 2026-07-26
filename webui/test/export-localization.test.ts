@@ -19,6 +19,13 @@ describe('export localization and safe presentation', () => {
     }
   })
 
+  it('provides localized account selector guidance in both catalogs', () => {
+    for (const catalog of [en.articles.ux, zhCN.articles.ux]) {
+      expect(catalog.accountDescription).not.toBe('')
+      expect(catalog.albumDescription).not.toBe('')
+    }
+  })
+
   it('keeps raw selector keys and complete IDs out of normal-flow presentation', () => {
     expect(exportPageSource).not.toContain('stageCopy(')
     expect(exportPageSource).not.toContain("'Saved account'")
@@ -35,7 +42,7 @@ describe('export localization and safe presentation', () => {
     expect(exportPageSource).toContain('value: file.path')
     expect(exportPageSource).toContain('value: serializeVerificationIssue(issue)')
     expect(exportPageSource).toContain('return JSON.stringify(detail)')
-    expect(exportPageSource).toContain('messages.verificationIssue(index + 1)')
+    expect(exportPageSource).toContain('verificationIssue(index + 1)')
     expect(exportPageSource).not.toContain('issue.message?.trim()')
     expect(exportPageSource).not.toContain('<code>{file.path}</code>')
     expect(exportPageSource).not.toContain('issue.message ?? JSON.stringify(issue)')

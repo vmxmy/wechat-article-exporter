@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { expectOnlyLoopbackRequests, installExportArtifactFixture, installLoopbackFixture } from './fixtures/loopback-api'
+import { selectRemoteSelectorOption, selectStaticSelectorOption } from './fixtures/selectors'
 
 test('sanitized loopback fixture covers QR login and logout UI', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
@@ -11,10 +12,13 @@ test('sanitized loopback fixture covers QR login and logout UI', async ({ page }
   await expect(page.getByText('Scanned', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Complete login' }).click()
   await expect(page.getByText('Authenticated', { exact: true })).toBeVisible()
-  await selectAstryxSelectorOption(page, 'Eligible account', 'Second Fixture Account')
+  await selectStaticSelectorOption(page, 'Eligible account', 'Second Fixture Account')
   await expect(page.getByRole('status').filter({ hasText: 'Switched to Second Fixture Account.' })).toBeVisible()
   expect(fixture.accountSwitches).toEqual(['account-fixture-2'])
   await page.getByRole('button', { name: 'Log out' }).click()
+  const logoutDialog = page.getByRole('alertdialog', { name: 'Sign out of the local session?' })
+  await expect(logoutDialog).toBeVisible()
+  await logoutDialog.getByRole('button', { name: 'Log out' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Signed out of the local session.' })).toBeVisible()
   await expect(page.getByText('Not signed in', { exact: true })).toBeVisible()
   expect(fixture.requests).toContain('POST /api/v1/session/logout')
@@ -29,6 +33,73 @@ test('login clearly reports unavailable account switching', async ({ page }) => 
   await page.getByRole('button', { name: 'Poll login status' }).click()
   await page.getByRole('button', { name: 'Complete login' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Account switching is not available for this local session.' })).toBeVisible()
+})
+
+test('account resources keep their primary action and column controls with the table', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/accounts')
+
+  const pageHeader = page.locator('.presentation-page-header')
+  await expect(pageHeader.getByRole('button', { name: 'Add account', exact: true })).toBeVisible()
+
+  const visibleColumns = page.getByRole('combobox', { name: 'Visible account columns', exact: true })
+  await visibleColumns.click()
+  await page.getByRole('option', { name: 'Alias', exact: true }).click()
+  await expect(page.getByRole('columnheader', { name: 'Alias', exact: true })).toBeHidden()
+  await expect(page.getByRole('navigation', { name: 'Account pagination', exact: true })).toBeVisible()
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('account drawer preserves focus while drafting non-primary fields', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/accounts')
+  await page.getByRole('button', { name: 'Add account', exact: true }).click()
+
+  const overlay = page.locator('.presentation-drawer-overlay')
+  await expect(overlay).toBeVisible()
+  await expect.poll(() => overlay.evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    return [bounds.x, bounds.y, bounds.width, bounds.height]
+  })).toEqual([0, 0, 1280, 720])
+
+  const alias = page.getByRole('textbox', { name: 'Alias' })
+  await alias.fill('Fixture alias')
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+  await expect(alias).toBeFocused()
+  await page.locator('a[href="#astryx-app-shell-main"]').evaluate((link) => (link as HTMLElement).focus())
+  await expect(alias).toBeFocused()
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('account resource errors do not render pagination controls', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.route('**/api/v1/accounts?offset=0&limit=25', (route) => route.fulfill({
+    status: 503,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: { message: 'fixture unavailable' } })
+  }))
+  await page.goto('/accounts')
+
+  await expect(page.getByRole('alert')).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Account pagination', exact: true })).toHaveCount(0)
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('mobile account empty state retains its explanation and primary action', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installLoopbackFixture(page)
+  await page.route('**/api/v1/accounts?offset=0&limit=25', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      data: [],
+      pagination: { page: 1, pageSize: 25, total: 0 }
+    })
+  }))
+  await page.goto('/accounts')
+
+  await expect(page.getByRole('heading', { name: 'No saved accounts yet' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add account' }).last()).toBeVisible()
+  await expectOnlyLoopbackRequests(page)
 })
 
 test('sanitized account and article selections remain browser-local', async ({ page }) => {
@@ -127,7 +198,7 @@ test('article export selector searches past an initial page and queues its opaqu
   const fixture = await installLoopbackFixture(page)
   await page.goto('/exports')
 
-  await selectRemoteTypeaheadOption(page, 'Selected articles', 'Later sanitized article')
+  await selectRemoteSelectorOption(page, 'Selected articles', 'Later sanitized article')
   await expect(page.getByRole('status').filter({ hasText: 'Later sanitized article' })).toBeVisible()
   await continueToExportDestination(page)
   await page.getByRole('button', { name: 'Authorize default directory' }).click()
@@ -136,6 +207,61 @@ test('article export selector searches past an initial page and queues its opaqu
   await jobHandoff
   await expect.poll(() => fixture.exports).toHaveLength(1)
   expect(JSON.parse(fixture.exports[0])).toMatchObject({ selection: { kind: 'explicit_ids', articleIds: ['article-beyond-first-page'] } })
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('saved-query export scope filters locally, selects, and clears', async ({ page }) => {
+  const fixture = await installLoopbackFixture(page, {
+    savedQueries: [
+      { name: 'Sanitized recent', query: { keyword: 'Sanitized' } },
+      { name: 'Queued fixture', query: { state: 'queued' } }
+    ]
+  })
+  await page.goto('/exports')
+  await page.locator('input[type="radio"][value="savedQuery"]').evaluate((element) => (element as HTMLInputElement).click())
+
+  const savedQuery = page.getByRole('combobox', { name: 'Saved query', exact: true })
+  await expect.poll(() => fixture.requests.filter((request) => request === 'GET /api/v1/saved-queries').length).toBeGreaterThan(0)
+  await savedQuery.evaluate((element) => {
+    const input = element as HTMLInputElement
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    nativeSetter?.call(input, 'queued')
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: 'queued', inputType: 'insertText' }))
+  })
+  const savedQueryRequestsBeforeFiltering = fixture.requests.filter((request) => request === 'GET /api/v1/saved-queries').length
+  const queued = page.getByRole('option').filter({ hasText: 'Queued fixture' })
+  await expect(queued).toBeVisible()
+  expect(fixture.requests.filter((request) => request === 'GET /api/v1/saved-queries')).toHaveLength(savedQueryRequestsBeforeFiltering)
+
+  await queued.evaluate((element) => (element as HTMLElement).click())
+  await expect(page.locator('.export-scope-summary')).toContainText('Saved query Queued fixture')
+  await expect(page.getByRole('button', { name: 'Continue to format' })).toBeEnabled()
+  await page.getByRole('button', { name: 'Clear Saved query' }).evaluate((element) => (element as HTMLButtonElement).click())
+  await expect(savedQuery).toHaveValue('')
+  await expect(page.locator('.export-scope-summary')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Continue to format' })).toBeDisabled()
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('article export selector selects and clears multiple remote articles without exposing IDs', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/exports')
+
+  await selectRemoteSelectorOption(page, 'Selected articles', 'Sanitized article one')
+  await selectRemoteSelectorOption(page, 'Selected articles', 'Sanitized article two')
+  const selectedArticles = page.getByRole('combobox', { name: 'Selected articles', exact: true })
+  await expect(selectedArticles).toHaveAttribute('placeholder', '2 selected')
+  await expect(page.locator('.export-scope-summary')).toContainText('2 selected articles')
+  await expect(page.locator('.export-scope-summary')).toContainText('Sanitized article one')
+  await expect(page.locator('.export-scope-summary')).toContainText('Sanitized article two')
+  await expect(page.getByRole('button', { name: 'Continue to format' })).toBeEnabled()
+  await expect(page.locator('body')).not.toContainText('article-fixture-1')
+  await expect(page.locator('body')).not.toContainText('article-fixture-2')
+
+  await page.getByRole('button', { name: 'Clear Selected articles' }).evaluate((element) => (element as HTMLButtonElement).click())
+  await expect(selectedArticles).toHaveAttribute('placeholder', 'Selected articles')
+  await expect(page.locator('.export-scope-summary')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Continue to format' })).toBeDisabled()
   await expectOnlyLoopbackRequests(page)
 })
 
@@ -167,9 +293,14 @@ test('article table reserves flexible width for titles and supports truncation',
 
 test('account discovery keeps fakeid technical while preserving the selected candidate save contract', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
+  await page.goto('/login')
+  await page.getByRole('button', { name: 'Start QR login' }).click()
+  await page.getByRole('button', { name: 'Poll login status' }).click()
+  await page.getByRole('button', { name: 'Complete login' }).click()
+  await expect(page.getByText('Authenticated', { exact: true })).toBeVisible()
   await page.goto('/accounts')
 
-  await page.getByRole('button', { name: 'Account actions' }).click()
+  await page.getByRole('button', { name: 'Add account', exact: true }).click()
   await expect(page.getByRole('textbox', { name: 'Account fakeid' })).toBeHidden()
   await expect(page.locator('body')).not.toContainText('fixture-account')
   await page.getByRole('textbox', { name: 'Search discovery' }).fill('fixture')
@@ -190,13 +321,78 @@ test('account discovery keeps fakeid technical while preserving the selected can
   await expect(page.getByText('Uses the latest local sync state to refresh new and changed article-list records.')).toBeVisible()
   await page.getByRole('button', { name: 'Sync selected account' }).click()
   await expect.poll(() => fixture.accountSyncs).toEqual([{ path: '/api/v1/accounts/account-discovered/sync', incremental: true }])
-  await selectAstryxSelectorOption(page, 'Synchronization mode', 'Full')
+  await selectStaticSelectorOption(page, 'Synchronization mode', 'Full')
   await expect(page.getByText('Fetches the available article list without relying on the local sync boundary.')).toBeVisible()
   await page.getByRole('button', { name: 'Sync selected account' }).click()
   await expect.poll(() => fixture.accountSyncs).toEqual([
     { path: '/api/v1/accounts/account-discovered/sync', incremental: true },
     { path: '/api/v1/accounts/account-discovered/sync', incremental: false }
   ])
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('account discovery asks for a WeChat sign-in before searching and surfaces a failed search', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/accounts')
+
+  await page.getByRole('button', { name: 'Add account', exact: true }).click()
+  // Unauthenticated: the search box is hidden behind a sign-in call-to-action.
+  await expect(page.getByRole('textbox', { name: 'Search discovery' })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Sign in to WeChat' })).toBeVisible()
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('account discovery surfaces an explicit error when the session expires mid-search', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/login')
+  await page.getByRole('button', { name: 'Start QR login' }).click()
+  await page.getByRole('button', { name: 'Poll login status' }).click()
+  await page.getByRole('button', { name: 'Complete login' }).click()
+  await expect(page.getByText('Authenticated', { exact: true })).toBeVisible()
+  // Simulate the session expiring after the drawer opened authenticated.
+  await page.route(/\/api\/v1\/accounts\/search(\?.*)?$/, (route) => route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'authentication_required', message: 'workspace session must be authenticated' } }) }))
+  await page.goto('/accounts')
+
+  await page.getByRole('button', { name: 'Add account', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Search discovery' }).fill('fixture')
+  await page.getByRole('button', { name: 'Discover account' }).click()
+  await expect(page.getByText('The WeChat session may have expired. Sign in again to search for accounts.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Sign in again' })).toBeVisible()
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('account resolve fills the draft from an article link when authenticated', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/login')
+  await page.getByRole('button', { name: 'Start QR login' }).click()
+  await page.getByRole('button', { name: 'Poll login status' }).click()
+  await page.getByRole('button', { name: 'Complete login' }).click()
+  await expect(page.getByText('Authenticated', { exact: true })).toBeVisible()
+  await page.goto('/accounts')
+
+  await page.getByRole('button', { name: 'Add account', exact: true }).click()
+  await page.getByRole('button', { name: 'Or paste an article link' }).click()
+  await page.getByRole('textbox', { name: 'Article URL' }).fill('https://mp.weixin.qq.com/s/article-fixture')
+  await page.getByRole('button', { name: 'Resolve account' }).click()
+
+  await expect(page.getByRole('textbox', { name: 'Account name' })).toHaveValue('Resolved Account')
+  await expect(page.getByRole('textbox', { name: 'Alias' })).toHaveValue('resolved')
+  await expect(page.locator('body')).not.toContainText('fixture-resolved')
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('account resolve degrades to a name-only preview when not signed in', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/accounts')
+
+  await page.getByRole('button', { name: 'Add account', exact: true }).click()
+  await page.getByRole('button', { name: 'Or paste an article link' }).click()
+  await page.getByRole('textbox', { name: 'Article URL' }).fill('https://mp.weixin.qq.com/s/article-fixture')
+  await page.getByRole('button', { name: 'Resolve account' }).click()
+
+  await expect(page.getByText('Detected Resolved Account. Sign in to save the complete account record.')).toBeVisible()
+  // The resolve panel surfaces its own sign-in button alongside the detected name.
+  await expect(page.getByRole('dialog').getByRole('button', { name: 'Sign in to WeChat' })).toHaveCount(2)
   await expectOnlyLoopbackRequests(page)
 })
 
@@ -232,7 +428,13 @@ test('article metrics and resource details stay bounded and sanitized while reso
   const fixture = await installLoopbackFixture(page)
   await page.goto('/articles')
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized article one' }))
-  await page.getByRole('button', { name: 'Details' }).click()
+  const details = page.getByRole('button', { name: 'Details' })
+  await details.click()
+  const detailDialog = page.getByRole('dialog')
+  await expect(detailDialog).toBeVisible()
+  await expect(detailDialog.getByRole('button', { name: 'Close dialog' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(detailDialog.locator('.presentation-detail-body')).toContainText('Resource availability')
   await expect(page.getByRole('heading', { name: 'Resource availability' })).toBeVisible()
   await expect(page.getByText('4 resources · 3 available · 1 missing')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Article details' })).toBeVisible()
@@ -264,7 +466,7 @@ test('article metrics and resource details stay bounded and sanitized while reso
 test('account manifest controls download and import locally without retaining file details', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/accounts')
-  await page.getByRole('button', { name: 'Account actions' }).click()
+  await page.getByRole('button', { name: 'Add account', exact: true }).click()
 
   const downloadLink = page.getByRole('link', { name: 'Download account manifest' })
   await expect(downloadLink).toHaveAttribute('href', '/api/v1/accounts/manifest')
@@ -286,7 +488,7 @@ test('account manifest controls download and import locally without retaining fi
 test('advanced article query and export handoff preserve typed local selections', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/articles')
-  await selectRemoteTypeaheadOption(page, 'Account', 'Fixture Account')
+  await selectRemoteSelectorOption(page, 'Account', 'Fixture Account')
   await page.getByRole('button', { name: 'More filters' }).click()
   await page.getByRole('spinbutton', { name: 'Minimum reads' }).fill('10')
   await page.getByRole('button', { name: 'Apply filters' }).click()
@@ -310,9 +512,9 @@ test('remote account and album selectors search server pages and keep opaque IDs
   const fixture = await installLoopbackFixture(page)
   await page.goto('/articles')
 
-  await selectRemoteTypeaheadOption(page, 'Account', 'Later Fixture Account')
+  await selectRemoteSelectorOption(page, 'Account', 'Later Fixture Account')
   await page.getByRole('button', { name: 'More filters' }).click()
-  await selectRemoteTypeaheadOption(page, 'Album', 'Later fixture album')
+  await selectRemoteSelectorOption(page, 'Album', 'Later fixture album')
   await page.getByRole('button', { name: 'Apply filters' }).click()
 
   await page.getByRole('button', { name: 'Export current matches' }).click()
@@ -390,11 +592,11 @@ test('album selections persist across server pages and queue one multi-album tra
 test('album filters stay server-paginated and traversal sends the selected order', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/albums')
-  await selectRemoteTypeaheadOption(page, 'Account', 'Fixture Account')
+  await selectRemoteSelectorOption(page, 'Account', 'Fixture Account')
   await page.getByRole('textbox', { name: 'Album keyword' }).fill('Sanitized')
   await expect.poll(() => fixture.requests.filter((request) => request === 'GET /api/v1/albums').length).toBeGreaterThan(1)
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized album' }))
-  await selectAstryxSelectorOption(page, 'Traversal order', 'Reverse')
+  await selectStaticSelectorOption(page, 'Traversal order', 'Reverse')
   await page.getByRole('button', { name: 'Traverse and batch download' }).click()
   await expect.poll(() => fixture.albumTraversals).toEqual([{ accountId: 'account-fixture', order: 'reverse', download: true }])
   await expectOnlyLoopbackRequests(page)
@@ -462,8 +664,8 @@ test('job controls require typed proofs and disable unavailable actions', async 
   await expect(page.getByRole('table').getByText('Running', { exact: true })).toBeVisible()
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Export' }))
   await expect(page.getByRole('checkbox', { name: 'Select job-fixture-1' })).toHaveCount(0)
-  await expect(page.getByRole('table')).not.toContainText('job-fixture-1')
   await expect(page.getByRole('heading', { name: 'Task detail' })).toBeVisible()
+  await expect(page.locator('table')).not.toContainText('job-fixture-1')
   await expect(page.getByText('Sanitized local progress', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Resume selected task' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Retry selected task' })).toHaveCount(0)
@@ -485,9 +687,13 @@ test('job controls require typed proofs and disable unavailable actions', async 
   const cancelTrigger = page.getByRole('button', { name: 'Cancel selected task' })
   await cancelTrigger.click()
   const cancelConfirmation = page.getByRole('alertdialog', { name: 'Cancel selected task' })
+  await expect(cancelConfirmation).toBeVisible()
   await cancelConfirmation.getByRole('textbox', { name: 'Exact confirmation for this task action' }).press('Escape')
   await expect(cancelConfirmation).toBeHidden()
+  await expect(page.getByRole('dialog', { name: 'Task detail' })).toBeVisible()
   await expect(cancelTrigger).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: 'Task detail' })).toBeHidden()
   await expectOnlyLoopbackRequests(page)
 })
 
@@ -495,17 +701,17 @@ test('sanitized export flow authorizes a directory, downloads an artifact, opens
   const fixture = await installLoopbackFixture(page)
   await installExportArtifactFixture(page)
   await page.goto('/exports')
-  await selectRemoteTypeaheadOption(page, 'Selected articles', 'Sanitized article one')
+  await selectRemoteSelectorOption(page, 'Selected articles', 'Sanitized article one')
   await clickButton(page, 'Continue to format')
   await expect(page.getByRole('heading', { name: 'Format and options' })).toBeVisible()
-  await selectAstryxSelectorOption(page, 'Format', 'HTML')
+  await selectStaticSelectorOption(page, 'Format', 'HTML')
   await expect(page.getByRole('group', { name: 'HTML content options' })).toBeVisible()
   await expect(page.getByRole('group', { name: 'HTML content options' }).getByRole('checkbox', { name: 'Include locally stored comments' })).toBeVisible()
   await expect(page.getByRole('group', { name: 'HTML content options' })).not.toContainText('Include article content where supported')
   const includeComments = page.getByRole('checkbox', { name: 'Include locally stored comments' })
   await includeComments.evaluate((element) => (element as HTMLInputElement).click())
   await expect(includeComments).toBeChecked()
-  await selectAstryxSelectorOption(page, 'Resource handling', 'Strict (fail when resources cannot be made local)')
+  await selectStaticSelectorOption(page, 'Resource handling', 'Strict (fail when resources cannot be made local)')
   const batchArchive = page.getByRole('textbox', { name: 'HTML batch archive file name' })
   await setInputValue(batchArchive, 'articles.zip')
   await expect(batchArchive).toHaveValue('articles.zip')
@@ -613,9 +819,9 @@ test('every supported export format queues only its allowed local options', asyn
 
   for (const [index, testCase] of cases.entries()) {
     await page.goto('/exports')
-    await selectRemoteTypeaheadOption(page, 'Selected articles', 'Sanitized article one')
+    await selectRemoteSelectorOption(page, 'Selected articles', 'Sanitized article one')
     await clickButton(page, 'Continue to format')
-    await selectAstryxSelectorOption(page, 'Format', testCase.format.toUpperCase())
+    await selectStaticSelectorOption(page, 'Format', testCase.format.toUpperCase())
     await clickButton(page, 'Continue to destination')
     await page.getByRole('button', { name: 'Authorize default directory' }).click()
     await expect(page.getByRole('button', { name: 'Queue export' })).toBeEnabled()
@@ -660,51 +866,6 @@ async function continueToExportDestination(page: import('@playwright/test').Page
   await expect(page.getByRole('heading', { name: 'Format and options' })).toBeVisible()
   await clickButton(page, 'Continue to destination')
   await expect(page.getByRole('heading', { name: 'Destination and confirmation' })).toBeVisible()
-}
-
-async function selectAstryxSelectorOption(page: import('@playwright/test').Page, label: string, option: string): Promise<void>
-async function selectAstryxSelectorOption(page: import('@playwright/test').Page, label: string, currentOption: string, option: string): Promise<void>
-async function selectAstryxSelectorOption(page: import('@playwright/test').Page, label: string, currentOption: string, nextOption?: string) {
-  const option = nextOption ?? currentOption
-  const trigger = page.getByRole('combobox', { name: label, exact: true }).or(page.locator('[role="combobox"]').filter({ hasText: currentOption })).first()
-  await expect(trigger, `Astryx Selector ${label} did not expose a combobox trigger.`).toHaveCount(1)
-  await trigger.evaluate((element) => (element as HTMLButtonElement).click())
-  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
-  const listboxID = await trigger.getAttribute('aria-controls')
-  if (!listboxID) throw new Error(`Astryx Selector ${label} did not expose its listbox relationship.`)
-  const listbox = page.locator(`[id=${JSON.stringify(listboxID)}]`)
-  await listbox.getByRole('option', { name: option, exact: true }).evaluate((element) => (element as HTMLElement).click())
-  await expect(trigger).toHaveAttribute('aria-expanded', 'false')
-}
-
-async function selectAstryxSearchSelectorOption(page: import('@playwright/test').Page, label: string, option: string) {
-  const trigger = page.getByRole('button', { name: label, exact: true })
-  await expect(trigger).toHaveCount(1)
-  await trigger.evaluate((element) => (element as HTMLButtonElement).click())
-  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
-  const listboxID = await trigger.getAttribute('aria-controls')
-  if (!listboxID) throw new Error(`Astryx search Selector ${label} did not expose its listbox relationship.`)
-  const listbox = page.locator(`[id=${JSON.stringify(listboxID)}]`)
-  await listbox.getByRole('option', { name: option, exact: true }).evaluate((element) => (element as HTMLElement).click())
-  await expect(trigger).toHaveAttribute('aria-expanded', 'false')
-}
-
-async function selectRemoteTypeaheadOption(page: import('@playwright/test').Page, label: string, option: string) {
-  const input = page.getByRole('combobox', { name: label, exact: true })
-  await input.scrollIntoViewIfNeeded()
-  await input.focus()
-  await input.evaluate((element, value) => {
-    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-    nativeSetter?.call(element, value)
-    element.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }))
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-  }, option)
-  const listboxID = await input.getAttribute('aria-controls')
-  if (!listboxID) throw new Error(`Remote selector ${label} did not expose its listbox relationship.`)
-  const listbox = page.locator(`[id=${JSON.stringify(listboxID)}]`)
-  const result = listbox.getByRole('option').filter({ hasText: option }).first()
-  await expect(result).toBeVisible()
-  await result.evaluate((element) => (element as HTMLElement).click())
 }
 
 async function chooseExportScope(page: import('@playwright/test').Page, value: 'articles' | 'account') {
@@ -752,7 +913,7 @@ test('export defaults persist locally without changing sync settings or starting
   const fixture = await installLoopbackFixture(page)
   await page.goto('/settings')
 
-  await selectAstryxSelectorOption(page, 'Collision policy', 'Append suffix', 'Replace existing output')
+  await selectStaticSelectorOption(page, 'Collision policy', 'Append suffix', 'Replace existing output')
   await page.getByRole('checkbox', { name: 'Excel: include article content' }).uncheck()
   await page.getByRole('checkbox', { name: 'JSON: include article content' }).uncheck()
   await page.getByRole('checkbox', { name: 'JSON: include stored comments' }).check()
@@ -802,7 +963,7 @@ test('saving Chinese display language updates the UI immediately and persists th
   const fixture = await installLoopbackFixture(page)
   await page.goto('/settings')
 
-  await selectAstryxSelectorOption(page, 'Display language', 'English', 'Chinese (Simplified)')
+  await selectStaticSelectorOption(page, 'Display language', 'English', 'Chinese (Simplified)')
   await page.getByRole('button', { name: 'Save preferences' }).click()
 
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')

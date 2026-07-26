@@ -587,6 +587,15 @@ export async function switchAccount(id: string): Promise<SessionStatus> {
   return mutate<SessionStatus>(`session/accounts/${encodeURIComponent(id)}/switch`, 'POST', {})
 }
 export async function searchAccounts(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<AccountRecord>> { return getPage<AccountRecord>('accounts/search', params, signal) }
+
+export async function resolveAccountFromArticle(articleURL: string, signal?: AbortSignal): Promise<AccountRecord> {
+  return request<AccountRecord>(`${apiBase}/accounts/resolve?url=${encodeURIComponent(articleURL)}`, { signal })
+}
+
+export async function resolveAccountName(articleURL: string, signal?: AbortSignal): Promise<string> {
+  const response = await request<{ readonly name: string }>(`${apiBase}/accounts/resolve-name?url=${encodeURIComponent(articleURL)}`, { signal })
+  return response.name
+}
 export async function getAccountSelectorPage(params: SelectorPageParams, signal?: AbortSignal): Promise<PaginatedResponse<AccountOption>> {
   const response = await request<PaginatedResponse<AccountOption> | WorkspacePageResponse<AccountOption>>(`${apiBase}/selectors/accounts?${selectorPageQuery(params).toString()}`, { signal })
   return projectPage(normalizePage(response), projectAccountSelectorOption)

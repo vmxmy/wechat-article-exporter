@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -641,6 +642,124 @@ func TestAccountCRUDAndSearchUseAuthenticatedWorkspaceFacade(t *testing.T) {
 	}
 }
 
+func TestAccountResolveRoutesUseAuthenticatedWorkspaceFacade(t *testing.T) {
+	const articleURL = "https://mp.weixin.qq.com/s/article-fixture"
+
+	t.Run("resolve returns the full account when discovery is authenticated", func(t *testing.T) {
+		app := &apiApplication{
+			resolvedAccount: domain.Account{ID: "resolved-1", FakeID: "fixture-fakeid", Name: "Fixture Account", Alias: "fixture"},
+		}
+		server, client := startAPIApplicationServer(t, app)
+		base := authorizeAPI(t, client, server.URL())
+
+		response := get(t, client, base+"/api/v1/accounts/resolve?url="+url.QueryEscape(articleURL))
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("resolve status=%d body=%s", response.StatusCode, readResponse(t, response))
+		}
+		if app.resolvedArticleURL != articleURL {
+			t.Fatalf("resolve url=%q want %q", app.resolvedArticleURL, articleURL)
+		}
+		var envelope struct {
+			APIVersion string         `json:"apiVersion"`
+			Data       domain.Account `json:"data"`
+			FakeID     string         `json:"fakeid"`
+			Name       string         `json:"name"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+			response.Body.Close()
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if envelope.FakeID != "fixture-fakeid" || envelope.Name != "Fixture Account" {
+			t.Fatalf("resolve envelope=%#v", envelope)
+		}
+	})
+
+	t.Run("resolve maps an expired session to authentication_required", func(t *testing.T) {
+		app := &apiApplication{
+			resolveAccountErr: wechat.ErrDiscoveryAuthentication,
+		}
+		server, client := startAPIApplicationServer(t, app)
+		base := authorizeAPI(t, client, server.URL())
+
+		response := get(t, client, base+"/api/v1/accounts/resolve?url="+url.QueryEscape(articleURL))
+		if response.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("resolve status=%d want 401", response.StatusCode)
+		}
+		assertAPIError(t, response, string(application.WorkspaceErrorAuthentication))
+	})
+
+	t.Run("resolve maps an unavailable discovery capability to unavailable", func(t *testing.T) {
+		app := &apiApplication{
+			resolveAccountErr: application.ErrUnavailable,
+		}
+		server, client := startAPIApplicationServer(t, app)
+		base := authorizeAPI(t, client, server.URL())
+
+		response := get(t, client, base+"/api/v1/accounts/resolve?url="+url.QueryEscape(articleURL))
+		if response.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("resolve status=%d want 503", response.StatusCode)
+		}
+		assertAPIError(t, response, string(application.WorkspaceErrorUnavailable))
+	})
+
+	t.Run("resolve requires a url query parameter", func(t *testing.T) {
+		app := &apiApplication{}
+		server, client := startAPIApplicationServer(t, app)
+		base := authorizeAPI(t, client, server.URL())
+
+		response := get(t, client, base+"/api/v1/accounts/resolve")
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("resolve status=%d want 400", response.StatusCode)
+		}
+		response.Body.Close()
+		if app.resolvedArticleURL != "" {
+			t.Fatalf("resolve called application without url=%q", app.resolvedArticleURL)
+		}
+	})
+
+	t.Run("resolve-name returns the public account name without a session", func(t *testing.T) {
+		app := &apiApplication{resolvedName: "Fixture Account"}
+		server, client := startAPIApplicationServer(t, app)
+		base := authorizeAPI(t, client, server.URL())
+
+		response := get(t, client, base+"/api/v1/accounts/resolve-name?url="+url.QueryEscape(articleURL))
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("resolve-name status=%d body=%s", response.StatusCode, readResponse(t, response))
+		}
+		if app.resolvedNameURL != articleURL {
+			t.Fatalf("resolve-name url=%q want %q", app.resolvedNameURL, articleURL)
+		}
+		var envelope struct {
+			APIVersion string `json:"apiVersion"`
+			Data       struct {
+				Name string `json:"name"`
+			} `json:"data"`
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+			response.Body.Close()
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if envelope.Name != "Fixture Account" {
+			t.Fatalf("resolve-name envelope=%#v", envelope)
+		}
+	})
+
+	t.Run("resolve-name requires a url query parameter", func(t *testing.T) {
+		app := &apiApplication{}
+		server, client := startAPIApplicationServer(t, app)
+		base := authorizeAPI(t, client, server.URL())
+
+		response := get(t, client, base+"/api/v1/accounts/resolve-name")
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("resolve-name status=%d want 400", response.StatusCode)
+		}
+		response.Body.Close()
+	})
+}
+
 func TestSelectorAndReadableProjectionAPIContracts(t *testing.T) {
 	app := &apiApplication{
 		accounts: domain.Page[domain.Account]{Items: []domain.Account{
@@ -1147,6 +1266,12 @@ type apiApplication struct {
 	account              domain.Account
 	searchAccounts       domain.Page[domain.Account]
 	searchQuery          domain.AccountQuery
+	resolvedArticleURL   string
+	resolvedAccount      domain.Account
+	resolveAccountErr    error
+	resolvedNameURL      string
+	resolvedName         string
+	resolveNameErr       error
 	savedAccount         domain.Account
 	updatedAccount       domain.Account
 	deletedAccounts      []domain.AccountID
@@ -1276,6 +1401,14 @@ func (app *apiApplication) SearchAccounts(_ context.Context, query domain.Accoun
 	page := app.searchAccounts
 	page.Offset, page.Limit = query.Offset, query.Limit
 	return page, nil
+}
+func (app *apiApplication) ResolveAccountName(_ context.Context, articleURL string) (string, error) {
+	app.resolvedNameURL = articleURL
+	return app.resolvedName, app.resolveNameErr
+}
+func (app *apiApplication) ResolveAccountFromArticle(_ context.Context, articleURL string) (domain.Account, error) {
+	app.resolvedArticleURL = articleURL
+	return app.resolvedAccount, app.resolveAccountErr
 }
 func (app *apiApplication) QueryArticles(_ context.Context, query domain.ArticleQuery) (domain.Page[domain.Article], error) {
 	app.articleQueryCalls++

@@ -1,18 +1,19 @@
 import { expect, test } from '@playwright/test'
 import { expectOnlyLoopbackRequests, installLoopbackFixture } from './fixtures/loopback-api'
+import { selectStaticSelectorOption } from './fixtures/selectors'
 
 test('settings categories provide current-section navigation and preserve preference feedback', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/settings')
 
   const navigation = page.getByRole('navigation', { name: 'Settings sections' })
-  await expect(navigation.getByRole('link', { name: 'General/Preferences' })).toHaveAttribute('aria-current', 'page')
+  await expect(navigation.getByRole('link', { name: 'General/Preferences' })).toHaveAttribute('aria-current', 'location')
 
   await navigation.getByRole('link', { name: 'Download/Export Defaults' }).click()
   await expect(page.locator('#settings-download-export')).toBeInViewport()
-  await expect(navigation.getByRole('link', { name: 'Download/Export Defaults' })).toHaveAttribute('aria-current', 'page')
+  await expect(navigation.getByRole('link', { name: 'Download/Export Defaults' })).toHaveAttribute('aria-current', 'location')
 
-  await selectAstryxSelectorOption(page, 'Collision policy', 'Replace existing output')
+  await selectStaticSelectorOption(page, 'Collision policy', 'Replace existing output')
   await page.getByRole('button', { name: 'Save preferences' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Preferences saved.' })).toBeVisible()
   expect(fixture.preferencePatches).toHaveLength(1)
@@ -40,7 +41,7 @@ test('settings localize category navigation and use Astryx numeric controls', as
   const fixture = await installLoopbackFixture(page)
   await page.goto('/settings')
 
-  await selectAstryxSelectorOption(page, 'Display language', 'Chinese (Simplified)')
+  await selectStaticSelectorOption(page, 'Display language', 'Chinese (Simplified)')
   await page.getByRole('button', { name: 'Save preferences' }).click()
 
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
@@ -70,26 +71,27 @@ test('storage maintenance isolates restore and garbage collection while preservi
   await expectOnlyLoopbackRequests(page)
 })
 
-async function selectAstryxSelectorOption(page: import('@playwright/test').Page, label: string, option: string) {
-  const trigger = page.getByRole('combobox', { name: label, exact: true })
-  await trigger.click()
-  const listboxID = await trigger.getAttribute('aria-controls')
-  if (!listboxID) throw new Error(`Astryx Selector ${label} did not expose its listbox relationship.`)
-  const listbox = page.locator(`[role="listbox"]#${listboxID}`)
-  await expect(listbox).toBeVisible()
-  await listbox.getByRole('option', { name: option, exact: true }).click()
-}
-
 test('settings protects unsaved preferences and clears the guard after save', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.goto('/settings')
 
-  await selectAstryxSelectorOption(page, 'Collision policy', 'Replace existing output')
+  await selectStaticSelectorOption(page, 'Collision policy', 'Replace existing output')
   const articlesLink = page.getByRole('link', { name: 'Articles', exact: true })
   await articlesLink.click()
   const guard = page.getByRole('alertdialog', { name: 'Unsaved preference changes' })
   await expect(guard).toBeVisible()
-  await guard.getByRole('button', { name: 'Stay on settings' }).click()
+  const discardChanges = guard.getByRole('button', { name: 'Discard changes' })
+  const stayOnSettings = guard.getByRole('button', { name: 'Stay on settings' })
+  await expect(discardChanges).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(guard.getByRole('button', { name: 'Close dialog' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(discardChanges).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(stayOnSettings).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(guard.getByRole('button', { name: 'Close dialog' })).toBeFocused()
+  await stayOnSettings.click()
   await expect(page).toHaveURL(/\/settings$/)
   await expect(articlesLink).toBeFocused()
 
@@ -98,7 +100,7 @@ test('settings protects unsaved preferences and clears the guard after save', as
   await expect(page).toHaveURL(/\/articles$/)
 
   await page.goto('/settings')
-  await selectAstryxSelectorOption(page, 'Collision policy', 'Replace existing output')
+  await selectStaticSelectorOption(page, 'Collision policy', 'Replace existing output')
   await page.getByRole('button', { name: 'Save preferences' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Preferences saved.' })).toBeVisible()
   await page.getByRole('link', { name: 'Articles', exact: true }).click()

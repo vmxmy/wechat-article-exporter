@@ -1,5 +1,6 @@
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
+import { CheckboxInput } from '@/components/controls/CheckboxInput'
 import type { ReactNode } from 'react'
+import { ActionGroup } from './ActionGroup'
 import './presentation.css'
 
 export interface MobileResourceMetadata {
@@ -61,7 +62,7 @@ export function MobileResourceRow({
           ))}
         </dl>
       ) : null}
-      {actions ? <div className="presentation-actions">{actions}</div> : null}
+      {actions ? <ActionGroup align="start">{actions}</ActionGroup> : null}
     </article>
   )
 }

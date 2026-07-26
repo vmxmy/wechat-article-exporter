@@ -1,4 +1,4 @@
-import { DropdownMenu, type DropdownMenuOption } from '@astryxdesign/core/DropdownMenu'
+import { DropdownMenu, type DropdownMenuItem } from '@/components/controls/DropdownMenu'
 import { useState } from 'react'
 import type { MessageCatalog } from '../i18n'
 import { useSessionStatus, useSwitchableAccounts, useWorkspaceMutations } from '../lib/queries'
@@ -44,7 +44,7 @@ export function SessionControl({ messages }: { readonly messages: MessageCatalog
         }))
     : []
 
-  const items: DropdownMenuOption[] = authenticated
+  const items: DropdownMenuItem[] = authenticated
     ? [
         { label: messages.login.manageSession, onClick: () => navigateTo('/login') },
         ...(accountItems.length > 0 ? [{ type: 'section' as const, title: messages.login.switchTitle, items: accountItems }] : []),

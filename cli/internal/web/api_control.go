@@ -92,6 +92,8 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 				}
 			case "/api/v1/accounts/search":
 				return false
+			case "/api/v1/accounts/resolve", "/api/v1/accounts/resolve-name":
+				return false
 			case "/api/v1/ingest/url":
 				server.ingestURL(writer, request)
 			case "/api/v1/articles/download":

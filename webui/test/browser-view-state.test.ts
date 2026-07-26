@@ -6,9 +6,11 @@ import {
   loadExportBrowserDraft,
   parseArticleBrowserView,
   parseExportBrowserView,
+  parsePagedBrowserView,
   saveExportBrowserDraft,
   serializeArticleBrowserView,
   serializeExportBrowserView,
+  serializePagedBrowserView,
   type ExportBrowserDraft
 } from '../src/lib/browserViewState'
 
@@ -40,6 +42,28 @@ describe('article browser view state', () => {
       sort: { field: 'publishedAt', direction: 'desc' },
       page: 1
     }, '?dialog=article-1&selection=article-2')).toBe('?accountId=account+%2F+fixture&keyword=visible')
+  })
+})
+
+describe('paged browser view state', () => {
+  it('parses the page and preserves foreign parameters', () => {
+    const parsed = parsePagedBrowserView('?page=3&from=other')
+
+    expect(parsed.state).toEqual({ page: 3 })
+    expect(parsed.canonicalSearch).toBe('?from=other&page=3')
+    expect(parsed.needsReplace).toBe(true)
+  })
+
+  it('drops the page when it is the default or out of range', () => {
+    expect(parsePagedBrowserView('?page=1').canonicalSearch).toBe('')
+    expect(parsePagedBrowserView('?page=0').canonicalSearch).toBe('')
+    expect(parsePagedBrowserView('?page=abc').canonicalSearch).toBe('')
+    expect(parsePagedBrowserView('?page=999999').canonicalSearch).toBe('')
+  })
+
+  it('serializes only non-default pages while keeping foreign parameters', () => {
+    expect(serializePagedBrowserView({ page: 1 }, '?from=other')).toBe('?from=other')
+    expect(serializePagedBrowserView({ page: 4 }, '?from=other')).toBe('?from=other&page=4')
   })
 })
 

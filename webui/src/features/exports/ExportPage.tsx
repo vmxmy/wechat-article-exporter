@@ -1,16 +1,16 @@
-import { Button } from '@astryxdesign/core/Button'
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { FormLayout } from '@astryxdesign/core/FormLayout'
-import { NumberInput } from '@astryxdesign/core/NumberInput'
-import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
-import { Selector } from '@astryxdesign/core/Selector'
-import { TextInput } from '@astryxdesign/core/TextInput'
-import { AccountRemoteSelector, AlbumRemoteSelector, ArticleRemoteMultiSelector, MobileResourceRow, PageHeader, PageStack, Status, TechnicalDetails } from '../../components/presentation'
+import { Button } from '@/components/controls/Button'
+import { CheckboxInput } from '@/components/controls/CheckboxInput'
+import { NumberInput } from '@/components/controls/NumberInput'
+import { RadioList, RadioListItem } from '@/components/controls/RadioList'
+import { Selector } from '@/components/controls/Selector'
+import { SearchableSelector } from '@/components/controls/SearchableSelector'
+import { TextInput } from '@/components/controls/TextInput'
+import { AccountRemoteSelector, ActionGroup, AlbumRemoteSelector, ArticleRemoteMultiSelector, FieldHint, FormGrid, MobileResourceRow, PageHeader, PageStack, Panel, ResponsiveDataTable, SectionHeader, StaticResponsiveDataTable, Status, TechnicalDetails } from '../../components/presentation'
 import { navigationEvent } from '../../app/navigation'
-import { formatBytes, formatDateTime, formatShortIdentifier, formatStatus } from '../../lib/presentation'
+import { createSelectionColumn, formatBytes, formatDateTime, formatShortIdentifier, formatStatus } from '../../lib/presentation'
 import { describeArticleQuery } from '../articles/articleQueryPresentation'
 import { useEffect, useMemo, useState } from 'react'
-import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
+import { getCoreRowModel, useReactTable, type ColumnDef, type VisibilityState } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
 import {
   clearExportHandoffForMount,
@@ -21,6 +21,7 @@ import {
   type AlbumOption,
   type ArticleOption,
   type ExportDirectory,
+  type ExportFile,
   type ExportFormat,
   type ExportManifest,
   type ExportOptions,
@@ -118,6 +119,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   const [outputNotice, setOutputNotice] = useState<string>()
   const [pageIndex, setPageIndex] = useState(0)
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({})
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [openConfirmation, setOpenConfirmation] = useState('')
 
   const mutations = useWorkspaceMutations()
@@ -203,7 +205,10 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   const albumNames = useMemo(() => nameMapForMatchingScope(matchingScope?.query.albumId, initialHandoff?.presentation?.matching?.albumName), [initialHandoff?.presentation?.matching?.albumName, matchingScope?.query.albumId])
   const savedQueryOptions = useMemo(() => savedQueries.data?.data.map((savedQuery) => ({ value: savedQuery.name, label: savedQuery.name })) ?? [], [savedQueries.data])
   const columns = useMemo<ColumnDef<ExportRecord>[]>(() => [
-    { id: 'select', header: ({ table }) => <CheckboxInput label={copy.selectAll} isLabelHidden value={table.getIsSomePageRowsSelected() ? 'indeterminate' : table.getIsAllPageRowsSelected()} onChange={() => table.toggleAllPageRowsSelected()} />, cell: ({ row }) => <CheckboxInput label={copy.selectRow(copy.workflow.recordLabel(row.original.format))} isLabelHidden value={row.getIsSelected()} onChange={() => row.toggleSelected()} /> },
+    createSelectionColumn({
+      selectAllLabel: copy.selectAll,
+      selectRowLabel: (row) => copy.selectRow(copy.workflow.recordLabel(row.original.format))
+    }),
     { id: 'label', header: copy.recordsTitle, meta: { role: 'primaryText' }, cell: ({ row }) => <ExportRecordLabel record={row.original} locale={locale} copy={copy} /> },
     { accessorKey: 'format', header: copy.columns.format, meta: { role: 'secondaryText' }, cell: ({ getValue }) => getValue<string>().toUpperCase() },
     { accessorKey: 'state', header: copy.columns.state, meta: { role: 'status' }, cell: ({ getValue }) => <Status value={getValue<string>()} locale={locale} /> },
@@ -212,7 +217,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
   ], [copy, locale])
   // TanStack table exposes a mutable table instance. It is rendered directly.
   // eslint-disable-next-line react-hooks/incompatible-library
-  const table = useReactTable({ data: records.data ? [...records.data.data] : [], columns, getCoreRowModel: getCoreRowModel(), state: { rowSelection }, onRowSelectionChange: setRowSelection, getRowId: (row) => row.id, enableRowSelection: true })
+  const table = useReactTable({ data: records.data ? [...records.data.data] : [], columns, getCoreRowModel: getCoreRowModel(), state: { rowSelection, columnVisibility }, onRowSelectionChange: setRowSelection, onColumnVisibilityChange: setColumnVisibility, getRowId: (row) => row.id, enableRowSelection: true })
   const totalPages = records.data ? Math.max(1, Math.ceil(records.data.pagination.total / records.data.pagination.pageSize)) : 1
 
   function chooseScope(next: ScopeChoice | undefined) {
@@ -347,8 +352,8 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
         </ol>
 
         {stage === 'scope' ? (
-          <section className="workspace-panel export-stage" aria-labelledby="export-scope-title">
-            <div><h2 id="export-scope-title">{copy.workflow.scope}</h2><p>{copy.workflow.scopeDescription}</p></div>
+          <Panel className="export-stage" aria-labelledby="export-scope-title">
+            <SectionHeader title={copy.workflow.scope} titleId="export-scope-title" description={copy.workflow.scopeDescription} />
             <RadioList label={copy.workflow.scopeType} value={scopeMode} onChange={(value) => changeScopeMode(value as ScopeMode)} orientation="vertical">
               <RadioListItem value="articles" label={copy.workflow.selectedArticles} description={copy.workflow.selectedArticlesDescription} />
               <RadioListItem value="albums" label={copy.selection.albumsLabel(albumIDs.length)} description={copy.workflow.scopeDescription} isDisabled={albumIDs.length === 0} />
@@ -361,35 +366,35 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
             {scopeMode === 'articles' ? <ArticleRemoteMultiSelector label={copy.workflow.selectedArticles} description={copy.workflow.selectedArticlesDescription} placeholder={copy.workflow.selectedArticles} selected={selectedArticles} onChange={selectArticles} copy={remoteSelectorCopy(messages)} /> : null}
             {scopeMode === 'account' ? <AccountRemoteSelector label={copy.workflow.oneAccount} value={accountID || undefined} selectedLabel={scope?.selection.kind === 'account' ? scope.label : undefined} onChange={(next, option) => selectAccount(next ?? '', option)} placeholder={copy.workflow.chooseAccount} copy={remoteSelectorCopy(messages)} /> : null}
             {scopeMode === 'album' ? <AlbumRemoteSelector label={copy.workflow.oneAlbum} value={albumID || undefined} selectedLabel={scope?.selection.kind === 'album' ? scope.label : undefined} onChange={(next, option) => selectAlbum(next ?? '', option)} placeholder={copy.workflow.chooseAlbum} copy={remoteSelectorCopy(messages)} /> : null}
-            {scopeMode === 'savedQuery' ? <Selector label={copy.workflow.savedQuery} options={savedQueryOptions} value={savedQueryID} onChange={(next) => selectSavedQuery(next || '')} placeholder={copy.selection.savedQueryPlaceholder} hasClear hasSearch isLoading={savedQueries.isLoading} /> : null}
+            {scopeMode === 'savedQuery' ? <SearchableSelector label={copy.workflow.savedQuery} options={savedQueryOptions} value={savedQueryID || null} onChange={(next) => selectSavedQuery(next || '')} placeholder={copy.selection.savedQueryPlaceholder} copy={messages.selectors} hasClear isLoading={savedQueries.isLoading} /> : null}
             {scopeMode === 'matching' && matchingScope ? <div className="export-scope-summary"><strong>{matchingScopeLabel(initialHandoff?.presentation?.matching?.total, copy)}</strong><p>{describeArticleQuery(matchingScope.query, locale, messages, { accounts: accountNames, albums: albumNames })}</p><Button label={copy.workflow.useCurrentResults} variant="secondary" onClick={selectMatchingScope} /></div> : null}
             {scope ? <ScopeSummary label={scope.label} articles={scope.selection.kind === 'explicit_ids' ? selectedArticles : undefined} /> : null}
-          </section>
+          </Panel>
         ) : null}
 
         {stage === 'format' ? (
-          <section className="workspace-panel export-stage" aria-labelledby="export-format-title">
-            <div><h2 id="export-format-title">{copy.workflow.format}</h2><p>{copy.workflow.formatDescription}</p></div>
-            <FormLayout>
+          <Panel className="export-stage" aria-labelledby="export-format-title">
+            <SectionHeader title={copy.workflow.format} titleId="export-format-title" description={copy.workflow.formatDescription} />
+            <FormGrid>
               <Selector label={copy.format} options={formats.map((item) => ({ value: item, label: item.toUpperCase() }))} value={format} onChange={(value) => commitExportView({ stage, scope: scopeMode, format: value as ExportFormat })} />
-              <FormLayout direction="horizontal">
-                <TextInput label={copy.namingTemplate} value={namingTemplate} onChange={setNamingTemplate} />
-                <NumberInput label={copy.maximumNameBytes} value={maximumNameBytes} onChange={setMaximumNameBytes} min={1} step={1} isIntegerOnly isRequired />
-              </FormLayout>
-              <Selector label={copy.collision} options={[{ value: 'fail', label: copy.collisionFail }, { value: 'skip', label: copy.collisionSkip }, { value: 'replace', label: copy.collisionReplace }, { value: 'suffix', label: copy.collisionSuffix }]} value={collisionPolicy} onChange={(value) => setCollisionPolicy(value as typeof collisionPolicy)} />
-            </FormLayout>
+              <FormGrid direction="horizontal">
+                <TextInput label={copy.namingTemplate} value={namingTemplate} htmlName="export-naming-template" onChange={setNamingTemplate} />
+                <NumberInput label={copy.maximumNameBytes} value={maximumNameBytes} onChange={setMaximumNameBytes} htmlName="export-maximum-name-bytes" autoComplete="off" min={1} step={1} isIntegerOnly isRequired />
+              </FormGrid>
+              <Selector label={copy.collision} options={[{ value: 'fail', label: copy.collisionFail }, { value: 'skip', label: copy.collisionSkip }, { value: 'replace', label: copy.collisionReplace }, { value: 'suffix', label: copy.collisionSuffix }]} value={collisionPolicy} htmlName="export-collision-policy" onChange={(value) => setCollisionPolicy(value as typeof collisionPolicy)} />
+            </FormGrid>
             {formatOptions.length ? <fieldset className="export-options"><legend>{copy.formatOptions(format.toUpperCase())}</legend>{formatOptions.includes('content') ? <CheckboxInput label={copy.includeContent} value={includeContent} onChange={() => setIncludeContent((value) => !value)} /> : null}{formatOptions.includes('metadata') ? <CheckboxInput label={copy.includeMetadata} value={includeMetadata} onChange={() => setIncludeMetadata((value) => !value)} /> : null}{formatOptions.includes('comments') ? <CheckboxInput label={copy.includeComments} value={includeComments} onChange={() => setIncludeComments((value) => !value)} /> : null}</fieldset> : null}
-            {format === 'html' ? <fieldset className="export-options"><legend>{copy.htmlOptions}</legend><Selector label={copy.resourcePolicy} options={[{ value: 'best-effort', label: copy.resourceBestEffort }, { value: 'strict', label: copy.resourceStrict }]} value={htmlResourcePolicy} onChange={(value) => setHTMLResourcePolicy(value as typeof htmlResourcePolicy)} /><TextInput label={copy.batchArchive} value={htmlBatchArchive} onChange={setHTMLBatchArchive} /><p className="field-hint">{copy.batchArchiveHint}</p></fieldset> : null}
-          </section>
+            {format === 'html' ? <fieldset className="export-options"><legend>{copy.htmlOptions}</legend><Selector label={copy.resourcePolicy} options={[{ value: 'best-effort', label: copy.resourceBestEffort }, { value: 'strict', label: copy.resourceStrict }]} value={htmlResourcePolicy} onChange={(value) => setHTMLResourcePolicy(value as typeof htmlResourcePolicy)} /><TextInput label={copy.batchArchive} value={htmlBatchArchive} onChange={setHTMLBatchArchive} /><FieldHint>{copy.batchArchiveHint}</FieldHint></fieldset> : null}
+          </Panel>
         ) : null}
 
         {stage === 'destination' ? (
-          <section className="workspace-panel export-stage" aria-labelledby="export-destination-title">
-            <div><h2 id="export-destination-title">{copy.workflow.destination}</h2><p>{copy.workflow.destinationDescription}</p></div>
+          <Panel className="export-stage" aria-labelledby="export-destination-title">
+            <SectionHeader title={copy.workflow.destination} titleId="export-destination-title" description={copy.workflow.destinationDescription} />
             {!directory ? <div className="export-destination-default"><p>{copy.workflow.authorizeDefaultDescription}</p><Button label={copy.authorize} variant="primary" isLoading={mutations.authorizeDefaultExportDirectory.isPending} onClick={authorizeDirectory} /></div> : <div className="export-directory-summary"><p><strong>{copy.authorized(directory.label)}</strong></p><p>{copy.workflow.destinationReady}</p></div>}
-            {directory ? <details className="export-destination-details"><summary>{copy.workflow.optionalDestination}</summary><div className="export-destination-advanced"><TextInput label={copy.childName} placeholder={copy.childPlaceholder} value={childName} onChange={setChildName} /><Button label={copy.create} variant="secondary" isLoading={mutations.createExportDirectory.isPending} isDisabled={!childName.trim()} onClick={createDirectory} /><TextInput label={copy.subdirectory} value={subdirectory} onChange={setSubdirectory} /><p className="field-hint">{copy.subdirectoryHint}</p></div></details> : null}
-            {directory ? <div className="confirmation-proof"><span>{copy.confirmation}</span><code>{`start-export:${directory.token}`}</code><p>{copy.confirmationHint}</p></div> : null}
-          </section>
+            {directory ? <details className="export-destination-details"><summary>{copy.workflow.optionalDestination}</summary><div className="export-destination-advanced"><TextInput label={copy.childName} placeholder={copy.childPlaceholder} value={childName} onChange={setChildName} /><Button label={copy.create} variant="secondary" isLoading={mutations.createExportDirectory.isPending} isDisabled={!childName.trim()} onClick={createDirectory} /><TextInput label={copy.subdirectory} value={subdirectory} onChange={setSubdirectory} /><FieldHint>{copy.subdirectoryHint}</FieldHint></div></details> : null}
+            {directory ? <div className="confirmation-proof"><span>{copy.confirmation}</span><code translate="no">{`start-export:${directory.token}`}</code><p>{copy.confirmationHint}</p></div> : null}
+          </Panel>
         ) : null}
 
         {notice ? <div className="export-notice" role="status" aria-live="polite"><p>{notice}</p></div> : null}
@@ -400,25 +405,25 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
         <Button label={primaryAction} variant="primary" isLoading={stage === 'destination' && mutations.startExport.isPending} isDisabled={primaryDisabled} onClick={advanceStage} />
       </div>
 
-      <ExportRecords copy={copy} locale={locale} records={records} table={table} pageIndex={pageIndex} totalPages={totalPages} onPageChange={setPageIndex} />
+      <ExportRecords copy={copy} locale={locale} selectorCopy={messages.selectors} records={records} table={table} pageIndex={pageIndex} totalPages={totalPages} onPageChange={setPageIndex} />
 
-      <section className="workspace-panel export-detail" aria-labelledby="export-detail-title">
-        <h2 id="export-detail-title">{copy.detailTitle}</h2><p>{copy.detailDescription}</p>
-        <div className="export-actions"><Button label={copy.loadManifest} variant="secondary" isLoading={manifest.isFetching} isDisabled={!selectedID} onClick={() => void manifest.refetch()} /><Button label={copy.verify} variant="secondary" isLoading={mutations.verifyExport.isPending} isDisabled={!selectedID} onClick={runVerification} /></div>
-        {!selectedID ? <p className="field-hint">{copy.selectOne}</p> : null}
-        {selectedID ? <><div className="confirmation-proof"><span>{copy.confirmation}</span><code>{copy.verifyConfirmation(selectedID)}</code><p>{copy.confirmationHint}</p></div><TechnicalDetails label={copy.workflow.technicalDetails} items={[{ label: copy.workflow.exportID, value: selectedID, copyLabel: copy.workflow.copyValue }]} /></> : null}
+      <Panel className="export-detail" aria-labelledby="export-detail-title">
+        <SectionHeader title={copy.detailTitle} titleId="export-detail-title" description={copy.detailDescription} />
+        <ActionGroup align="start" gap="cluster"><Button label={copy.loadManifest} variant="secondary" isLoading={manifest.isFetching} isDisabled={!selectedID} onClick={() => void manifest.refetch()} /><Button label={copy.verify} variant="secondary" isLoading={mutations.verifyExport.isPending} isDisabled={!selectedID} onClick={runVerification} /></ActionGroup>
+        {!selectedID ? <FieldHint>{copy.selectOne}</FieldHint> : null}
+        {selectedID ? <><div className="confirmation-proof"><span>{copy.confirmation}</span><code translate="no">{copy.verifyConfirmation(selectedID)}</code><p>{copy.confirmationHint}</p></div><TechnicalDetails label={copy.workflow.technicalDetails} items={[{ label: copy.workflow.exportID, value: selectedID, copyLabel: copy.workflow.copyValue, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }]} /></> : null}
         {manifest.isLoading ? <p role="status">{copy.manifestLoading}</p> : null}
         {manifest.isError ? <p role="alert">{copy.manifestUnavailable}</p> : null}
-        {manifest.data ? <Manifest messages={copy} manifest={manifest.data} locale={locale} /> : null}
-        {mutations.verifyExport.data ? <Verification messages={copy} verification={mutations.verifyExport.data} /> : null}
-      </section>
+        {manifest.data ? <Manifest messages={messages} manifest={manifest.data} locale={locale} /> : null}
+        {mutations.verifyExport.data ? <Verification messages={messages} verification={mutations.verifyExport.data} /> : null}
+      </Panel>
 
-      <section className="workspace-panel export-output-actions" aria-labelledby="artifact-actions-title">
-        <div><h2 id="artifact-actions-title">{copy.artifactTitle}</h2><p>{copy.artifactDescription}</p></div>
-        <div className="export-actions"><Button label={copy.openAction} variant="secondary" isDisabled={!selectedID || openConfirmation !== expectedOpenConfirmation} onClick={openOutputDirectory} /></div>
-        {selectedID ? <><div className="confirmation-proof"><span>{copy.openConfirmationLabel}</span><code>{expectedOpenConfirmation}</code><p>{copy.openConfirmationHint}</p></div><TextInput label={copy.openConfirmationInput} value={openConfirmation} onChange={setOpenConfirmation} /></> : <p className="field-hint">{copy.selectOne}</p>}
+      <Panel className="export-output-actions" aria-labelledby="artifact-actions-title">
+        <SectionHeader title={copy.artifactTitle} titleId="artifact-actions-title" description={copy.artifactDescription} />
+        <ActionGroup align="start" gap="cluster"><Button label={copy.openAction} variant="secondary" isDisabled={!selectedID || openConfirmation !== expectedOpenConfirmation} onClick={openOutputDirectory} /></ActionGroup>
+        {selectedID ? <><div className="confirmation-proof"><span>{copy.openConfirmationLabel}</span><code translate="no">{expectedOpenConfirmation}</code><p>{copy.openConfirmationHint}</p></div><TextInput label={copy.openConfirmationInput} value={openConfirmation} onChange={setOpenConfirmation} /></> : <FieldHint>{copy.selectOne}</FieldHint>}
         {outputNotice ? <p className="export-notice" role="status" aria-live="polite">{outputNotice}</p> : null}
-      </section>
+      </Panel>
     </PageStack>
   )
 }
@@ -435,21 +440,49 @@ function ExportRecordLabel({ record, locale, copy }: { readonly record: ExportRe
   return <div className="export-record-label"><strong>{copy.workflow.recordLabel(record.format)}</strong><span>{formatDateTime(record.createdAt, locale)}</span></div>
 }
 
-function ExportRecords({ copy, locale, records, table, pageIndex, totalPages, onPageChange }: { readonly copy: MessageCatalog['exports']; readonly locale: Locale; readonly records: ReturnType<typeof useExportPage>; readonly table: ReturnType<typeof useReactTable<ExportRecord>>; readonly pageIndex: number; readonly totalPages: number; readonly onPageChange: (updater: number | ((value: number) => number)) => void }) {
+function ExportRecords({ copy, locale, selectorCopy, records, table, pageIndex, totalPages, onPageChange }: { readonly copy: MessageCatalog['exports']; readonly locale: Locale; readonly selectorCopy: MessageCatalog['selectors']; readonly records: ReturnType<typeof useExportPage>; readonly table: ReturnType<typeof useReactTable<ExportRecord>>; readonly pageIndex: number; readonly totalPages: number; readonly onPageChange: (updater: number | ((value: number) => number)) => void }) {
   return <section className="export-records" aria-labelledby="export-records-title">
-    <header><h2 id="export-records-title">{copy.recordsTitle}</h2><p>{copy.recordsDescription}</p></header>
+    <SectionHeader title={copy.recordsTitle} titleId="export-records-title" description={copy.recordsDescription} />
     {records.isLoading ? <p role="status">{copy.loading}</p> : null}
     {records.isError ? <div className="error-state" role="alert"><p>{copy.unavailable}</p><Button label={copy.retry} variant="secondary" onClick={() => void records.refetch()} /></div> : null}
-    {!records.isLoading && !records.isError ? <><div className="data-table-wrap export-records-table" aria-busy={records.isFetching}><table className="data-table"><thead>{table.getHeaderGroups().map((group) => <tr key={group.id}>{group.headers.map((header) => <th key={header.id} scope="col">{header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead><tbody>{table.getRowModel().rows.map((row) => <tr key={row.id} data-selected={row.getIsSelected() || undefined}>{row.getVisibleCells().map((cell) => <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}{table.getRowModel().rows.length === 0 ? <tr><td colSpan={table.getVisibleLeafColumns().length}>{copy.empty}</td></tr> : null}</tbody></table></div><div className="export-records-mobile" aria-label={copy.recordsTitle}>{table.getRowModel().rows.map((row) => <MobileResourceRow key={row.id} title={<ExportRecordLabel record={row.original} locale={locale} copy={copy} />} description={row.original.format.toUpperCase()} isSelected={row.getIsSelected()} selectionLabel={copy.selectRow(copy.workflow.recordLabel(row.original.format))} onSelectionChange={(selected) => row.toggleSelected(selected)} status={<Status value={row.original.state} locale={locale} />} metadata={[{ id: 'created', label: copy.columns.created, value: formatDateTime(row.original.createdAt, locale), fullValue: row.original.createdAt }, { id: 'provenance', label: copy.columns.provenance, value: formatProvenance(row.original, locale) }]} />)}</div><nav className="pagination" aria-label={copy.pagination}><Button label={copy.previous} variant="secondary" size="sm" isDisabled={pageIndex === 0} onClick={() => onPageChange((value) => value - 1)} /><span>{copy.page(pageIndex + 1, totalPages)}</span><Button label={copy.next} variant="secondary" size="sm" isDisabled={pageIndex + 1 >= totalPages} onClick={() => onPageChange((value) => value + 1)} /></nav></> : null}
+    {!records.isLoading && !records.isError ? <ResponsiveDataTable
+      table={table}
+      ariaLabel={copy.recordsTitle}
+      visibleColumnsLabel={copy.visibleColumns}
+      selectorCopy={selectorCopy}
+      emptyContent={copy.empty}
+      isBusy={records.isFetching}
+      footer={<nav className="pagination" aria-label={copy.pagination}><Button label={copy.previous} variant="secondary" size="sm" isDisabled={pageIndex === 0} onClick={() => onPageChange((value) => value - 1)} /><span>{copy.page(pageIndex + 1, totalPages)}</span><Button label={copy.next} variant="secondary" size="sm" isDisabled={pageIndex + 1 >= totalPages} onClick={() => onPageChange((value) => value + 1)} /></nav>}
+      renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow key={row.id} title={<ExportRecordLabel record={row.original} locale={locale} copy={copy} />} description={row.original.format.toUpperCase()} isSelected={row.getIsSelected()} selectionLabel={copy.selectRow(copy.workflow.recordLabel(row.original.format))} onSelectionChange={(selected) => row.toggleSelected(selected)} status={<Status value={row.original.state} locale={locale} />} metadata={[{ id: 'created', label: copy.columns.created, value: formatDateTime(row.original.createdAt, locale), fullValue: row.original.createdAt }, { id: 'provenance', label: copy.columns.provenance, value: formatProvenance(row.original, locale) }]} />)}
+    /> : null}
   </section>
 }
 
-function Manifest({ messages, manifest, locale }: { readonly messages: MessageCatalog['exports']; readonly manifest: ExportManifest; readonly locale: Locale }) {
-  return <div className="manifest-detail"><p><strong>{messages.workflow.recordLabel(manifest.format)}</strong> · <Status value={manifest.state} locale={locale} /> · {formatProvenance(manifest, locale)}</p><TechnicalDetails label={messages.workflow.technicalDetails} items={[{ label: messages.workflow.exportID, value: manifest.exportId, copyLabel: messages.workflow.copyValue }, { label: messages.workflow.provenanceGeneration, value: manifest.provenanceGeneration, copyLabel: messages.workflow.copyValue }]} /><p>{messages.manifestSummary(manifest.files.length)}</p>{manifest.files.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th scope="col">{messages.fileColumns.path}</th><th scope="col">{messages.fileColumns.size}</th><th scope="col">{messages.fileColumns.status}</th><th scope="col">{messages.fileColumns.checksum}</th><th scope="col">{messages.fileColumns.download}</th></tr></thead><tbody>{manifest.files.map((file) => <tr key={file.artifactId}><td>{safeFileName(file.path)}</td><td>{formatBytes(file.sizeBytes, locale)}</td><td><Status value={file.status} locale={locale} /></td><td><code title={file.sha256}>{formatShortIdentifier(file.sha256, 8)}</code></td><td><a className="artifact-download" href={getExportArtifactDownloadURL(manifest.exportId, file.artifactId)}>{messages.downloadArtifact}</a></td></tr>)}</tbody></table></div> : <p>{messages.noFiles}</p>}<TechnicalDetails label={messages.workflow.technicalDetails} items={manifest.files.map((file) => ({ label: safeFileName(file.path), value: file.path, copyLabel: messages.workflow.copyValue }))} /></div>
+function Manifest({ messages, manifest, locale }: { readonly messages: MessageCatalog; readonly manifest: ExportManifest; readonly locale: Locale }) {
+  const copy = messages.exports
+  const a11y = messages.a11y
+  const fileColumns = useMemo<ColumnDef<ExportFile>[]>(() => [
+    { accessorKey: 'path', header: copy.fileColumns.path, enableHiding: false, meta: { role: 'primaryText' }, cell: ({ row }) => safeFileName(row.original.path) },
+    { accessorKey: 'sizeBytes', header: copy.fileColumns.size, meta: { role: 'numeric' }, cell: ({ getValue }) => formatBytes(getValue<number>(), locale) },
+    { accessorKey: 'status', header: copy.fileColumns.status, meta: { role: 'status' }, cell: ({ getValue }) => <Status value={getValue<string>()} locale={locale} /> },
+    { accessorKey: 'sha256', header: copy.fileColumns.checksum, meta: { role: 'identifier' as const }, cell: ({ getValue }) => <code title={getValue<string>()}>{formatShortIdentifier(getValue<string>(), 8)}</code> },
+    { id: 'download', header: copy.fileColumns.download, enableHiding: false, meta: { role: 'actions' }, cell: ({ row }) => <a className="artifact-download" href={getExportArtifactDownloadURL(manifest.exportId, row.original.artifactId)}>{copy.downloadArtifact}</a> }
+  ], [copy, locale, manifest.exportId])
+  return <div className="manifest-detail"><p><strong>{copy.workflow.recordLabel(manifest.format)}</strong> · <Status value={manifest.state} locale={locale} /> · {formatProvenance(manifest, locale)}</p><TechnicalDetails label={copy.workflow.technicalDetails} items={[{ label: copy.workflow.exportID, value: manifest.exportId, copyLabel: copy.workflow.copyValue, copiedLabel: a11y.copied, copyFailedLabel: a11y.copyUnavailable }, { label: copy.workflow.provenanceGeneration, value: manifest.provenanceGeneration, copyLabel: copy.workflow.copyValue, copiedLabel: a11y.copied, copyFailedLabel: a11y.copyUnavailable }]} /><p>{copy.manifestSummary(manifest.files.length)}</p>{manifest.files.length ? <StaticResponsiveDataTable
+    data={manifest.files}
+    columns={fileColumns}
+    ariaLabel={copy.files}
+    visibleColumnsLabel={copy.visibleFileColumns}
+    selectorCopy={messages.selectors}
+    emptyContent={copy.noFiles}
+    renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow key={row.original.artifactId} title={safeFileName(row.original.path)} fullTitle={safeFileName(row.original.path)} status={<Status value={row.original.status} locale={locale} />} metadata={[{ id: 'size', label: copy.fileColumns.size, value: formatBytes(row.original.sizeBytes, locale) }, { id: 'checksum', label: copy.fileColumns.checksum, value: <code title={row.original.sha256}>{formatShortIdentifier(row.original.sha256, 8)}</code>, fullValue: row.original.sha256 }]} actions={<a className="artifact-download" href={getExportArtifactDownloadURL(manifest.exportId, row.original.artifactId)}>{copy.downloadArtifact}</a>} />)}
+  /> : <p>{copy.noFiles}</p>}<TechnicalDetails label={copy.workflow.technicalDetails} items={manifest.files.map((file) => ({ label: safeFileName(file.path), value: file.path, copyLabel: copy.workflow.copyValue, copiedLabel: a11y.copied, copyFailedLabel: a11y.copyUnavailable }))} /></div>
 }
 
-function Verification({ messages, verification }: { readonly messages: MessageCatalog['exports']; readonly verification: ExportVerification }) {
-  return <section className="verification-result" aria-live="polite"><h3>{messages.verificationTitle}</h3><p>{verification.valid ? messages.verificationValid(verification.verifiedOutputs) : messages.verificationInvalid(verification.verifiedOutputs)}</p>{verification.issues.length ? <><h4>{messages.verificationIssues}</h4><ul>{verification.issues.map((issue, index) => <li key={`${issue.path ?? 'issue'}-${index}`}>{messages.verificationIssue(index + 1)}</li>)}</ul><TechnicalDetails label={messages.workflow.technicalDetails} items={verification.issues.map((issue, index) => ({ label: messages.verificationIssue(index + 1), value: serializeVerificationIssue(issue), copyLabel: messages.workflow.copyValue }))} /></> : null}</section>
+function Verification({ messages, verification }: { readonly messages: MessageCatalog; readonly verification: ExportVerification }) {
+  const copy = messages.exports
+  const a11y = messages.a11y
+  return <section className="verification-result" aria-live="polite"><h3>{copy.verificationTitle}</h3><p>{verification.valid ? copy.verificationValid(verification.verifiedOutputs) : copy.verificationInvalid(verification.verifiedOutputs)}</p>{verification.issues.length ? <><h4>{copy.verificationIssues}</h4><ul>{verification.issues.map((issue, index) => <li key={`${issue.path ?? 'issue'}-${index}`}>{copy.verificationIssue(index + 1)}</li>)}</ul><TechnicalDetails label={copy.workflow.technicalDetails} items={verification.issues.map((issue, index) => ({ label: copy.verificationIssue(index + 1), value: serializeVerificationIssue(issue), copyLabel: copy.workflow.copyValue, copiedLabel: a11y.copied, copyFailedLabel: a11y.copyUnavailable }))} /></> : null}</section>
 }
 
 function scopeModeFor(selection: ExportSelection | undefined): ScopeMode {
@@ -489,8 +522,7 @@ function scopeChoiceFromDraft(selection: ExportSelection, label: string | undefi
 function accountLabel(account: AccountOption, copy: MessageCatalog['exports']) { return account.displayName?.trim() || copy.workflow.savedAccountFallback }
 function albumLabel(album: AlbumOption, copy: MessageCatalog['exports']) { return album.displayName?.trim() || copy.workflow.savedAlbumFallback }
 function remoteSelectorCopy(messages: MessageCatalog) {
-  const copy = messages.articles.ux
-  return { unavailable: copy.accountUnavailable, noResults: copy.selectorNoResults, duplicate: copy.duplicateSelection }
+  return messages.selectors
 }
 function selectionLabelForArticles(articles: readonly ArticleOption[], ids: readonly string[], copy: MessageCatalog['exports']) { return articles.length === 1 ? articles[0].title : copy.workflow.selectedArticlesLabel(ids.length) }
 function formatProvenance(value: { readonly provenanceState?: string; readonly provenanceGeneration: number }, locale: Locale) { return `${formatStatus(value.provenanceState, locale).label} · #${value.provenanceGeneration}` }

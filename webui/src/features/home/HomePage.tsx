@@ -1,5 +1,5 @@
-import { Link } from '@astryxdesign/core/Link'
-import { PageStack, ReadingMeasure } from '../../components/presentation'
+import { Link } from '@/components/controls/Link'
+import { ActionGroup, DefinitionList, PageHeader, PageStack, Panel } from '../../components/presentation'
 import type { MessageCatalog } from '../../i18n'
 import { useWorkspaceSnapshot } from '../../lib/queries'
 
@@ -20,34 +20,33 @@ export function HomePage({ messages }: { readonly messages: MessageCatalog }) {
 
   return (
     <PageStack className="overview" aria-labelledby="overview-title">
-      <ReadingMeasure size="description" className="overview-intro">
-        <p className="eyebrow">{messages.navigation.home}</p>
-        <h1 id="overview-title">{messages.overview.title}</h1>
-        <p className="lede">{messages.overview.description}</p>
-      </ReadingMeasure>
+      <PageHeader eyebrow={messages.navigation.home} title={messages.overview.title} titleId="overview-title" description={messages.overview.description} />
 
       {snapshot.isLoading ? <p role="status">{messages.connection.checking}</p> : null}
       {snapshot.isError ? <p role="alert">{messages.overview.unavailable}</p> : null}
 
       {!snapshot.isLoading && !snapshot.isError && action ? (
-        <section className={`workspace-panel overview-primary-action${failedJobs > 0 ? ' overview-primary-action-warning' : ''}`} aria-labelledby="next-action-title">
+        <Panel className={`overview-primary-action${failedJobs > 0 ? ' overview-primary-action-warning' : ''}`} aria-labelledby="next-action-title">
           <p className="overview-action-label">{messages.overview.primaryActionTitle}</p>
           <h2 id="next-action-title">{action.title}</h2>
           <p>{action.description}</p>
-          <div className="action-button-group">
+          <ActionGroup className="overview-action-cluster" align="start" gap="cluster" stackAt="compact">
             <Link href={action.primary.href} isStandalone hasUnderline>{action.primary.label}</Link>
             {action.secondary ? <Link href={action.secondary.href} isStandalone>{action.secondary.label}</Link> : null}
-          </div>
-        </section>
+          </ActionGroup>
+        </Panel>
       ) : null}
 
       <div className="overview-grid">
         <section className="overview-fact" aria-labelledby="session-title">
           <h2 id="session-title">{messages.overview.sessionTitle}</h2>
-          <dl className="facts-list">
-            <div><dt>{messages.overview.sessionAccount}</dt><dd>{session?.accountName ?? '—'}</dd></div>
-            <div><dt>{messages.overview.sessionState}</dt><dd>{session ? messages.login.states[session.state] ?? session.state : '—'}</dd></div>
-          </dl>
+          <DefinitionList
+            labelWidth="5.5rem"
+            items={[
+              { term: messages.overview.sessionAccount, description: session?.accountName ?? '—' },
+              { term: messages.overview.sessionState, description: session ? messages.login.states[session.state] ?? session.state : '—' }
+            ]}
+          />
         </section>
         <section className="overview-fact overview-fact-storage" aria-labelledby="storage-title">
           <h2 id="storage-title">{messages.overview.storageTitle}</h2>
@@ -55,10 +54,13 @@ export function HomePage({ messages }: { readonly messages: MessageCatalog }) {
         </section>
         <section className="overview-fact overview-fact-technical" aria-labelledby="runtime-title">
           <h2 id="runtime-title">{messages.overview.runtimeTitle}</h2>
-          <dl className="facts-list">
-            <div><dt>{messages.overview.runtimeProfile}</dt><dd>{runtime?.profileId ?? runtime?.profile ?? '—'}</dd></div>
-            <div><dt>{messages.overview.runtimeVersion}</dt><dd>{runtime?.version ?? '—'}</dd></div>
-          </dl>
+          <DefinitionList
+            labelWidth="5.5rem"
+            items={[
+              { term: messages.overview.runtimeProfile, description: runtime?.profileId ?? runtime?.profile ?? '—' },
+              { term: messages.overview.runtimeVersion, description: runtime?.version ?? '—' }
+            ]}
+          />
         </section>
       </div>
     </PageStack>

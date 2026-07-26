@@ -129,6 +129,26 @@ func (workspace *Workspace) SearchAccounts(ctx context.Context, input WorkspaceA
 	return workspacePage(result), workspaceError(err)
 }
 
+// ResolveAccountName resolves only the public account name behind an article
+// URL. It needs no authenticated WeChat session: it parses the public article
+// HTML. It is the degraded fallback when a browser has not signed in.
+func (workspace *Workspace) ResolveAccountName(ctx context.Context, articleURL string) (string, error) {
+	name, err := workspace.application.ResolveAccountName(ctx, strings.TrimSpace(articleURL))
+	if err != nil {
+		return "", workspaceError(err)
+	}
+	return name, nil
+}
+
+// ResolveAccountFromArticle resolves a complete account (name + fakeid) from an
+// article URL. Its second step searches WeChat and therefore requires an
+// authenticated WeChat session; without one it fails with
+// WorkspaceErrorAuthentication.
+func (workspace *Workspace) ResolveAccountFromArticle(ctx context.Context, articleURL string) (domain.Account, error) {
+	account, err := workspace.application.ResolveAccountFromArticle(ctx, strings.TrimSpace(articleURL))
+	return workspaceAccountResult(account, err)
+}
+
 func (workspace *Workspace) SaveAccount(ctx context.Context, account domain.Account) (domain.Account, error) {
 	if strings.TrimSpace(account.FakeID) == "" || strings.TrimSpace(account.Name) == "" {
 		return domain.Account{}, &WorkspaceError{Code: WorkspaceErrorInvalidArgument, Message: "account fakeid and name are required"}

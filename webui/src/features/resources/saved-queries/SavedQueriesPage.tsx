@@ -1,15 +1,15 @@
-import { Button } from '@astryxdesign/core/Button'
-import { Collapsible } from '@astryxdesign/core/Collapsible'
-import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog'
-import { TextArea } from '@astryxdesign/core/TextArea'
-import { TextInput } from '@astryxdesign/core/TextInput'
-import { useEffect, useMemo, useState } from 'react'
+import { Button } from '@/components/controls/Button'
+import { Collapsible } from '@/components/controls/Collapsible'
+import { TextArea } from '@/components/controls/TextArea'
+import { TextInput } from '@/components/controls/TextInput'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
-import { PageStack } from '../../../components/presentation'
+import { ActionGroup, PageStack, SectionHeader, TypedConfirmationDialog } from '../../../components/presentation'
 import type { Locale, MessageCatalog } from '../../../i18n'
 import { consumeArticleQueryHandoff, parseArticleQuery, type ArticleQuery, type SavedQueryRecord } from '../../../lib/api'
 import { formatDateTime } from '../../../lib/presentation'
 import { useAccountSelectorPage, useAlbumSelectorPage, useSavedQueryPage, useWorkspaceMutations } from '../../../lib/queries'
+import { usePagedBrowserView } from '../../../lib/usePagedBrowserView'
 import { ResourceTable } from '../ResourceTable'
 import { ArticleFilterEditor } from '../../articles/ArticleFilterEditor'
 import { describeArticleQuery } from '../../articles/articleQueryPresentation'
@@ -18,7 +18,7 @@ import './SavedQueriesPage.css'
 const pageSize = 25
 
 export function SavedQueriesPage({ messages, locale }: { readonly messages: MessageCatalog; readonly locale: Locale }) {
-  const [pageIndex, setPageIndex] = useState(0)
+  const [pageIndex, setPageIndex] = usePagedBrowserView()
   const [selected, setSelected] = useState<readonly string[]>([])
   const [name, setName] = useState('')
   const [initialQuery] = useState<ArticleQuery>(() => stripSorting(consumeArticleQueryHandoff() ?? {}))
@@ -27,6 +27,7 @@ export function SavedQueriesPage({ messages, locale }: { readonly messages: Mess
   const [notice, setNotice] = useState<string>()
   const [queryPendingDeletion, setQueryPendingDeletion] = useState<string>()
   const [deleteConfirmation, setDeleteConfirmation] = useState('')
+  const deleteTriggerRef = useRef<HTMLElement | null>(null)
   const query = useSavedQueryPage({ page: pageIndex + 1, pageSize })
   const accountSelectors = useAccountSelectorPage({ page: 1, pageSize: 100 })
   const albumSelectors = useAlbumSelectorPage({ page: 1, pageSize: 100 })
@@ -80,18 +81,19 @@ export function SavedQueriesPage({ messages, locale }: { readonly messages: Mess
   }
   const remove = () => {
     if (!selectedQuery) return setNotice(actions.selectOne)
+    deleteTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setDeleteConfirmation('')
     setQueryPendingDeletion(selectedQuery.name)
   }
 
   return <PageStack as="div">
-    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.savedQueries} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
+    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.savedQueries} selectorCopy={messages.selectors} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
     <section className="saved-query-editor" aria-labelledby="saved-query-editor-title">
-      <div><h2 id="saved-query-editor-title">{copy.savedQuery.visualEditor}</h2><p>{copy.savedQuery.visualDescription}</p></div>
+      <SectionHeader title={copy.savedQuery.visualEditor} titleId="saved-query-editor-title" description={copy.savedQuery.visualDescription} />
       <TextInput label={actions.name} value={name} onChange={setName} isRequired />
       <ArticleFilterEditor locale={locale} messages={messages} value={visualQuery} onChange={setVisualQuery} idPrefix="saved-query" />
       <p className="saved-query-summary"><strong>{copy.savedQuery.savedSummary}</strong><span>{describeArticleQuery(visualQuery, locale, messages, articleQueryNames)}</span></p>
-      <div className="action-button-group"><Button label={actions.create} variant="primary" isLoading={mutations.saveSavedQuery.isPending} onClick={save} /><Button label={actions.edit} variant="secondary" isDisabled={!selectedQuery} onClick={loadSelectedQuery} /><Button label={actions.remove} variant="secondary" isLoading={mutations.deleteSavedQuery.isPending} isDisabled={!selectedQuery} onClick={remove} /></div>
+      <ActionGroup align="start" gap="cluster" stackAt="compact"><Button label={actions.create} variant="primary" isLoading={mutations.saveSavedQuery.isPending} onClick={save} /><Button label={actions.edit} variant="secondary" isDisabled={!selectedQuery} onClick={loadSelectedQuery} /><Button label={actions.remove} variant="secondary" isLoading={mutations.deleteSavedQuery.isPending} isDisabled={!selectedQuery} onClick={remove} /></ActionGroup>
       <Collapsible trigger={copy.savedQuery.technicalMode} defaultIsOpen={false}>
         <div className="saved-query-technical">
           <p>{copy.savedQuery.technicalDescription}</p>
@@ -101,33 +103,8 @@ export function SavedQueriesPage({ messages, locale }: { readonly messages: Mess
       </Collapsible>
       {notice ? <p role="status">{notice}</p> : null}
     </section>
-    {queryPendingDeletion ? <TypedConfirmationDialog isOpen onOpenChange={(isOpen) => { if (!isOpen) { setQueryPendingDeletion(undefined); setDeleteConfirmation('') } }} title={actions.deleteTitle} description={actions.deleteConfirm(queryPendingDeletion)} expected={actions.deleteConfirmation(queryPendingDeletion)} inputLabel={actions.deleteConfirmationLabel} inputHint={actions.deleteConfirmationHint} actionLabel={actions.confirmDelete} cancelLabel={actions.cancelDelete} confirmation={deleteConfirmation} onConfirmationChange={setDeleteConfirmation} isActionLoading={mutations.deleteSavedQuery.isPending} onAction={() => mutations.deleteSavedQuery.mutate({ name: queryPendingDeletion, confirmation: deleteConfirmation }, { onSuccess: () => { setSelected([]); setNotice(actions.deleted(queryPendingDeletion)); setQueryPendingDeletion(undefined); setDeleteConfirmation('') }, onError: () => setNotice(actions.actionFailed) })} /> : null}
+    {queryPendingDeletion ? <TypedConfirmationDialog isOpen triggerRef={deleteTriggerRef} onOpenChange={(isOpen) => { if (!isOpen) { setQueryPendingDeletion(undefined); setDeleteConfirmation('') } }} title={actions.deleteTitle} closeLabel={messages.a11y.closeDialog} description={actions.deleteConfirm(queryPendingDeletion)} expected={actions.deleteConfirmation(queryPendingDeletion)} inputLabel={actions.deleteConfirmationLabel} inputHint={actions.deleteConfirmationHint} actionLabel={actions.confirmDelete} cancelLabel={actions.cancelDelete} confirmation={deleteConfirmation} onConfirmationChange={setDeleteConfirmation} isActionLoading={mutations.deleteSavedQuery.isPending} onAction={() => mutations.deleteSavedQuery.mutate({ name: queryPendingDeletion, confirmation: deleteConfirmation }, { onSuccess: () => { setSelected([]); setNotice(actions.deleted(queryPendingDeletion)); setQueryPendingDeletion(undefined); setDeleteConfirmation('') }, onError: () => setNotice(actions.actionFailed) })} /> : null}
   </PageStack>
-}
-
-function TypedConfirmationDialog({ isOpen, onOpenChange, title, description, expected, inputLabel, inputHint, actionLabel, cancelLabel, confirmation, onConfirmationChange, isActionLoading, onAction }: {
-  readonly isOpen: boolean
-  readonly onOpenChange: (isOpen: boolean) => void
-  readonly title: string
-  readonly description: string
-  readonly expected: string
-  readonly inputLabel: string
-  readonly inputHint: string
-  readonly actionLabel: string
-  readonly cancelLabel: string
-  readonly confirmation: string
-  readonly onConfirmationChange: (value: string) => void
-  readonly isActionLoading: boolean
-  readonly onAction: () => void
-}) {
-  return <Dialog isOpen={isOpen} onOpenChange={onOpenChange} purpose="form" role="alertdialog" aria-label={title}>
-    <DialogHeader title={title} subtitle={description} onOpenChange={onOpenChange} />
-    <form className="typed-confirmation-dialog" onSubmit={(event) => { event.preventDefault(); if (confirmation === expected) onAction() }}>
-      <div className="confirmation-proof"><strong>{inputLabel}</strong><code>{expected}</code><p>{inputHint}</p></div>
-      <TextInput label={inputLabel} value={confirmation} onChange={onConfirmationChange} isRequired hasAutoFocus />
-      <div className="action-button-group"><Button label={actionLabel} variant="destructive" type="submit" isLoading={isActionLoading} isDisabled={confirmation !== expected} /><Button label={cancelLabel} variant="secondary" isDisabled={isActionLoading} onClick={() => onOpenChange(false)} /></div>
-    </form>
-  </Dialog>
 }
 
 function stripSorting(query: ArticleQuery): ArticleQuery {

@@ -1,14 +1,15 @@
-import { Banner } from '@astryxdesign/core/Banner'
-import { Button } from '@astryxdesign/core/Button'
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { FileInput } from '@astryxdesign/core/FileInput'
-import { Link } from '@astryxdesign/core/Link'
-import { NumberInput } from '@astryxdesign/core/NumberInput'
-import { Selector } from '@astryxdesign/core/Selector'
-import { Section } from '@astryxdesign/core/Section'
-import { TextInput } from '@astryxdesign/core/TextInput'
+import { Banner } from '@/components/controls/Banner'
+import { Button } from '@/components/controls/Button'
+import { CheckboxInput } from '@/components/controls/CheckboxInput'
+import { FileInput } from '@/components/controls/FileInput'
+import { Link } from '@/components/controls/Link'
+import { NumberInput } from '@/components/controls/NumberInput'
+import { Selector } from '@/components/controls/Selector'
+import { Section } from '@/components/controls/Section'
+import { TextInput } from '@/components/controls/TextInput'
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { PageHeader, PageStack, Status, TechnicalDetails } from '../../components/presentation'
+import type { ColumnDef } from '@tanstack/react-table'
+import { ActionGroup, FieldHint, FormGrid, FormGridFullSpan, MobileResourceRow, PageHeader, PageStack, SectionHeader, StaticResponsiveDataTable, Status, TechnicalDetails } from '../../components/presentation'
 import { isLocale, messages as localeMessages, persistLocale, type Locale, type MessageCatalog } from '../../i18n'
 import { formatBytes, formatCount, formatDateTime, formatHash, formatStatus } from '../../lib/presentation'
 import { getBackupArtifactDownloadURL, getDiagnosticBundleDownloadURL, getProxyDisclosure, type BackupReceipt, type CredentialImportInput, type CredentialValidation, type DiagnosticBundleReceipt, type GarbageCollectionPlan, type Preferences, type ProxyInput, type ProxyRequestClass, type ProxyTrust, type RestoreCompletion, type RestoreConflictPolicy, type RestorePreparation } from '../../lib/api'
@@ -30,7 +31,7 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
   const integrity = useIntegrity()
   const diagnostics = useDiagnostics()
   const mutations = useWorkspaceMutations()
-  const [notice, setNotice] = useState<string>()
+  const [notice, setNotice] = useState<{ readonly kind: 'success' | 'error'; readonly message: string }>()
   const [backup, setBackup] = useState<BackupReceipt>()
   const [backupID, setBackupID] = useState('')
   const [backupDownloadURL, setBackupDownloadURL] = useState<string>()
@@ -47,16 +48,17 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
     void integrity.refetch()
     void diagnostics.refetch()
   }
-  const failure = (reason: unknown) => setNotice(reason instanceof Error ? reason.message : copy.actionFailed)
+  const failure = (reason: unknown) => setNotice({ kind: 'error', message: reason instanceof Error ? reason.message : copy.actionFailed })
+  const notifySuccess = (message: string) => setNotice({ kind: 'success', message })
   const savePreferences = async (value: Preferences) => {
     try {
       const saved = await mutations.patchPreferences.mutateAsync({ download: value.download, export: value.export, display: value.display, proxy: value.proxy })
       const language = isLocale(saved.display?.language) ? saved.display.language : value.display?.language
       if (isLocale(language)) {
         persistLocale(language)
-        setNotice(localeMessages[language].settings.preferences.saved)
+        notifySuccess(localeMessages[language].settings.preferences.saved)
       } else {
-        setNotice(copy.preferences.saved)
+        notifySuccess(copy.preferences.saved)
       }
       return saved
     } catch (reason) {
@@ -69,7 +71,7 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
     <PageStack className="settings-page" aria-labelledby="settings-title">
       <PageHeader eyebrow={messages.navigation.operations} title={copy.title} titleId="settings-title" description={copy.description} />
       {error ? <Banner status="error" title={copy.unavailable} endContent={<Button label={copy.retry} variant="secondary" onClick={refreshing} />} /> : null}
-      {notice ? <Banner status="success" title={notice} isDismissable onDismiss={() => setNotice(undefined)} /> : null}
+      {notice ? <Banner status={notice.kind} title={notice.message} isDismissable onDismiss={() => setNotice(undefined)} /> : null}
       <PreferencesDraftProvider value={preferences.data} pending={mutations.patchPreferences.isPending} onSave={savePreferences}>
       <div className="settings-layout">
         <SettingsNavigation messages={messages} />
@@ -84,17 +86,19 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
             <CredentialsPanel locale={locale} messages={messages} data={credentials.data} loading={credentials.isLoading} pending={mutations.importCredential.isPending || mutations.uploadCredentialFile.isPending || mutations.removeCredential.isPending} validationPending={mutations.validateCredential.isPending} onValidate={async (input) => {
               try {
                 const result = await mutations.validateCredential.mutateAsync(input)
-                setNotice(result.valid ? copy.credentials.validationPassed : copy.credentials.validationFailed)
+                setNotice(result.valid
+                  ? { kind: 'success', message: copy.credentials.validationPassed }
+                  : { kind: 'error', message: copy.credentials.validationFailed })
                 return result
               } catch (reason) {
                 failure(reason)
                 throw reason
               }
-            }} onImport={(input) => mutations.importCredential.mutate(input, { onSuccess: () => setNotice(copy.credentials.imported), onError: failure })} onUpload={(file) => mutations.uploadCredentialFile.mutate(file, { onSuccess: () => setNotice(copy.credentials.fileImported), onError: failure })} onRemove={(id, removalConfirmation) => mutations.removeCredential.mutate({ id, confirmation: removalConfirmation }, { onSuccess: () => setNotice(copy.credentials.removed), onError: failure })} />
+            }} onImport={(input) => mutations.importCredential.mutate(input, { onSuccess: () => notifySuccess(copy.credentials.imported), onError: failure })} onUpload={(file) => mutations.uploadCredentialFile.mutate(file, { onSuccess: () => notifySuccess(copy.credentials.fileImported), onError: failure })} onRemove={(id, removalConfirmation) => mutations.removeCredential.mutate({ id, confirmation: removalConfirmation }, { onSuccess: () => notifySuccess(copy.credentials.removed), onError: failure })} />
           </SettingsSection>
           <SettingsSection id="settings-network" title={copy.navigation.network} description={copy.proxies.description}>
             <NetworkPreferencesPanel locale={locale} messages={messages} value={preferences.data} loading={preferences.isLoading} />
-            <ProxiesPanel locale={locale} messages={messages} data={proxies.data} loading={proxies.isLoading} pending={mutations.addProxy.isPending || mutations.removeProxy.isPending} onAdd={(input) => mutations.addProxy.mutate(input, { onSuccess: () => setNotice(copy.proxies.added), onError: failure })} onRemove={(id, removalConfirmation) => mutations.removeProxy.mutate({ id, confirmation: removalConfirmation }, { onSuccess: () => setNotice(copy.proxies.removed), onError: failure })} onToggle={(id, enabled) => mutations.setProxyEnabled.mutate({ id, enabled }, { onSuccess: () => setNotice(enabled ? copy.proxies.enabledNotice : copy.proxies.disabledNotice), onError: failure })} onTest={(id) => mutations.testProxy.mutate(id, { onSuccess: () => setNotice(copy.proxies.tested), onError: failure })} probe={mutations.testProxy.data} />
+            <ProxiesPanel locale={locale} messages={messages} data={proxies.data} loading={proxies.isLoading} pending={mutations.addProxy.isPending || mutations.removeProxy.isPending} onAdd={(input) => mutations.addProxy.mutate(input, { onSuccess: () => notifySuccess(copy.proxies.added), onError: failure })} onRemove={(id, removalConfirmation) => mutations.removeProxy.mutate({ id, confirmation: removalConfirmation }, { onSuccess: () => notifySuccess(copy.proxies.removed), onError: failure })} onToggle={(id, enabled) => mutations.setProxyEnabled.mutate({ id, enabled }, { onSuccess: () => notifySuccess(enabled ? copy.proxies.enabledNotice : copy.proxies.disabledNotice), onError: failure })} onTest={(id) => mutations.testProxy.mutate(id, { onSuccess: () => notifySuccess(copy.proxies.tested), onError: failure })} probe={mutations.testProxy.data} />
           </SettingsSection>
           <SettingsSection id="settings-storage" title={copy.navigation.storage} description={copy.storage.description}>
             <StorageMaintenancePanel locale={locale} messages={messages} backup={backup} backupID={backupID} backupDownloadURL={backupDownloadURL} plan={plan} confirmation={confirmation} mutations={mutations} integrity={integrity.data} integrityLoading={integrity.isLoading} onBackupIDChange={(next) => { setBackupID(next); setBackupDownloadURL(undefined) }} onCreateBackup={() => mutations.createBackup.mutate(undefined, {
@@ -102,19 +106,19 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
                 setBackup(result)
                 setBackupID(result.id)
                 setBackupDownloadURL(getBackupArtifactDownloadURL(result.id))
-                setNotice(copy.backups.created)
+                notifySuccess(copy.backups.created)
               },
               onError: failure
             })} onVerifyBackup={() => mutations.verifyBackup.mutate(backupID, { onError: failure })} onPlanGarbageCollection={() => mutations.planGarbageCollection.mutate(undefined, {
               onSuccess: (next) => {
                 setPlan(next)
                 setConfirmation('')
-                setNotice(copy.gc.planned)
+                notifySuccess(copy.gc.planned)
               },
               onError: failure
             })} onConfirmationChange={setConfirmation} onApplyGarbageCollection={() => mutations.applyGarbageCollection.mutate({ planId: plan?.id ?? '', confirmation }, {
               onSuccess: () => {
-                setNotice(copy.gc.result)
+                notifySuccess(copy.gc.result)
                 setPlan(undefined)
                 setConfirmation('')
               },
@@ -131,7 +135,7 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
               mutations.createDiagnosticBundle.mutate(undefined, {
                 onSuccess: (receipt) => {
                   setDiagnosticBundle(receipt)
-                  setNotice(copy.diagnostics.bundleReady)
+                  notifySuccess(copy.diagnostics.bundleReady)
                 },
                 onError: (reason) => {
                   const message = reason instanceof Error ? reason.message : copy.actionFailed
@@ -179,7 +183,7 @@ function SettingsNavigation({ messages }: { readonly messages: MessageCatalog })
       <ul>
         {sections.map((section) => (
           <li key={section.id}>
-            <Link href={`#${section.id}`} isStandalone className="settings-secondary-nav-link" aria-current={activeID === section.id ? 'page' : undefined} onClick={() => setActiveID(section.id)}>{section.label}</Link>
+            <Link href={`#${section.id}`} isStandalone className="settings-secondary-nav-link" aria-current={activeID === section.id ? 'location' : undefined} onClick={() => setActiveID(section.id)}>{section.label}</Link>
           </li>
         ))}
       </ul>
@@ -191,10 +195,7 @@ function SettingsNavigation({ messages }: { readonly messages: MessageCatalog })
 function SettingsSection({ id, title, description, children }: { readonly id: SettingsSectionID; readonly title: string; readonly description: string; readonly children: ReactNode }) {
   return (
     <Section id={id} className="settings-section" variant="transparent" dividers={['bottom']} padding={0} aria-labelledby={`${id}-title`}>
-      <header className="settings-section-header">
-        <h2 id={`${id}-title`}>{title}</h2>
-        <p>{description}</p>
-      </header>
+      <SectionHeader className="settings-section-header" title={title} titleId={`${id}-title`} description={description} />
       <div className="settings-section-body">{children}</div>
     </Section>
   )
@@ -297,7 +298,7 @@ function DownloadExportDefaultsEditor({ copy }: { readonly copy: MessageCatalog[
         <h3 id="export-defaults-title">{copy.exportDefaults}</h3>
         <TextInput label={copy.namingTemplate} value={draft.export.namingTemplate} onChange={(next) => preferences.update({ export: { ...draft.export, namingTemplate: next } })} />
         <NumberInput label={copy.maximumNameBytes} value={draft.export.maximumNameBytes} onChange={(next) => preferences.update({ export: { ...draft.export, maximumNameBytes: next ?? 1 } })} min={1} step={1} isIntegerOnly />
-        <Selector label={copy.collisionPolicy} options={[{ value: 'fail', label: copy.collisionFail }, { value: 'skip', label: copy.collisionSkip }, { value: 'replace', label: copy.collisionReplace }, { value: 'suffix', label: copy.collisionSuffix }]} value={draft.export.collisionPolicy} onChange={(next) => preferences.update({ export: { ...draft.export, collisionPolicy: next } })} />
+        <Selector label={copy.collisionPolicy} options={[{ value: 'fail', label: copy.collisionFail }, { value: 'skip', label: copy.collisionSkip }, { value: 'replace', label: copy.collisionReplace }, { value: 'suffix', label: copy.collisionSuffix }]} value={draft.export.collisionPolicy} onChange={(next) => preferences.update({ export: { ...draft.export, collisionPolicy: next ?? 'fail' } })} />
         <CheckboxInput label={copy.excelIncludeContent} value={draft.export.excelIncludeContent} onChange={(next) => preferences.update({ export: { ...draft.export, excelIncludeContent: next } })} />
         <CheckboxInput label={copy.jsonIncludeContent} value={draft.export.jsonIncludeContent} onChange={(next) => preferences.update({ export: { ...draft.export, jsonIncludeContent: next } })} />
         <CheckboxInput label={copy.jsonIncludeComments} value={draft.export.jsonIncludeComments} onChange={(next) => preferences.update({ export: { ...draft.export, jsonIncludeComments: next } })} />
@@ -363,6 +364,13 @@ function CredentialsPanel({ locale, messages, data, loading, pending, validation
     onRemove(removingID, removalConfirmation)
     cancelRemoval()
   }
+  const columns = useMemo<ColumnDef<CredentialDisplayMetadata>[]>(() => [
+    { id: 'account', header: copy.columns.account, enableHiding: false, meta: { role: 'primaryText' }, cell: ({ row }) => <><span>{credentialAccountLabel(row.original, copy)}</span><TechnicalDetails label={copy.technicalDetails} items={[{ label: copy.accountId, value: row.original.accountId, copyLabel: copy.copyAccountId, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }]} /></> },
+    { accessorKey: 'kind', header: copy.columns.kind, meta: { role: 'description' }, cell: ({ getValue }) => humanizeIdentifier(getValue<string>(), locale) },
+    { accessorKey: 'status', header: copy.columns.status, meta: { role: 'status' }, cell: ({ getValue }) => <Status value={getValue<string>()} locale={locale} /> },
+    { accessorKey: 'updatedAt', header: copy.columns.updated, meta: { role: 'dateTime' }, cell: ({ getValue }) => formatDateTime(getValue<string>(), locale) },
+    { id: 'actions', header: copy.remove, enableHiding: false, meta: { role: 'actions' }, cell: ({ row }) => <Button label={copy.remove} variant="secondary" size="sm" isDisabled={pending || validationPending} onClick={() => { setRemovingID(row.original.id); setRemovalConfirmation('') }} /> }
+  ], [copy, locale, messages.a11y.copied, messages.a11y.copyUnavailable, pending, validationPending])
 
   return (
     <div className="settings-stack">
@@ -377,15 +385,23 @@ function CredentialsPanel({ locale, messages, data, loading, pending, validation
           <TextInput label={copy.wapSid2} value={wapSid2} htmlName="credential-wap-sid2" onChange={changed(setWapSID2)} type="password" />
           <TextInput label={copy.appMsgToken} value={appMsgToken} htmlName="credential-appmsg-token" onChange={changed(setAppMsgToken)} type="password" />
           <TextInput label={copy.cookie} value={cookie} htmlName="credential-cookie" onChange={changed(setCookie)} type="password" isOptional />
-          <p className="settings-hint">{copy.validationHint}</p>
-          <div className="settings-action-row"><Button label={copy.validate} variant="secondary" isLoading={validationPending} isDisabled={pending || validationPending} onClick={validate} /><Button label={copy.import} variant="primary" isLoading={pending} isDisabled={!validated || validationPending} onClick={submit} /></div>
+          <FieldHint>{copy.validationHint}</FieldHint>
+          <ActionGroup align="start"><Button label={copy.validate} variant="secondary" isLoading={validationPending} isDisabled={pending || validationPending} onClick={validate} /><Button label={copy.import} variant="primary" isLoading={pending} isDisabled={!validated || validationPending} onClick={submit} /></ActionGroup>
           <FileInput label={copy.file} value={null} onChange={(file) => { void upload(file) }} accept="application/json,.json" description={copy.fileHint} isDisabled={pending || validationPending} isLoading={pending || validationPending} />
         </div>
       </div>
       <div className="settings-field-group" aria-labelledby="credential-list-title">
         <h3 id="credential-list-title">{copy.listTitle}</h3>
         {loading ? <LoadingSettings messages={messages} /> : null}
-        {data?.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>{copy.columns.account}</th><th>{copy.columns.kind}</th><th>{copy.columns.status}</th><th>{copy.columns.updated}</th><th><span className="sr-only">{copy.remove}</span></th></tr></thead><tbody>{data.map((item) => <tr key={item.id}><td><span>{credentialAccountLabel(item, copy)}</span><TechnicalDetails label={copy.technicalDetails} items={[{ label: copy.accountId, value: item.accountId, copyLabel: copy.copyAccountId }]} /></td><td>{humanizeIdentifier(item.kind, locale)}</td><td><Status value={item.status} locale={locale} /></td><td>{formatDateTime(item.updatedAt, locale)}</td><td><Button label={copy.remove} variant="secondary" size="sm" isDisabled={pending || validationPending} onClick={() => { setRemovingID(item.id); setRemovalConfirmation('') }} /></td></tr>)}</tbody></table></div> : !loading ? <p className="settings-empty">{copy.empty}</p> : null}
+        {data?.length ? <StaticResponsiveDataTable
+          data={data}
+          columns={columns}
+          ariaLabel={copy.listTitle}
+          visibleColumnsLabel={copy.visibleColumns}
+          selectorCopy={messages.selectors}
+          emptyContent={copy.empty}
+          renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow key={row.original.id} title={<>{credentialAccountLabel(row.original, copy)}<TechnicalDetails label={copy.technicalDetails} items={[{ label: copy.accountId, value: row.original.accountId, copyLabel: copy.copyAccountId, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }]} /></>} fullTitle={credentialAccountLabel(row.original, copy)} status={<Status value={row.original.status} locale={locale} />} metadata={[{ id: 'kind', label: copy.columns.kind, value: humanizeIdentifier(row.original.kind, locale) }, { id: 'updated', label: copy.columns.updated, value: formatDateTime(row.original.updatedAt, locale), fullValue: row.original.updatedAt }]} actions={<Button label={copy.remove} variant="secondary" size="sm" isDisabled={pending || validationPending} onClick={() => { setRemovingID(row.original.id); setRemovalConfirmation('') }} />} />)}
+        /> : !loading ? <p className="settings-empty">{copy.empty}</p> : null}
         {removingID ? <RemovalConfirmation copy={copy} expected={copy.removeConfirmation(removingID)} value={removalConfirmation} pending={pending} onChange={setRemovalConfirmation} onCancel={cancelRemoval} onRemove={remove} /> : null}
       </div>
     </div>
@@ -438,28 +454,45 @@ function ProxiesPanel({ locale, messages, data, loading, pending, onAdd, onRemov
     onRemove(removingID, removalConfirmation)
     cancelRemoval()
   }
+  const columns = useMemo<ColumnDef<ProxyDisplayRoute>[]>(() => [
+    { accessorKey: 'name', header: copy.columns.name, enableHiding: false, meta: { role: 'primaryText' } },
+    { accessorKey: 'endpoint', header: copy.columns.endpoint, enableHiding: false, meta: { role: 'description' }, cell: ({ getValue }) => <code className="settings-code" translate="no">{getValue<string>()}</code> },
+    { accessorKey: 'trust', header: copy.columns.trust, enableHiding: false, meta: { role: 'description' }, cell: ({ getValue }) => <div className="settings-trust-cell"><span>{proxyTrustLabel(getValue<ProxyTrust>(), copy)}</span><small>{proxyTrustSummary(getValue<ProxyTrust>(), copy)}</small></div> },
+    { accessorKey: 'priority', header: copy.columns.priority, meta: { role: 'numeric' }, cell: ({ getValue }) => formatCount(getValue<number>(), locale) },
+    { id: 'health', header: copy.columns.health, meta: { role: 'status' }, cell: ({ row }) => <Status value={row.original.health.state} locale={locale} /> },
+    { id: 'state', header: copy.columns.state, meta: { role: 'status' }, cell: ({ row }) => <Status value={row.original.enabled ? 'enabled' : 'disabled'} locale={locale} /> },
+    { id: 'actions', header: copy.columns.actions, enableHiding: false, meta: { role: 'actions' }, cell: ({ row }) => <><ActionGroup align="start" gap="cluster" nowrap><Button label={row.original.enabled ? copy.disable : copy.enable} variant="secondary" size="sm" onClick={() => onToggle(row.original.id, !row.original.enabled)} /><Button label={copy.test} variant="secondary" size="sm" onClick={() => onTest(row.original.id)} /><Button label={copy.remove} variant="secondary" size="sm" isDisabled={pending} onClick={() => { setRemovingID(row.original.id); setRemovalConfirmation('') }} /></ActionGroup>{probe?.route.id === row.original.id ? <small className="settings-probe-result">{copy.probe}: <Status value={probe.responseValid ? 'valid' : 'invalid'} locale={locale} />{probe.errorClass ? ` · ${humanizeIdentifier(probe.errorClass, locale)}` : ''}</small> : null}</> }
+  ], [copy, locale, onTest, onToggle, pending, probe])
 
   return (
     <div className="settings-stack settings-proxy-stack">
       <div className="settings-field-group" aria-labelledby="proxy-add-title">
         <h3 id="proxy-add-title">{copy.addTitle}</h3>
-        <div className="settings-form settings-proxy-form">
+        <FormGrid columns={2} className="settings-proxy-form">
           <TextInput label={copy.name} value={name} htmlName="proxy-name" onChange={(next) => { invalidateDisclosure(); setName(next) }} />
           <TextInput label={copy.endpoint} value={endpoint} htmlName="proxy-endpoint" onChange={(next) => { invalidateDisclosure(); setEndpoint(next) }} placeholder={copy.endpointPlaceholder} />
           <TextInput label={copy.authorization} value={authorization} htmlName="proxy-authorization" onChange={setAuthorization} type="password" isOptional />
           <Selector label={copy.trust} options={[{ value: 'public-only', label: copy.publicOnly }, { value: 'credential-trusted', label: copy.credentialTrusted }]} value={trust} htmlName="proxy-trust" onChange={(next) => { invalidateDisclosure(); setTrust(next as ProxyTrust) }} />
           <NumberInput label={copy.priority} value={Number(priority) || 0} htmlName="proxy-priority" onChange={(next) => { invalidateDisclosure(); setPriority(String(next ?? 0)) }} step={1} isIntegerOnly />
-          <fieldset><legend>{copy.classes}</legend>{proxyClasses.map((item) => <CheckboxInput key={item} label={humanizeIdentifier(item, locale)} value={classes.includes(item)} onChange={(checked) => { invalidateDisclosure(); setClasses(checked ? [...classes, item] : classes.filter((value) => value !== item)) }} />)}</fieldset>
-          <ProxyTrustExplanation trust={trust} copy={copy} />
-          {trust === 'credential-trusted' ? <Button label={copy.disclosure} variant="secondary" onClick={disclose} /> : null}
-          {disclosure?.required ? <div className="confirmation-proof"><span>{copy.disclosureRequired}{disclosure.secrets?.map((secret) => humanizeIdentifier(secret, locale)).join(', ')}</span><code translate="no">{disclosure.confirmation}</code><p>{copy.confirmationHint}</p><TextInput label={copy.confirmation} value={confirm} htmlName="proxy-confirmation" onChange={setConfirm} /></div> : null}
-          <div className="settings-action-row"><Button label={copy.add} variant="primary" isLoading={pending} isDisabled={!name || !endpoint || (trust === 'credential-trusted' && (!disclosure?.confirmation || confirm !== disclosure.confirmation))} onClick={add} /></div>
-        </div>
+          <FormGridFullSpan><fieldset><legend>{copy.classes}</legend>{proxyClasses.map((item) => <CheckboxInput key={item} label={humanizeIdentifier(item, locale)} value={classes.includes(item)} onChange={(checked) => { invalidateDisclosure(); setClasses(checked ? [...classes, item] : classes.filter((value) => value !== item)) }} />)}</fieldset></FormGridFullSpan>
+          <FormGridFullSpan><ProxyTrustExplanation trust={trust} copy={copy} /></FormGridFullSpan>
+          {trust === 'credential-trusted' ? <FormGridFullSpan><Button label={copy.disclosure} variant="secondary" onClick={disclose} /></FormGridFullSpan> : null}
+          {disclosure?.required ? <FormGridFullSpan><div className="confirmation-proof"><span>{copy.disclosureRequired}{disclosure.secrets?.map((secret) => humanizeIdentifier(secret, locale)).join(', ')}</span><code translate="no">{disclosure.confirmation}</code><p>{copy.confirmationHint}</p><TextInput label={copy.confirmation} value={confirm} htmlName="proxy-confirmation" onChange={setConfirm} /></div></FormGridFullSpan> : null}
+          <FormGridFullSpan><ActionGroup align="start"><Button label={copy.add} variant="primary" isLoading={pending} isDisabled={!name || !endpoint || (trust === 'credential-trusted' && (!disclosure?.confirmation || confirm !== disclosure.confirmation))} onClick={add} /></ActionGroup></FormGridFullSpan>
+        </FormGrid>
       </div>
       <div className="settings-field-group" aria-labelledby="proxy-list-title">
         <h3 id="proxy-list-title">{copy.listTitle}</h3>
         {loading ? <LoadingSettings messages={messages} /> : null}
-        {data?.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>{copy.columns.name}</th><th>{copy.columns.endpoint}</th><th>{copy.columns.trust}</th><th>{copy.columns.priority}</th><th>{copy.columns.health}</th><th>{copy.columns.state}</th><th>{copy.columns.actions}</th></tr></thead><tbody>{data.map((route) => <tr key={route.id}><td>{route.name}</td><td><code className="settings-code" translate="no">{route.endpoint}</code></td><td><div className="settings-trust-cell"><span>{proxyTrustLabel(route.trust, copy)}</span><small>{proxyTrustSummary(route.trust, copy)}</small></div></td><td>{formatCount(route.priority, locale)}</td><td><Status value={route.health.state} locale={locale} /></td><td><Status value={route.enabled ? 'enabled' : 'disabled'} locale={locale} /></td><td><div className="action-button-group"><Button label={route.enabled ? copy.disable : copy.enable} variant="secondary" size="sm" onClick={() => onToggle(route.id, !route.enabled)} /><Button label={copy.test} variant="secondary" size="sm" onClick={() => onTest(route.id)} /><Button label={copy.remove} variant="secondary" size="sm" isDisabled={pending} onClick={() => { setRemovingID(route.id); setRemovalConfirmation('') }} /></div>{probe?.route.id === route.id ? <small className="settings-probe-result">{copy.probe}: <Status value={probe.responseValid ? 'valid' : 'invalid'} locale={locale} />{probe.errorClass ? ` · ${humanizeIdentifier(probe.errorClass, locale)}` : ''}</small> : null}</td></tr>)}</tbody></table></div> : !loading ? <p className="settings-empty">{copy.empty}</p> : null}
+        {data?.length ? <StaticResponsiveDataTable
+          data={data}
+          columns={columns}
+          ariaLabel={copy.listTitle}
+          visibleColumnsLabel={copy.visibleColumns}
+          selectorCopy={messages.selectors}
+          emptyContent={copy.empty}
+          renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow key={row.original.id} title={row.original.name} fullTitle={row.original.name} description={<code className="settings-code" translate="no">{row.original.endpoint}</code>} status={<Status value={row.original.health.state} locale={locale} />} metadata={[{ id: 'trust', label: copy.columns.trust, value: <div className="settings-trust-cell"><span>{proxyTrustLabel(row.original.trust, copy)}</span><small>{proxyTrustSummary(row.original.trust, copy)}</small></div> }, { id: 'priority', label: copy.columns.priority, value: formatCount(row.original.priority, locale) }, { id: 'state', label: copy.columns.state, value: <Status value={row.original.enabled ? 'enabled' : 'disabled'} locale={locale} /> }]} actions={<><ActionGroup align="start" gap="cluster" nowrap><Button label={row.original.enabled ? copy.disable : copy.enable} variant="secondary" size="sm" onClick={() => onToggle(row.original.id, !row.original.enabled)} /><Button label={copy.test} variant="secondary" size="sm" onClick={() => onTest(row.original.id)} /><Button label={copy.remove} variant="secondary" size="sm" isDisabled={pending} onClick={() => { setRemovingID(row.original.id); setRemovalConfirmation('') }} /></ActionGroup>{probe?.route.id === row.original.id ? <small className="settings-probe-result">{copy.probe}: <Status value={probe.responseValid ? 'valid' : 'invalid'} locale={locale} />{probe.errorClass ? ` · ${humanizeIdentifier(probe.errorClass, locale)}` : ''}</small> : null}</>} />)}
+        /> : !loading ? <p className="settings-empty">{copy.empty}</p> : null}
         {removingID ? <RemovalConfirmation copy={copy} expected={copy.removeConfirmation(removingID)} value={removalConfirmation} pending={pending} onChange={setRemovalConfirmation} onCancel={cancelRemoval} onRemove={remove} /> : null}
       </div>
     </div>
@@ -492,7 +525,7 @@ function proxyTrustSummary(trust: ProxyTrust, copy: MessageCatalog['settings']['
 type RemovalConfirmationCopy = { readonly removeConfirmationLabel: string; readonly removeConfirmationHint: string; readonly confirmRemove: string; readonly cancelRemove: string }
 
 function RemovalConfirmation({ copy, expected, value, pending, onChange, onCancel, onRemove }: { readonly copy: RemovalConfirmationCopy; readonly expected: string; readonly value: string; readonly pending: boolean; readonly onChange: (value: string) => void; readonly onCancel: () => void; readonly onRemove: () => void }) {
-  return <section className="confirmation-proof" aria-label={copy.removeConfirmationLabel}><strong>{copy.removeConfirmationLabel}</strong><code translate="no">{expected}</code><p>{copy.removeConfirmationHint}</p><TextInput label={copy.removeConfirmationLabel} value={value} htmlName="removal-confirmation" onChange={onChange} /><div className="settings-action-row"><Button label={copy.confirmRemove} variant="destructive" isLoading={pending} isDisabled={value !== expected} onClick={onRemove} /><Button label={copy.cancelRemove} variant="secondary" isDisabled={pending} onClick={onCancel} /></div></section>
+  return <section className="confirmation-proof" aria-label={copy.removeConfirmationLabel}><strong>{copy.removeConfirmationLabel}</strong><code translate="no">{expected}</code><p>{copy.removeConfirmationHint}</p><TextInput label={copy.removeConfirmationLabel} value={value} htmlName="removal-confirmation" onChange={onChange} /><ActionGroup align="start"><Button label={copy.confirmRemove} variant="destructive" isLoading={pending} isDisabled={value !== expected} onClick={onRemove} /><Button label={copy.cancelRemove} variant="secondary" isDisabled={pending} onClick={onCancel} /></ActionGroup></section>
 }
 
 function StorageMaintenancePanel({ locale, messages, backup, backupID, backupDownloadURL, plan, confirmation, mutations, integrity, integrityLoading, onBackupIDChange, onCreateBackup, onVerifyBackup, onPlanGarbageCollection, onConfirmationChange, onApplyGarbageCollection, onFailure }: { readonly locale: Locale; readonly messages: MessageCatalog; readonly backup?: BackupReceipt; readonly backupID: string; readonly backupDownloadURL?: string; readonly plan?: GarbageCollectionPlan; readonly confirmation: string; readonly mutations: RestoreMutations; readonly integrity?: { readonly checkedAt: string; readonly issues: readonly { readonly kind: string; readonly message: string; readonly repairable: boolean; readonly recommendation?: string }[] }; readonly integrityLoading: boolean; readonly onBackupIDChange: (value: string) => void; readonly onCreateBackup: () => void; readonly onVerifyBackup: () => void; readonly onPlanGarbageCollection: () => void; readonly onConfirmationChange: (value: string) => void; readonly onApplyGarbageCollection: () => void; readonly onFailure: (reason: unknown) => void }) {
@@ -501,13 +534,13 @@ function StorageMaintenancePanel({ locale, messages, backup, backupID, backupDow
     <div className="settings-stack">
       <div className="settings-field-group" aria-labelledby="backup-title">
         <h3 id="backup-title">{copy.backups.title}</h3>
-        <p className="settings-hint">{copy.backups.description}</p>
+        <FieldHint>{copy.backups.description}</FieldHint>
         <div className="settings-form settings-form-narrow">
-          <div className="settings-action-row"><Button label={copy.backups.create} variant="primary" isLoading={mutations.createBackup.isPending} onClick={onCreateBackup} /></div>
+          <ActionGroup align="start"><Button label={copy.backups.create} variant="primary" isLoading={mutations.createBackup.isPending} onClick={onCreateBackup} /></ActionGroup>
           {backup ? <BackupSummary locale={locale} messages={messages} backup={backup} /> : null}
           {backupID ? <TextInput label={copy.backups.backupId} value={backupID} onChange={onBackupIDChange} /> : null}
           {backupDownloadURL ? <a className="artifact-download" href={backupDownloadURL} onClick={() => undefined}>{copy.backups.download}</a> : null}
-          <div className="settings-action-row"><Button label={copy.backups.verify} variant="secondary" isLoading={mutations.verifyBackup.isPending} isDisabled={!backupID} onClick={onVerifyBackup} /></div>
+          <ActionGroup align="start"><Button label={copy.backups.verify} variant="secondary" isLoading={mutations.verifyBackup.isPending} isDisabled={!backupID} onClick={onVerifyBackup} /></ActionGroup>
           {mutations.verifyBackup.data ? <Status value={mutations.verifyBackup.data.valid ? 'valid' : 'invalid'} locale={locale} label={mutations.verifyBackup.data.valid ? copy.backups.valid : copy.backups.invalid} /> : null}
         </div>
       </div>
@@ -523,7 +556,7 @@ function StorageMaintenancePanel({ locale, messages, backup, backupID, backupDow
 
 function BackupSummary({ locale, messages, backup }: { readonly locale: Locale; readonly messages: MessageCatalog; readonly backup: BackupReceipt }) {
   const copy = messages.settings.backups
-  return <div className="settings-summary"><dl><div><dt>{copy.summaryCreated}</dt><dd>{formatDateTime(backup.createdAt, locale)}</dd></div><div><dt>{copy.summarySize}</dt><dd>{formatBytes(backup.bytes, locale)}</dd></div><div><dt>{copy.summaryObjects}</dt><dd>{formatCount(backup.objects, locale)}</dd></div></dl><TechnicalDetails label={copy.technicalDetails} items={[{ label: copy.checksum, value: backup.sha256, copyLabel: copy.copyChecksum }]} /></div>
+  return <div className="settings-summary"><dl><div><dt>{copy.summaryCreated}</dt><dd>{formatDateTime(backup.createdAt, locale)}</dd></div><div><dt>{copy.summarySize}</dt><dd>{formatBytes(backup.bytes, locale)}</dd></div><div><dt>{copy.summaryObjects}</dt><dd>{formatCount(backup.objects, locale)}</dd></div></dl><TechnicalDetails label={copy.technicalDetails} items={[{ label: copy.checksum, value: backup.sha256, copyLabel: copy.copyChecksum, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }]} /></div>
 }
 
 function RestorePanel({ messages, mutations, onFailure }: { readonly messages: MessageCatalog; readonly mutations: RestoreMutations; readonly onFailure: (reason: unknown) => void }) {
@@ -553,28 +586,55 @@ function RestorePanel({ messages, mutations, onFailure }: { readonly messages: M
     mutations.commitRestore.mutate({ preparationId: preparation.id, confirmation }, { onSuccess: setCompleted, onError: onFailure })
   }
   if (completed) return <div className="confirmation-proof" role="status" aria-live="assertive"><h4>{copy.terminalTitle}</h4><p>{copy.terminalMessage}</p></div>
-  return <section className="settings-danger-action" aria-labelledby="restore-title"><h4 id="restore-title">{copy.restoreTitle}</h4><p>{copy.restoreDescription}</p><Banner status="warning" title={copy.destructiveWarning} /><div className="settings-form"><FileInput label={copy.archive} value={archive ?? null} accept=".wab,.zip,application/octet-stream,application/zip" isDisabled={staging} isLoading={staging} onChange={(file) => { setArchive(file instanceof File ? file : undefined); setPreparation(undefined); setConfirmation('') }} /><Selector label={copy.policy} options={[{ value: 'refuse', label: copy.refuse }, { value: 'rename', label: copy.rename }]} value={policy} isDisabled={staging} onChange={(next) => { setPolicy(next as RestoreConflictPolicy); setPreparation(undefined); setConfirmation('') }} /><div className="settings-action-row"><Button label={staging ? copy.staging : copy.stage} variant="secondary" isLoading={staging} isDisabled={!archive || staging} onClick={stage} /></div>{preparation ? <div className="confirmation-proof"><code>{preparation.confirmation}</code><p>{copy.confirmationHint}</p><TextInput label={copy.confirmation} value={confirmation} onChange={setConfirmation} /><Button label={copy.commit} variant="destructive" isLoading={mutations.commitRestore.isPending} isDisabled={confirmation !== preparation.confirmation} onClick={commit} /></div> : null}</div></section>
+  return <section className="settings-danger-action" aria-labelledby="restore-title"><h4 id="restore-title">{copy.restoreTitle}</h4><p>{copy.restoreDescription}</p><Banner status="warning" title={copy.destructiveWarning} /><div className="settings-form"><FileInput label={copy.archive} value={archive ?? null} accept=".wab,.zip,application/octet-stream,application/zip" isDisabled={staging} isLoading={staging} onChange={(file) => { setArchive(file instanceof File ? file : undefined); setPreparation(undefined); setConfirmation('') }} /><Selector label={copy.policy} options={[{ value: 'refuse', label: copy.refuse }, { value: 'rename', label: copy.rename }]} value={policy} isDisabled={staging} onChange={(next) => { setPolicy(next as RestoreConflictPolicy); setPreparation(undefined); setConfirmation('') }} /><ActionGroup align="start"><Button label={staging ? copy.staging : copy.stage} variant="secondary" isLoading={staging} isDisabled={!archive || staging} onClick={stage} /></ActionGroup>{preparation ? <div className="confirmation-proof"><code translate="no">{preparation.confirmation}</code><p>{copy.confirmationHint}</p><TextInput label={copy.confirmation} value={confirmation} onChange={setConfirmation} /><Button label={copy.commit} variant="destructive" isLoading={mutations.commitRestore.isPending} isDisabled={confirmation !== preparation.confirmation} onClick={commit} /></div> : null}</div></section>
 }
 
 function IntegrityPanel({ locale, messages, loading, report }: { readonly locale: Locale; readonly messages: MessageCatalog; readonly loading: boolean; readonly report?: { readonly checkedAt: string; readonly issues: readonly { readonly kind: string; readonly message: string; readonly repairable: boolean; readonly recommendation?: string }[] } }) {
   const copy = messages.settings.integrity
-  return <section className="settings-field-group" aria-labelledby="integrity-title"><h3 id="integrity-title">{copy.title}</h3><p className="settings-hint">{copy.description}</p>{loading ? <LoadingSettings messages={messages} /> : null}{report ? <><p className="settings-summary-line">{copy.checked}: {formatDateTime(report.checkedAt, locale)} · {formatCount(report.issues.length, locale)} {copy.issues}</p>{report.issues.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>{copy.columns.kind}</th><th>{copy.columns.message}</th><th>{copy.columns.repairable}</th><th>{copy.columns.recommendation}</th></tr></thead><tbody>{report.issues.map((item, index) => <tr key={`${item.kind}-${index}`}><td>{humanizeIdentifier(item.kind, locale)}</td><td>{item.message}</td><td>{item.repairable ? messages.settings.common.yes : messages.settings.common.no}</td><td>{item.recommendation ?? '—'}</td></tr>)}</tbody></table></div> : <p className="settings-empty">{copy.noIssues}</p>}</> : null}</section>
+  const columns = useMemo<ColumnDef<NonNullable<typeof report>['issues'][number]>[]>(() => [
+    { accessorKey: 'kind', header: copy.columns.kind, enableHiding: false, meta: { role: 'primaryText' }, cell: ({ getValue }) => humanizeIdentifier(getValue<string>(), locale) },
+    { accessorKey: 'message', header: copy.columns.message, enableHiding: false, meta: { role: 'description' } },
+    { accessorKey: 'repairable', header: copy.columns.repairable, meta: { role: 'secondaryText' }, cell: ({ getValue }) => getValue<boolean>() ? messages.settings.common.yes : messages.settings.common.no },
+    { accessorKey: 'recommendation', header: copy.columns.recommendation, meta: { role: 'description' }, cell: ({ getValue }) => getValue<string | undefined>() ?? '—' }
+  ], [copy, locale, messages.settings.common.no, messages.settings.common.yes])
+  return <section className="settings-field-group" aria-labelledby="integrity-title"><h3 id="integrity-title">{copy.title}</h3><FieldHint>{copy.description}</FieldHint>{loading ? <LoadingSettings messages={messages} /> : null}{report ? <><p className="settings-summary-line">{copy.checked}: {formatDateTime(report.checkedAt, locale)} · {formatCount(report.issues.length, locale)} {copy.issues}</p>{report.issues.length ? <StaticResponsiveDataTable
+    data={report.issues}
+    columns={columns}
+    ariaLabel={copy.title}
+    visibleColumnsLabel={copy.visibleColumns}
+    selectorCopy={messages.selectors}
+    emptyContent={copy.noIssues}
+    renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow key={`${row.original.kind}-${row.index}`} title={humanizeIdentifier(row.original.kind, locale)} fullTitle={humanizeIdentifier(row.original.kind, locale)} description={row.original.message} metadata={[{ id: 'repairable', label: copy.columns.repairable, value: row.original.repairable ? messages.settings.common.yes : messages.settings.common.no }, { id: 'recommendation', label: copy.columns.recommendation, value: row.original.recommendation ?? '—' }]} />)}
+  /> : <p className="settings-empty">{copy.noIssues}</p>}</> : null}</section>
 }
 
 function GCPlan({ locale, messages, plan, confirmation, onConfirmation, onApply, pending }: { readonly locale: Locale; readonly messages: MessageCatalog; readonly plan: GarbageCollectionPlan; readonly confirmation: string; readonly onConfirmation: (value: string) => void; readonly onApply: () => void; readonly pending: boolean }) {
   const copy = messages.settings.gc
   const items = [[copy.categories.objects, plan.unreferencedObjects], [copy.categories.temporary, plan.temporaryFiles], [copy.categories.debug, plan.expiredDebugCaptures], [copy.categories.logs, plan.completedJobLogs]] as const
-  return <div className="confirmation-proof"><strong>{copy.totals}</strong><span>{copy.generated}: {formatDateTime(plan.generatedAt, locale)}</span><span>{copy.expires}: {plan.expiresAt ? formatDateTime(plan.expiresAt, locale) : '—'}</span><ul>{items.map(([name, value]) => <li key={name}>{name}: {formatQuantity(value.count, value.bytes, locale, copy)}</li>)}</ul><code>{plan.confirmation}</code><TextInput label={copy.confirmation} value={confirmation} onChange={onConfirmation} /><Button label={copy.apply} variant="destructive" isLoading={pending} isDisabled={confirmation !== plan.confirmation} onClick={onApply} /></div>
+  return <div className="confirmation-proof"><strong>{copy.totals}</strong><span>{copy.generated}: {formatDateTime(plan.generatedAt, locale)}</span><span>{copy.expires}: {plan.expiresAt ? formatDateTime(plan.expiresAt, locale) : '—'}</span><ul>{items.map(([name, value]) => <li key={name}>{name}: {formatQuantity(value.count, value.bytes, locale, copy)}</li>)}</ul><code translate="no">{plan.confirmation}</code><TextInput label={copy.confirmation} value={confirmation} onChange={onConfirmation} /><Button label={copy.apply} variant="destructive" isLoading={pending} isDisabled={confirmation !== plan.confirmation} onClick={onApply} /></div>
 }
 
 function DiagnosticsPanel({ locale, messages, loading, report, bundle, bundleError, pending, onCreateBundle }: { readonly locale: Locale; readonly messages: MessageCatalog; readonly loading: boolean; readonly report?: { readonly collectedAt: string; readonly checks: readonly { readonly name: string; readonly status: string; readonly summary?: string }[] }; readonly bundle?: DiagnosticBundleReceipt; readonly bundleError?: string; readonly pending: boolean; readonly onCreateBundle: () => void }) {
   const copy = messages.settings.diagnostics
-  return <div className="settings-stack"><div className="settings-form settings-form-narrow"><div className="settings-action-row"><Button label={pending ? copy.creatingBundle : copy.createBundle} variant="secondary" isLoading={pending} onClick={onCreateBundle} /></div>{bundleError ? <Banner status="error" title={bundleError} /> : null}{bundle ? <DiagnosticBundleSummary locale={locale} messages={messages} bundle={bundle} /> : null}</div>{loading ? <LoadingSettings messages={messages} /> : null}{report ? <><p className="settings-summary-line">{copy.collected}: {formatDateTime(report.collectedAt, locale)}</p>{report.checks.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>{copy.columns.check}</th><th>{copy.columns.status}</th><th>{copy.columns.summary}</th></tr></thead><tbody>{report.checks.map((item) => <tr key={item.name}><td>{humanizeIdentifier(item.name, locale)}</td><td><Status value={item.status} locale={locale} /></td><td>{item.summary ?? '—'}</td></tr>)}</tbody></table></div> : <p className="settings-empty">{copy.empty}</p>}</> : null}</div>
+  const columns = useMemo<ColumnDef<NonNullable<typeof report>['checks'][number]>[]>(() => [
+    { accessorKey: 'name', header: copy.columns.check, enableHiding: false, meta: { role: 'primaryText' }, cell: ({ getValue }) => humanizeIdentifier(getValue<string>(), locale) },
+    { accessorKey: 'status', header: copy.columns.status, enableHiding: false, meta: { role: 'status' }, cell: ({ getValue }) => <Status value={getValue<string>()} locale={locale} /> },
+    { accessorKey: 'summary', header: copy.columns.summary, meta: { role: 'description' }, cell: ({ getValue }) => getValue<string | undefined>() ?? '—' }
+  ], [copy, locale])
+  return <div className="settings-stack"><div className="settings-form settings-form-narrow"><ActionGroup align="start"><Button label={pending ? copy.creatingBundle : copy.createBundle} variant="secondary" isLoading={pending} onClick={onCreateBundle} /></ActionGroup>{bundleError ? <Banner status="error" title={bundleError} /> : null}{bundle ? <DiagnosticBundleSummary locale={locale} messages={messages} bundle={bundle} /> : null}</div>{loading ? <LoadingSettings messages={messages} /> : null}{report ? <><p className="settings-summary-line">{copy.collected}: {formatDateTime(report.collectedAt, locale)}</p>{report.checks.length ? <StaticResponsiveDataTable
+    data={report.checks}
+    columns={columns}
+    ariaLabel={copy.title}
+    visibleColumnsLabel={copy.visibleColumns}
+    selectorCopy={messages.selectors}
+    emptyContent={copy.empty}
+    renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow key={row.original.name} title={humanizeIdentifier(row.original.name, locale)} fullTitle={humanizeIdentifier(row.original.name, locale)} status={<Status value={row.original.status} locale={locale} />} metadata={[{ id: 'summary', label: copy.columns.summary, value: row.original.summary ?? '—' }]} />)}
+  /> : <p className="settings-empty">{copy.empty}</p>}</> : null}</div>
 }
 
 function DiagnosticBundleSummary({ locale, messages, bundle }: { readonly locale: Locale; readonly messages: MessageCatalog; readonly bundle: DiagnosticBundleReceipt }) {
   const copy = messages.settings.diagnostics
-  return <div className="settings-summary"><p>{copy.bundleReady}</p><p>{copy.bundleDescription}</p><dl><div><dt>{copy.summaryCreated}</dt><dd>{formatDateTime(bundle.createdAt, locale)}</dd></div><div><dt>{copy.bundleExpires}</dt><dd>{formatDateTime(bundle.expiresAt, locale)}</dd></div><div><dt>{copy.summarySize}</dt><dd>{formatBytes(bundle.sizeBytes, locale)}</dd></div><div><dt>{copy.bundleChecksum}</dt><dd><code title={bundle.sha256}>{formatHash(bundle.sha256)}</code></dd></div></dl><TechnicalDetails label={copy.technicalDetails} items={[{ label: copy.checksum, value: bundle.sha256, copyLabel: copy.copyChecksum }]} /><a className="artifact-download" href={getDiagnosticBundleDownloadURL(bundle.handle)}>{copy.downloadBundle}</a></div>
+  return <div className="settings-summary"><p>{copy.bundleReady}</p><p>{copy.bundleDescription}</p><dl><div><dt>{copy.summaryCreated}</dt><dd>{formatDateTime(bundle.createdAt, locale)}</dd></div><div><dt>{copy.bundleExpires}</dt><dd>{formatDateTime(bundle.expiresAt, locale)}</dd></div><div><dt>{copy.summarySize}</dt><dd>{formatBytes(bundle.sizeBytes, locale)}</dd></div><div><dt>{copy.bundleChecksum}</dt><dd><code title={bundle.sha256}>{formatHash(bundle.sha256)}</code></dd></div></dl><TechnicalDetails label={copy.technicalDetails} items={[{ label: copy.checksum, value: bundle.sha256, copyLabel: copy.copyChecksum, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }]} /><a className="artifact-download" href={getDiagnosticBundleDownloadURL(bundle.handle)}>{copy.downloadBundle}</a></div>
 }
 
 function formatQuantity(count: number, bytes: number, locale: Locale, copy: MessageCatalog['settings']['gc']) {

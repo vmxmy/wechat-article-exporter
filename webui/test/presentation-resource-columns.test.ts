@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { getResourceColumnPresentation, projectResourceToMobile, type ResourceColumnDefinition } from '../src/lib/presentation/resourceColumns'
+import { getResourceColumnPresentation, getTableColumnClassName, projectResourceToMobile, type ResourceColumnDefinition } from '../src/lib/presentation/resourceColumns'
 
 describe('resource column presentation', () => {
   it('derives alignment, truncation, numeric treatment, and full-value access by role', () => {
+    expect(getResourceColumnPresentation('selection')).toMatchObject({ alignment: 'center', mobilePlacement: 'hidden', truncate: false, exposeFullValue: false })
     expect(getResourceColumnPresentation('primaryText')).toMatchObject({ alignment: 'start', maxLines: 2, truncate: true, exposeFullValue: true })
     expect(getResourceColumnPresentation('numeric')).toMatchObject({ alignment: 'end', numeric: true, truncate: false })
     expect(getResourceColumnPresentation('actions')).toMatchObject({ alignment: 'end', mobilePlacement: 'actions', exposeFullValue: false })
+  })
+
+  it('composes semantic role and caller classes for table cells', () => {
+    expect(getTableColumnClassName({ meta: { role: 'selection' } })).toBe('resource-column resource-column-selection resource-column-center')
+    expect(getTableColumnClassName({ meta: { role: 'primaryText', className: 'article-title-cell' } })).toBe('article-title-cell resource-column resource-column-primaryText resource-column-start resource-column-truncate')
+    expect(getTableColumnClassName({ meta: { role: 'numeric' } })).toBe('resource-column resource-column-numeric resource-column-end')
   })
 
   it('projects one shared row model into mobile identity, metadata, status, and actions', () => {

@@ -1,0 +1,167 @@
+@import './themes/vercel.css';
+
+/*
+ * Token bridge: the existing ~1680 lines of app/feature CSS consume flat custom
+ * properties (e.g. --color-text-primary, --spacing-4, --radius-element). After
+ * removing Astryx's generated theme.css those names have no source, so we alias
+ * them onto the starter's shadcn semantic variables below. Keeping the legacy
+ * names lets feature CSS keep working while components use shadcn/Tailwind names.
+ */
+
+:root {
+  /* Legacy color aliases (light) */
+  --color-accent: var(--primary);
+  --color-accent-muted: color-mix(in oklch, var(--primary) 20%, transparent);
+  --color-on-accent: var(--primary-foreground);
+  --color-background-surface: var(--background);
+  --color-background-body: var(--background);
+  --color-background-muted: var(--muted);
+  --color-background-card: var(--card);
+  --color-background-popover: var(--popover);
+  --color-background-inverted: var(--foreground);
+  --color-text-primary: var(--foreground);
+  --color-text-secondary: var(--muted-foreground);
+  --color-text-disabled: color-mix(in oklch, var(--muted-foreground) 40%, transparent);
+  --color-text-accent: var(--primary);
+  --color-text-danger: var(--destructive);
+  --color-text-warning: oklch(0.72 0.16 70);
+  --color-icon-primary: var(--foreground);
+  --color-icon-secondary: var(--muted-foreground);
+  --color-icon-disabled: color-mix(in oklch, var(--muted-foreground) 40%, transparent);
+  --color-icon-accent: var(--primary);
+  --color-border: var(--border);
+  --color-border-emphasized: color-mix(in oklch, var(--foreground) 20%, var(--border));
+  --color-overlay: color-mix(in oklch, var(--foreground) 45%, transparent);
+  --color-overlay-hover: color-mix(in oklch, var(--foreground) 8%, transparent);
+  --color-overlay-pressed: color-mix(in oklch, var(--foreground) 14%, transparent);
+  --color-shadow: color-mix(in oklch, var(--foreground) 18%, transparent);
+  --color-skeleton: var(--muted);
+  --color-track: var(--border);
+  --color-tint-hover: black;
+  --color-neutral: color-mix(in oklch, var(--foreground) 10%, transparent);
+
+  /* Legacy radius aliases */
+  --radius-none: 0px;
+  --radius-control: var(--radius-md);
+  --radius-inner: var(--radius-md);
+  --radius-element: var(--radius-lg);
+  --radius-container: var(--radius-xl);
+  --radius-full: 9999px;
+
+  /* Compact type scale shared by legacy CSS and component primitives. */
+  --font-family-body: var(--font-sans);
+  --font-family-heading: var(--font-sans);
+  --font-family-code: var(--font-mono);
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.8125rem;
+  --font-size-base: 0.875rem;
+  --font-size-lg: 1rem;
+  --font-size-xl: 1.125rem;
+  --font-size-2xl: 1.25rem;
+  --font-size-3xl: 1.5rem;
+  --font-size-4xl: 1.875rem;
+  --font-size-5xl: 2.25rem;
+  --text-body-size: var(--font-size-base);
+  --text-body-leading: 1.55;
+  --text-body-small-size: var(--font-size-sm);
+  --text-label-size: var(--font-size-sm);
+  --text-supporting-size: var(--font-size-sm);
+  --text-heading-1-size: clamp(1.5rem, 2vw, 1.875rem);
+  --text-heading-2-size: var(--font-size-xl);
+  --text-heading-3-size: var(--font-size-lg);
+  --text-heading-4-size: var(--font-size-base);
+  --text-heading-5-size: var(--font-size-sm);
+
+  /* Four-pixel spacing scale consumed by feature CSS. */
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+  --spacing-3: 0.75rem;
+  --spacing-4: 1rem;
+  --spacing-5: 1.25rem;
+  --spacing-6: 1.5rem;
+  --spacing-7: 1.75rem;
+
+  /* Shared operational-workspace density contract. */
+  --workspace-content-max: 76rem;
+  --measure-reading: 60ch;
+  --measure-description: 44rem;
+  --measure-form: 36rem;
+  --space-page-top: clamp(1.5rem, 3vw, 2rem);
+  --space-page-bottom: clamp(2.5rem, 5vw, 3.5rem);
+  --space-section: clamp(1.5rem, 3vw, 2.25rem);
+  --space-subsection: clamp(1.125rem, 2.5vw, 1.5rem);
+  --space-cluster: var(--spacing-3);
+  --space-control: var(--spacing-2);
+  --workspace-control-height: 2.25rem;
+  --workspace-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --workspace-ring: color-mix(in oklch, var(--foreground) 9%, transparent);
+  --workspace-ring-strong: color-mix(in oklch, var(--foreground) 15%, transparent);
+  --workspace-accent-wash: color-mix(in oklch, var(--primary) 7%, var(--background));
+  --workspace-accent-wash-strong: color-mix(in oklch, var(--primary) 12%, var(--background));
+  --workspace-shadow-surface: 0 0 0 1px var(--workspace-ring), 0 1px 2px color-mix(in oklch, var(--color-shadow) 18%, transparent);
+  --workspace-shadow-raised: 0 0 0 1px var(--workspace-ring-strong), 0 4px 12px -8px color-mix(in oklch, var(--color-shadow) 44%, transparent), 0 12px 24px -22px color-mix(in oklch, var(--primary) 24%, transparent);
+
+  /* media-context overrides referenced by the old theme; point on-* at foreground */
+  --color-on-dark: var(--foreground);
+  --color-on-light: var(--background);
+}
+
+.dark {
+  --color-text-warning: oklch(0.78 0.15 75);
+  --color-tint-hover: white;
+}
+
+:root {
+  @theme inline {
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+    --color-chart-1: var(--chart-1);
+    --color-chart-2: var(--chart-2);
+    --color-chart-3: var(--chart-3);
+    --color-chart-4: var(--chart-4);
+    --color-chart-5: var(--chart-5);
+    --color-sidebar: var(--sidebar);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --font-sans: var(--font-sans);
+    --font-mono: var(--font-mono);
+    --font-serif: var(--font-serif);
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+    --shadow-2xs: var(--shadow-2xs);
+    --shadow-xs: var(--shadow-xs);
+    --shadow-sm: var(--shadow-sm);
+    --shadow: var(--shadow);
+    --shadow-md: var(--shadow-md);
+    --shadow-lg: var(--shadow-lg);
+    --shadow-xl: var(--shadow-xl);
+    --shadow-2xl: var(--shadow-2xl);
+  }
+}

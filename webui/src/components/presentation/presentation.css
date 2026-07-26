@@ -10,7 +10,7 @@
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--spacing-4);
+  gap: var(--spacing-3);
   margin-block-end: 0;
 }
 
@@ -32,26 +32,47 @@
 .presentation-heading {
   margin: 0;
   color: var(--color-text-primary);
-  font-size: clamp(1.75rem, 2.6vw, 2.125rem);
+  font-size: var(--text-heading-1-size);
   font-weight: 600;
-  line-height: 1.18;
+  line-height: 1.2;
   text-wrap: balance;
 }
 
-.presentation-description {
+.presentation-description,
+.presentation-section-description {
   max-width: var(--measure-reading);
   margin: 0;
   color: var(--color-text-secondary);
-  line-height: 1.65;
+  line-height: var(--text-body-leading);
   text-wrap: pretty;
 }
 
-.presentation-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--spacing-2);
+.presentation-supporting-copy {
+  max-width: var(--measure-reading);
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-supporting-size);
+  line-height: var(--text-body-leading);
+  text-wrap: pretty;
 }
+
+.presentation-section-header {
+  display: grid;
+  gap: var(--spacing-1);
+  max-width: var(--measure-reading);
+}
+
+.presentation-section-heading {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.presentation-section-heading:is(h2) { font-size: var(--text-heading-2-size); }
+.presentation-section-heading:is(h3) { font-size: var(--text-heading-3-size); }
+.presentation-section-heading:is(h4) { font-size: var(--text-heading-4-size); }
 
 .presentation-technical-list,
 .presentation-active-filters,
@@ -119,7 +140,7 @@
 
 .presentation-selection-bar {
   position: sticky;
-  bottom: var(--spacing-3);
+  bottom: calc(var(--spacing-3) + var(--safe-area-bottom));
   z-index: 10;
   margin-block: 0;
   border: 0;
@@ -140,9 +161,9 @@
 }
 
 .presentation-mobile-row {
-  gap: var(--spacing-3);
+  gap: var(--spacing-2);
   min-width: 0;
-  padding: var(--spacing-4) var(--spacing-1);
+  padding: var(--spacing-3) var(--spacing-1);
   border-block-end: 1px solid var(--color-border);
   border-radius: var(--radius-inner);
 }
@@ -151,7 +172,29 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--spacing-3);
-  align-items: start;
+  align-items: center;
+}
+
+.presentation-mobile-row-header > [data-slot='field'] {
+  display: inline-flex;
+  width: auto;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
+.presentation-mobile-row-header [data-slot='checkbox'] {
+  width: var(--data-table-selection-size);
+  height: var(--data-table-selection-size);
+  min-width: var(--data-table-selection-size);
+  min-height: var(--data-table-selection-size);
+}
+
+.presentation-mobile-row-header [data-slot='checkbox-indicator'] svg {
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 .presentation-mobile-row-identity,
@@ -220,4 +263,110 @@
   .presentation-technical-item {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Application modals render inline so open state remains available to SSR output. */
+.presentation-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  justify-items: end;
+  padding: 0;
+  background: color-mix(in srgb, var(--color-text-primary) 48%, transparent);
+  animation: presentation-overlay-fade 160ms var(--workspace-ease-out) both;
+}
+
+.presentation-drawer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  width: min(36rem, 100vw);
+  height: 100dvh;
+  max-height: 100dvh;
+  padding: clamp(1rem, 3vw, 1.25rem);
+  border-start-start-radius: var(--radius-element);
+  border-end-start-radius: var(--radius-element);
+  background: var(--color-background-surface);
+  box-shadow: var(--workspace-shadow-raised);
+  animation: presentation-drawer-enter 220ms var(--workspace-ease-out) both;
+}
+
+.presentation-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+}
+
+.presentation-dialog-header h2 {
+  margin: 0;
+  font-size: var(--text-heading-3-size, 1.25rem);
+}
+
+.presentation-dialog-close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-inner);
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.presentation-dialog-close:hover {
+  background: var(--color-background-subtle);
+  color: var(--color-text-primary);
+}
+
+.presentation-dialog-close:focus-visible {
+  outline: 3px solid var(--workspace-ring);
+  outline-offset: 2px;
+}
+
+.presentation-dialog-close svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.presentation-dialog-description {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.presentation-dialog-footer {
+  margin-top: auto;
+}
+
+.presentation-drawer-body,
+.presentation-detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+@keyframes presentation-overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes presentation-drawer-enter {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (max-width: 40rem) {
+  .presentation-drawer-panel {
+    width: 100vw;
+    border-radius: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presentation-drawer-overlay,
+  .presentation-drawer-panel { animation: none; }
 }

@@ -1,6 +1,6 @@
-import { Button } from '@astryxdesign/core/Button'
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { TextInput } from '@astryxdesign/core/TextInput'
+import { Button } from '@/components/controls/Button'
+import { CheckboxInput } from '@/components/controls/CheckboxInput'
+import { TextInput } from '@/components/controls/TextInput'
 import { useState } from 'react'
 import { PageHeader, PageStack } from '../../components/presentation'
 import type { MessageCatalog } from '../../i18n'
@@ -27,15 +27,15 @@ export function ImportPage({ messages }: { readonly messages: MessageCatalog }) 
   return (
     <PageStack aria-labelledby="import-title">
       <PageHeader eyebrow={messages.navigation.operations} title={messages.import.title} titleId="import-title" description={messages.import.description} />
-      <section className="unavailable-actions" aria-labelledby="import-form-title">
-        <div><h2 id="import-form-title">{messages.import.title}</h2><p>{messages.import.note}</p></div>
-        <form className="import-form" onSubmit={submit}>
+      <div className="unavailable-actions">
+        <p id="import-note">{messages.import.note}</p>
+        <form className="import-form" aria-describedby="import-note" onSubmit={submit}>
           <TextInput label={messages.import.url} value={url} placeholder={messages.import.placeholder} htmlName="article-url" onChange={setUrl} />
           <CheckboxInput label={messages.import.force} value={force} htmlName="force-download" onChange={setForce} />
           <Button label={messages.import.submit} type="submit" variant="primary" isLoading={mutations.ingestURL.isPending} isDisabled={!url.trim()} />
         </form>
-        {error ? <p role="status">{error}</p> : null}
-      </section>
+        {error ? <p role="alert">{error}</p> : null}
+      </div>
     </PageStack>
   )
 }

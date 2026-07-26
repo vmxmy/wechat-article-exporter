@@ -31,5 +31,6 @@
     border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
     border-radius: var(--radius-inner);
     background: var(--workspace-accent-wash);
+    overflow-wrap: anywhere;
   }
 }

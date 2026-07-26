@@ -3,8 +3,15 @@ import { expect, type Page, type Route } from '@playwright/test'
 const now = '2026-07-24T09:30:00.000Z'
 const csrfToken = 'sanitized-e2e-csrf-token'
 
+export interface SelectorRequest {
+  readonly path: '/api/v1/selectors/accounts' | '/api/v1/selectors/albums' | '/api/v1/selectors/articles'
+  readonly search: string
+  readonly accountID?: string
+}
+
 export interface LoopbackFixture {
   readonly requests: readonly string[]
+  readonly selectorRequests: readonly SelectorRequest[]
   readonly controls: readonly { readonly path: string; readonly confirmation?: string }[]
   readonly accountDeletions: readonly unknown[]
   readonly savedAccounts: readonly unknown[]
@@ -21,8 +28,14 @@ export interface LoopbackFixture {
   readonly accountSwitches: readonly string[]
 }
 
-export async function installLoopbackFixture(page: Page, options: { readonly displayLanguage?: 'en' | 'zh-CN' } = {}): Promise<LoopbackFixture> {
+interface LoopbackFixtureOptions {
+  readonly displayLanguage?: 'en' | 'zh-CN'
+  readonly savedQueries?: readonly { readonly name: string; readonly query: Record<string, unknown> }[]
+}
+
+export async function installLoopbackFixture(page: Page, options: LoopbackFixtureOptions = {}): Promise<LoopbackFixture> {
   const requests: string[] = []
+  const selectorRequests: SelectorRequest[] = []
   const controls: Array<{ path: string; confirmation?: string }> = []
   const accountDeletions: unknown[] = []
   const savedAccounts: unknown[] = []
@@ -41,7 +54,7 @@ export async function installLoopbackFixture(page: Page, options: { readonly dis
   let directory = { token: 'dir-sanitized', label: 'Sanitized exports' }
   let backupID = ''
   let gcPlan = false
-  let savedQueries: Array<{ name: string; query: Record<string, unknown>; createdAt: string; updatedAt: string }> = []
+  let savedQueries: Array<{ name: string; query: Record<string, unknown>; createdAt: string; updatedAt: string }> = (options.savedQueries ?? []).map((savedQuery) => ({ ...savedQuery, createdAt: now, updatedAt: now }))
 
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url())
@@ -61,6 +74,7 @@ export async function installLoopbackFixture(page: Page, options: { readonly dis
       backupID,
       gcPlan,
       controls,
+      selectorRequests,
       accountDeletions,
       savedAccounts,
       accountSyncs,
@@ -83,7 +97,7 @@ export async function installLoopbackFixture(page: Page, options: { readonly dis
       onSavedQueries: (next) => { savedQueries = next }
     })
   })
-  return { requests, controls, accountDeletions, savedAccounts, accountSyncs, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, credentialValidations, proxyRemovals, resourceDownloads, albumTraversals, accountSwitches }
+  return { requests, selectorRequests, controls, accountDeletions, savedAccounts, accountSyncs, exports, accountManifestImports, preferencePatches, diagnosticBundleRequests, credentialRemovals, credentialValidations, proxyRemovals, resourceDownloads, albumTraversals, accountSwitches }
 }
 
 export async function expectOnlyLoopbackRequests(page: Page) {
@@ -104,6 +118,7 @@ interface State {
   readonly gcPlan: boolean
   readonly displayLanguage?: 'en' | 'zh-CN'
   readonly controls: Array<{ path: string; confirmation?: string }>
+  readonly selectorRequests: SelectorRequest[]
   readonly accountDeletions: unknown[]
   readonly savedAccounts: unknown[]
   readonly accountSyncs: Array<{ path: string; incremental: boolean }>
@@ -162,11 +177,24 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
     return json(route, { id: 'job-account-sync-fixture', kind: 'account_sync', label: 'Account Sync', state: 'queued', createdAt: now, updatedAt: now })
   }
   if (url.pathname === '/api/v1/selectors/accounts') {
+    state.selectorRequests.push({ path: '/api/v1/selectors/accounts', search: url.searchParams.get('search')?.trim() ?? '' })
     const options = [{ id: 'account-fixture', displayName: 'Fixture Account', displayNameAvailable: true, alias: 'fixture' }, { id: 'account-beyond-first-page', displayName: 'Later Fixture Account', displayNameAvailable: true, alias: 'later' }, { id: 'account-fixture-unknown', displayNameAvailable: false }]
     return selectorPage(route, url, options.filter((item) => matchesSelectorSearch(item, url.searchParams.get('search'))))
   }
   if (url.pathname === '/api/v1/accounts') return page(route, [{ id: 'account-fixture', fakeid: 'fixture-account', name: 'Fixture Account', alias: 'fixture', articleCount: 2, lastSyncAt: now, syncCompleted: true }])
-  if (url.pathname === '/api/v1/accounts/search') return page(route, [{ id: 'discovery-opaque-id', fakeid: 'fixture-discovered', name: 'Discovered Fixture Account', alias: 'discovered', articleCount: 0, syncCompleted: false }])
+  if (url.pathname === '/api/v1/accounts/search') {
+    if (state.loginState !== 'authenticated') return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'authentication_required', message: 'workspace session must be authenticated' } }) })
+    return page(route, [{ id: 'discovery-opaque-id', fakeid: 'fixture-discovered', name: 'Discovered Fixture Account', alias: 'discovered', articleCount: 0, syncCompleted: false }])
+  }
+  if (url.pathname === '/api/v1/accounts/resolve-name') {
+    if (!url.searchParams.get('url')) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { code: 'invalid_argument', message: 'article url is required' } }) })
+    return json(route, { name: 'Resolved Account' })
+  }
+  if (url.pathname === '/api/v1/accounts/resolve') {
+    if (!url.searchParams.get('url')) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { code: 'invalid_argument', message: 'article url is required' } }) })
+    if (state.loginState !== 'authenticated') return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'authentication_required', message: 'workspace session must be authenticated' } }) })
+    return json(route, { id: 'resolved-account', fakeid: 'fixture-resolved', name: 'Resolved Account', alias: 'resolved', articleCount: 0, syncCompleted: false })
+  }
   if (url.pathname === '/api/v1/accounts/manifest') return route.fulfill({ contentType: 'application/json', headers: { 'content-disposition': 'attachment; filename="wechat-article-accounts-manifest.json"' }, body: '{"schemaVersion":1,"accounts":[]}' })
   if (url.pathname === '/api/v1/accounts/manifest/upload') return json(route, { handle: 'account-manifest-upload-fixture', sizeBytes: 24, sha256: 'e'.repeat(64), expiresAt: '2026-07-24T09:45:00.000Z' })
   if (url.pathname === '/api/v1/accounts/manifest/import') { state.accountManifestImports.push(body); return json(route, { report: { added: 1, merged: 2, unchanged: 3 } }) }
@@ -177,6 +205,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
     return page(route, articles, 26)
   }
   if (url.pathname === '/api/v1/selectors/articles') {
+    state.selectorRequests.push({ path: '/api/v1/selectors/articles', search: url.searchParams.get('search')?.trim() ?? '' })
     const options = [
       { id: 'article-fixture-1', title: 'Sanitized article one', accountName: 'Fixture Account', accountNameAvailable: true },
       { id: 'article-fixture-2', title: 'Sanitized article two', accountName: 'Fixture Account', accountNameAvailable: true },
@@ -198,6 +227,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/selectors/albums') {
     const options = [{ id: 'album-fixture-1', accountId: 'account-fixture', displayName: 'Sanitized album', displayNameAvailable: true, accountName: 'Fixture Account', accountNameAvailable: true }, { id: 'album-beyond-first-page', accountId: 'account-beyond-first-page', displayName: 'Later fixture album', displayNameAvailable: true, accountName: 'Later Fixture Account', accountNameAvailable: true }, { id: 'album-fixture-unknown', displayNameAvailable: false, accountNameAvailable: false }]
     const accountID = url.searchParams.get('accountId')?.trim()
+    state.selectorRequests.push({ path: '/api/v1/selectors/albums', search: url.searchParams.get('search')?.trim() ?? '', ...(accountID ? { accountID } : {}) })
     return selectorPage(route, url, options.filter((item) => (!accountID || item.accountId === accountID) && matchesSelectorSearch(item, url.searchParams.get('search'))))
   }
   if ((url.pathname === '/api/v1/albums/album-fixture-1/traverse' || url.pathname === '/api/v1/albums/traverse') && method === 'POST') { state.albumTraversals.push(body); return json(route, { id: 'job-album-fixture', kind: 'album_sync', label: 'Album Sync', state: 'queued', createdAt: now, updatedAt: now }) }

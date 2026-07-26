@@ -1,4 +1,4 @@
-import { EmptyState as AstryxEmptyState } from '@astryxdesign/core/EmptyState'
+import { EmptyState as ControlEmptyState } from '@/components/controls/EmptyState'
 import type { ReactNode } from 'react'
 
 export interface EmptyStateProps {
@@ -12,7 +12,7 @@ export interface EmptyStateProps {
 
 export function EmptyState({ title, description, actions, icon, headingLevel = 2, isCompact = false }: EmptyStateProps) {
   return (
-    <AstryxEmptyState
+    <ControlEmptyState
       title={title}
       description={description}
       actions={actions}

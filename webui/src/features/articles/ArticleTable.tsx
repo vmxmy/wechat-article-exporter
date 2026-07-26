@@ -1,17 +1,15 @@
-import { Button } from '@astryxdesign/core/Button'
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { Collapsible } from '@astryxdesign/core/Collapsible'
-import { MultiSelector } from '@astryxdesign/core/MultiSelector'
-import { Selector } from '@astryxdesign/core/Selector'
-import { Timestamp } from '@astryxdesign/core/Timestamp'
+import { Button } from '@/components/controls/Button'
+import { Collapsible } from '@/components/controls/Collapsible'
+import { SearchableSelector } from '@/components/controls/SearchableSelector'
+import { Timestamp } from '@/components/controls/Timestamp'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type RowSelectionState, type SortingState, type Updater, type VisibilityState } from '@tanstack/react-table'
 import { useEffect, useMemo, useState } from 'react'
 import { navigateTo, navigationEvent } from '../../app/navigation'
-import { ActiveFilterSummary, DenseRegion, DetailPanel, EmptyState, MobileResourceRow, PageHeader, PageStack, SectionStack, SelectionActionBar, Status, TechnicalDetails } from '../../components/presentation'
+import { ActionGroup, ActiveFilterSummary, DenseRegion, DetailPanel, EmptyState, MobileResourceRow, PageHeader, PageStack, Panel, ResponsiveDataTable, SectionHeader, SectionStack, SelectionActionBar, Status, TechnicalDetails } from '../../components/presentation'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { getArticlePreview, parseArticleQuery, saveArticleQueryHandoff, saveExportHandoff, type ArticleQuery, type ArticleRecord, type ArticleSort } from '../../lib/api'
 import { createExportWorkflowID, parseArticleBrowserView, serializeArticleBrowserView, type ArticleBrowserView } from '../../lib/browserViewState'
-import { formatCount, formatDate, formatDateTime, getResourceColumnPresentation } from '../../lib/presentation'
+import { createSelectionColumn, formatCount, formatDate, formatDateTime } from '../../lib/presentation'
 import { useAccountSelectorPage, useAlbumSelectorPage, useArticleCommentReplies, useArticleComments, useArticleDetail, useArticlePage, useArticleResourceSummary, useSavedQueryPage, useWorkspaceMutations } from '../../lib/queries'
 import { ArticleFilterEditor } from './ArticleFilterEditor'
 import { getArticleQuerySummaryParts, hasArticleQueryFilters } from './articleQueryPresentation'
@@ -134,12 +132,10 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   }
 
   const columns = useMemo<ColumnDef<ArticleRecord>[]>(() => [
-    {
-      id: 'select',
-      enableSorting: false,
-      header: ({ table }) => <CheckboxInput label={messages.articles.selectAll} isLabelHidden value={table.getIsSomePageRowsSelected() ? 'indeterminate' : table.getIsAllPageRowsSelected()} onChange={() => table.toggleAllPageRowsSelected()} />,
-      cell: ({ row }) => <CheckboxInput label={messages.articles.selectRow(row.original.title)} isLabelHidden value={row.getIsSelected()} onChange={() => row.toggleSelected()} />
-    },
+    createSelectionColumn({
+      selectAllLabel: messages.articles.selectAll,
+      selectRowLabel: (row) => messages.articles.selectRow(row.original.title)
+    }),
     {
       accessorKey: 'title',
       header: messages.articles.columns.title,
@@ -241,7 +237,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
       <PageHeader eyebrow={messages.navigation.library} title={messages.articles.title} titleId="articles-title" description={messages.articles.description} />
 
       <SectionStack as="section" gap="cluster" aria-label={messages.articles.filters.title}>
-        <section className="workspace-panel article-filters">
+        <Panel className="article-filters">
           <ArticleFilterEditor locale={locale} messages={messages} value={filters} onChange={setFilters} selectedAccountLabel={filters.accountId ? articleQueryNames.accounts.get(filters.accountId) : undefined} selectedAlbumLabel={filters.albumId ? articleQueryNames.albums.get(filters.albumId) : undefined} onAccountOptionChange={(option) => {
             const name = option?.displayName?.trim()
             if (!option) return
@@ -251,12 +247,12 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
             if (!option) return
             if (name) setSelectedSelectorNames((current) => ({ accounts: current.accounts, albums: new Map(current.albums).set(option.id, name) }))
           }} />
-          <div className="article-filter-actions">
+          <ActionGroup align="start">
             <Button label={messages.articles.filters.apply} variant="primary" onClick={applyFilters} />
             <Button label={messages.articles.filters.reset} variant="secondary" onClick={clearFilters} />
             <Button label={copy.saveView} variant="secondary" onClick={saveCurrentQuery} />
-          </div>
-        </section>
+          </ActionGroup>
+        </Panel>
 
         <ActiveFilterSummary
           label={copy.appliedFilters}
@@ -278,18 +274,6 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
           <span className="selection-count" aria-live="polite">{selectedCount > 0 ? copy.selectedCount(selectedCount) : ''}</span>
           </div>
 
-          <div className="column-controls article-column-controls" aria-label={messages.articles.visibleColumns}>
-          <MultiSelector
-            label={messages.articles.visibleColumns}
-            isLabelHidden
-            options={table.getAllLeafColumns().filter((column) => column.id !== 'select').map((column) => ({ value: column.id, label: typeof column.columnDef.header === 'string' ? column.columnDef.header : column.id }))}
-            value={table.getAllLeafColumns().filter((column) => column.id !== 'select' && column.getIsVisible()).map((column) => column.id)}
-            onChange={(visible) => table.getAllLeafColumns().filter((column) => column.id !== 'select').forEach((column) => column.toggleVisibility(visible.includes(column.id)))}
-            triggerDisplay="count"
-            hasSelectAll
-          />
-          </div>
-
           {articlePage.isLoading ? <p role="status">{messages.articles.loading}</p> : null}
           {articlePage.isError ? <div className="error-state" role="alert"><p>{messages.articles.unavailable}</p><Button label={messages.articles.retry} variant="secondary" onClick={() => void articlePage.refetch()} /></div> : null}
           {!articlePage.isLoading && !articlePage.isError ? <>
@@ -302,12 +286,14 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
             isFirstUse={!hasArticleQueryFilters(query) && (articlePage.data?.pagination.total ?? 0) === 0}
             isFilteredEmpty={hasArticleQueryFilters(query) && (articlePage.data?.pagination.total ?? 0) === 0}
             copy={copy}
+            visibleColumnsLabel={messages.articles.visibleColumns}
+            selectorCopy={messages.selectors}
+            footer={<nav className="pagination" aria-label={messages.articles.pagination}>
+              <Button label={messages.articles.previous} variant="secondary" size="sm" isDisabled={pageIndex === 0} onClick={() => commitBrowserView({ query, sort: activeSort, page: pageIndex })} />
+              <span>{messages.articles.page(pageIndex + 1, totalPages)}</span>
+              <Button label={messages.articles.next} variant="secondary" size="sm" isDisabled={pageIndex + 1 >= totalPages} onClick={() => commitBrowserView({ query, sort: activeSort, page: pageIndex + 2 })} />
+            </nav>}
           />
-          <nav className="pagination" aria-label={messages.articles.pagination}>
-            <Button label={messages.articles.previous} variant="secondary" size="sm" isDisabled={pageIndex === 0} onClick={() => commitBrowserView({ query, sort: activeSort, page: pageIndex })} />
-            <span>{messages.articles.page(pageIndex + 1, totalPages)}</span>
-            <Button label={messages.articles.next} variant="secondary" size="sm" isDisabled={pageIndex + 1 >= totalPages} onClick={() => commitBrowserView({ query, sort: activeSort, page: pageIndex + 2 })} />
-          </nav>
           </> : null}
         </DenseRegion>
       </SectionStack>
@@ -324,16 +310,16 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
         moreActions={<SelectionMoreActions label={copy.moreActions} messages={messages} selectedArticle={selectedArticle} onPreview={() => preview()} onMetadata={() => startDownload('metadata')} onComments={() => startDownload('comments')} onResources={() => startDownload('resources')} onForceResources={() => startDownload('resources', true)} />}
       />
 
-      <section className="article-filter-actions" aria-label={messages.articles.actions.title}>
+      <ActionGroup align="start" aria-label={messages.articles.actions.title}>
         <Button label={messages.articles.actions.exportMatching} variant="secondary" onClick={() => handoffExport('matching')} />
-        {notice ? <p role="status">{notice}</p> : null}
-      </section>
+        {notice ? <p role="alert">{notice}</p> : null}
+      </ActionGroup>
       {detailArticleID ? <ArticleDetailPanel article={detailArticle} locale={locale} messages={messages} isOpen onOpenChange={(isOpen) => { if (!isOpen) setDetailArticleID(undefined) }} onPreview={preview} /> : null}
     </PageStack>
   )
 }
 
-function ArticleResults({ table, locale, messages, onOpenDetail, onClearFilters, isFirstUse, isFilteredEmpty, copy }: {
+function ArticleResults({ table, locale, messages, onOpenDetail, onClearFilters, isFirstUse, isFilteredEmpty, copy, visibleColumnsLabel, selectorCopy, footer }: {
   readonly table: ReturnType<typeof useReactTable<ArticleRecord>>
   readonly locale: Locale
   readonly messages: MessageCatalog
@@ -342,52 +328,53 @@ function ArticleResults({ table, locale, messages, onOpenDetail, onClearFilters,
   readonly isFirstUse: boolean
   readonly isFilteredEmpty: boolean
   readonly copy: MessageCatalog['articles']['ux']
+  readonly visibleColumnsLabel: string
+  readonly selectorCopy: MessageCatalog['selectors']
+  readonly footer: import('react').ReactNode
 }) {
   if (isFirstUse) return <EmptyState title={copy.firstUseTitle} description={copy.firstUseDescription} actions={<Button label={copy.firstUseAction} variant="primary" onClick={() => navigateTo('/accounts')} />} />
   if (isFilteredEmpty) return <EmptyState title={copy.filteredEmptyTitle} description={copy.filteredEmptyDescription} actions={<Button label={copy.filteredEmptyAction} variant="secondary" onClick={onClearFilters} />} />
-  const rows = table.getRowModel().rows
-  return <>
-    <div className="data-table-wrap article-data-table" aria-busy={false}>
-      <table className="data-table">
-        <thead>{table.getHeaderGroups().map((group) => <tr key={group.id}>{group.headers.map((header) => <th key={header.id} scope="col" className={columnClassName(header.column.columnDef)} aria-sort={header.column.getCanSort() ? getSortLabel(header.column.getIsSorted()) : undefined}>{header.isPlaceholder ? null : header.column.getCanSort() ? <button className="sort-button" type="button" onClick={header.column.getToggleSortingHandler()}>{flexRender(header.column.columnDef.header, header.getContext())}</button> : flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead>
-        <tbody>
-          {rows.map((row) => <tr key={row.id} data-selected={row.getIsSelected() || undefined}>{row.getVisibleCells().map((cell) => <td key={cell.id} className={columnClassName(cell.column.columnDef)}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}</tr>)}
-          {rows.length === 0 ? <tr><td colSpan={table.getVisibleLeafColumns().length}>{messages.articles.empty}</td></tr> : null}
-        </tbody>
-      </table>
-    </div>
-    <div className="article-table-mobile" aria-label={messages.articles.title}>
-      {rows.map((row) => <MobileResourceRow
-        key={row.id}
-        title={<button className="article-title-button" type="button" onClick={() => onOpenDetail(row.original.id)}>{row.original.title}</button>}
-        fullTitle={row.original.title}
-        description={accountNamePresentation(row.original, copy.accountNameUnavailable)}
-        isSelected={row.getIsSelected()}
-        selectionLabel={messages.articles.selectRow(row.original.title)}
-        onSelectionChange={(selected) => row.toggleSelected(selected)}
-        status={<Status value={row.original.state ?? row.original.status} locale={locale} />}
-        metadata={[
-          { id: 'published', label: messages.articles.columns.published, value: formatDate(row.original.publishedAt, locale), fullValue: row.original.publishedAt ?? undefined },
-          { id: 'account', label: messages.articles.columns.account, value: accountNamePresentation(row.original, copy.accountNameUnavailable) }
-        ]}
-        actions={<Button label={copy.openDetails(row.original.title)} variant="ghost" size="sm" onClick={() => onOpenDetail(row.original.id)} />}
-      />)}
-    </div>
-  </>
+  return <ResponsiveDataTable
+    table={table}
+    ariaLabel={messages.articles.title}
+    visibleColumnsLabel={visibleColumnsLabel}
+    selectorCopy={selectorCopy}
+    emptyContent={messages.articles.empty}
+    footer={footer}
+    getHeaderAriaSort={(header) => header.column.getCanSort() ? getSortLabel(header.column.getIsSorted()) : undefined}
+    renderHeader={(header) => header.column.getCanSort()
+      ? <button className="sort-button" type="button" onClick={header.column.getToggleSortingHandler()}>{flexRender(header.column.columnDef.header, header.getContext())}</button>
+      : flexRender(header.column.columnDef.header, header.getContext())}
+    renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow
+      key={row.id}
+      title={<button className="article-title-button" type="button" onClick={() => onOpenDetail(row.original.id)}>{row.original.title}</button>}
+      fullTitle={row.original.title}
+      description={accountNamePresentation(row.original, copy.accountNameUnavailable)}
+      isSelected={row.getIsSelected()}
+      selectionLabel={messages.articles.selectRow(row.original.title)}
+      onSelectionChange={(selected) => row.toggleSelected(selected)}
+      status={<Status value={row.original.state ?? row.original.status} locale={locale} />}
+      metadata={[
+        { id: 'published', label: messages.articles.columns.published, value: formatDate(row.original.publishedAt, locale), fullValue: row.original.publishedAt ?? undefined },
+        { id: 'account', label: messages.articles.columns.account, value: accountNamePresentation(row.original, copy.accountNameUnavailable) }
+      ]}
+      actions={<Button label={copy.openDetails(row.original.title)} variant="ghost" size="sm" onClick={() => onOpenDetail(row.original.id)} />}
+    />)}
+  />
 }
 
 function SavedQuerySelector({ locale, messages, names, value, onChange }: { readonly locale: Locale; readonly messages: MessageCatalog; readonly names: Parameters<typeof getArticleQuerySummaryParts>[3]; readonly value: string | undefined; readonly onChange: (name: string | undefined, query?: ArticleQuery) => void }) {
   const savedQueries = useSavedQueryPage({ page: 1, pageSize: 25 })
   const copy = messages.articles.ux
   const queryByName = useMemo(() => new Map((savedQueries.data?.data ?? []).map((savedQuery) => [savedQuery.name, savedQuery.query])), [savedQueries.data?.data])
-  return <Selector
+  return <SearchableSelector
     label={copy.savedViews}
     options={(savedQueries.data?.data ?? []).map((savedQuery) => ({ value: savedQuery.name, label: savedQuery.name, description: getArticleQuerySummaryParts(savedQuery.query, locale, messages, names).map((part) => part.label).join(' · ') }))}
     value={value ?? null}
     onChange={(next) => onChange(next || undefined, next ? queryByName.get(next) : undefined)}
     placeholder={copy.savedViewsPlaceholder}
+    copy={messages.selectors}
     hasClear
-    hasSearch
     isLoading={savedQueries.isLoading}
   />
 }
@@ -419,12 +406,12 @@ function ArticleDetailPanel({ article, locale, messages, isOpen, onOpenChange, o
   const copy = messages.articles.ux
   const detail = useArticleDetail(article?.id)
   const resourceSummary = useArticleResourceSummary(article?.id)
-  return <DetailPanel isOpen={isOpen} onOpenChange={onOpenChange} title={article?.title ?? copy.details} description={article?.accountName?.trim() || undefined}>
+  return <DetailPanel isOpen={isOpen} onOpenChange={onOpenChange} title={article?.title ?? copy.details} description={article?.accountName?.trim() || undefined} closeLabel={messages.a11y.closeDialog}>
     {!article ? null : <div className="article-detail-content">
       <div className="article-detail-actions"><Button label={messages.articles.actions.preview} variant="primary" onClick={() => onPreview(article)} /></div>
       <ResourceSummary summary={resourceSummary} messages={messages} />
       <ArticleDetail detail={detail} articleID={article.id} messages={messages} locale={locale} />
-      <TechnicalDetails label={copy.technicalDetails} items={[{ label: 'Article ID', value: article.id, copyLabel: copy.copyArticleID }]} />
+      <TechnicalDetails label={copy.technicalDetails} items={[{ label: 'Article ID', value: article.id, copyLabel: copy.copyArticleID, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }]} />
     </div>}
   </DetailPanel>
 }
@@ -435,9 +422,9 @@ function ArticleDetail({ detail, articleID, messages, locale }: { readonly detai
   if (detail.isError || !detail.data) return <p role="status">{messages.articles.actions.detailUnavailable}</p>
   const { metrics, resources } = detail.data
   return <section className="article-detail-section" aria-label={messages.articles.actions.detailTitle}>
-    <h2>{messages.articles.actions.detailTitle}</h2>
+    <h3>{messages.articles.actions.detailTitle}</h3>
     <section className="article-detail-section" aria-label={messages.articles.actions.metricsTitle}>
-      <h3>{messages.articles.actions.metricsTitle}</h3>
+      <h4>{messages.articles.actions.metricsTitle}</h4>
       {metrics.available ? <>
         <dl className="article-metrics-list">
           <Metric label={copy.metrics.reads} value={metrics.readCount} locale={locale} />
@@ -450,7 +437,7 @@ function ArticleDetail({ detail, articleID, messages, locale }: { readonly detai
       </> : <p>{messages.articles.actions.metricsUnavailable}</p>}
     </section>
     <section className="article-detail-section" aria-label={messages.articles.actions.resourceDetailsTitle}>
-      <h3>{messages.articles.actions.resourceDetailsTitle}</h3>
+      <h4>{messages.articles.actions.resourceDetailsTitle}</h4>
       {resources.items.length === 0 ? <p>{messages.articles.actions.resourceDetailsEmpty}</p> : <ul>{resources.items.map((resource) => <li key={`${resource.role}-${resource.ordinal}`}>{messages.articles.actions.resourceDetail(resource.role, resource.ordinal, resource.available ? messages.articles.actions.resourceAvailable : messages.articles.actions.resourceMissing)}</li>)}</ul>}
       {resources.total > resources.items.length ? <p>{messages.articles.actions.resourceDetailsLimited(resources.items.length, resources.total)}</p> : null}
     </section>
@@ -467,12 +454,12 @@ function StoredComments({ articleID, messages }: { readonly articleID: string; r
   const currentPage = pageState.articleID === articleID ? pageState.page : 1
   const comments = useArticleComments(articleID, currentPage, 10)
   const copy = messages.articles.actions
-  if (comments.isLoading) return <section aria-label={copy.commentsTitle}><h3>{copy.commentsTitle}</h3><p role="status">{copy.commentsLoading}</p></section>
-  if (comments.isError || !comments.data) return <section aria-label={copy.commentsTitle}><h3>{copy.commentsTitle}</h3><p role="status">{copy.commentsUnavailable}</p></section>
+  if (comments.isLoading) return <section aria-label={copy.commentsTitle}><h4>{copy.commentsTitle}</h4><p role="status">{copy.commentsLoading}</p></section>
+  if (comments.isError || !comments.data) return <section aria-label={copy.commentsTitle}><h4>{copy.commentsTitle}</h4><p role="status">{copy.commentsUnavailable}</p></section>
   const { comments: commentPage, pendingReplies } = comments.data
   const totalPages = Math.max(1, Math.ceil(commentPage.total / commentPage.limit))
   return <section className="stored-comments" aria-labelledby="stored-comments-title">
-    <h3 id="stored-comments-title">{copy.commentsTitle}</h3>
+    <h4 id="stored-comments-title">{copy.commentsTitle}</h4>
     {pendingReplies > 0 ? <p className="availability-note" role="status">{copy.commentsPartial(pendingReplies)}</p> : null}
     {commentPage.items.length === 0 ? <p>{copy.commentsEmpty}</p> : <div className="comment-list">{commentPage.items.map((comment) => <StoredComment key={comment.id} articleID={articleID} comment={comment} messages={messages} />)}</div>}
     {commentPage.total > commentPage.limit ? <nav className="pagination" aria-label={copy.commentsPagination}><Button label={messages.articles.previous} variant="secondary" size="sm" isDisabled={currentPage === 1} onClick={() => setPageState({ articleID, page: currentPage - 1 })} /><span>{copy.commentsPage(currentPage, totalPages)}</span><Button label={messages.articles.next} variant="secondary" size="sm" isDisabled={currentPage >= totalPages} onClick={() => setPageState({ articleID, page: currentPage + 1 })} /></nav> : null}
@@ -501,7 +488,7 @@ function ResourceSummary({ summary, messages }: { readonly summary: ReturnType<t
   if (summary.isLoading) return <p role="status">{messages.articles.actions.resourcesLoading}</p>
   if (summary.isError) return <p role="status">{messages.articles.actions.resourcesUnavailable}</p>
   if (!summary.data) return null
-  return <section className="article-detail-section" aria-label={messages.articles.actions.resourcesSummaryTitle}><h2>{messages.articles.actions.resourcesSummaryTitle}</h2><p>{messages.articles.actions.resourcesSummary(summary.data.total, summary.data.available, summary.data.missing)}</p>{summary.data.complete ? <p>{messages.articles.actions.resourcesComplete}</p> : null}</section>
+  return <section className="article-detail-section" aria-label={messages.articles.actions.resourcesSummaryTitle}><SectionHeader level={3} title={messages.articles.actions.resourcesSummaryTitle} description={messages.articles.actions.resourcesSummary(summary.data.total, summary.data.available, summary.data.missing)} />{summary.data.complete ? <p>{messages.articles.actions.resourcesComplete}</p> : null}</section>
 }
 
 function selectedArticleIDs(selection: RowSelectionState): RowSelectionState {
@@ -522,12 +509,6 @@ function stripSorting(query: ArticleQuery): ArticleQuery {
   const next = { ...query }
   delete next.sorts
   return next
-}
-
-function columnClassName(column: ColumnDef<ArticleRecord>) {
-  const meta = column.meta as { readonly className?: string; readonly role?: Parameters<typeof getResourceColumnPresentation>[0] } | undefined
-  const presentation = getResourceColumnPresentation(meta?.role ?? 'secondaryText')
-  return `${meta?.className ?? ''} resource-column resource-column-${presentation.role} resource-column-${presentation.alignment}${presentation.truncate ? ' resource-column-truncate' : ''}`.trim()
 }
 
 function getSortLabel(sort: false | 'asc' | 'desc') {

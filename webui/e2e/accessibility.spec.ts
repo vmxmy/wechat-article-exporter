@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { expectOnlyLoopbackRequests, installLoopbackFixture } from './fixtures/loopback-api'
+import { selectRemoteSelectorOption } from './fixtures/selectors'
 
 test('keyboard-only navigation preserves skip focus and live login status', async ({ page }) => {
   await installLoopbackFixture(page)
@@ -110,26 +111,76 @@ test('390px resource views use readable mobile projections without whole-documen
   await page.setViewportSize({ width: 390, height: 844 })
   await installLoopbackFixture(page)
 
-  await page.goto('/accounts')
-  await expect(page.locator('.resource-table-mobile')).toBeVisible()
-  await expect(page.locator('.resource-table-mobile')).toContainText('Fixture Account')
+  for (const view of [
+    { path: '/accounts', content: 'Fixture Account' },
+    { path: '/articles', content: 'Sanitized article one' },
+    { path: '/albums', content: 'Sanitized album' },
+    { path: '/jobs', content: 'Export' }
+  ]) {
+    await page.goto(view.path)
+    const mobileTable = page.locator('.presentation-data-table-mobile')
+    await expect(mobileTable).toBeVisible()
+    await expect(mobileTable).toContainText(view.content)
+    await expect(page.locator('.presentation-data-table-desktop')).toBeHidden()
+    await expect(page.locator('.presentation-data-table-toolbar')).toBeHidden()
+    await expectNoDocumentOverflow(page)
+  }
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('390px export and settings tables retain safe mobile identity, status, and actions', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installLoopbackFixture(page)
+
+  await page.goto('/exports')
+  const exportRecords = page.locator('.presentation-data-table-mobile').filter({ hasText: 'MARKDOWN export' })
+  await expect(exportRecords).toBeVisible()
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select export MARKDOWN export' }))
+  await page.getByRole('button', { name: 'View manifest' }).click()
+  await expect(page.locator('.presentation-data-table-mobile').filter({ hasText: 'sanitized-article.md' })).toBeVisible()
+  await expect(page.getByText('/private/export/root/sanitized-article.md', { exact: true })).toHaveCount(0)
   await expectNoDocumentOverflow(page)
 
-  await page.goto('/articles')
-  await expect(page.locator('.article-table-mobile')).toBeVisible()
-  await expect(page.locator('.article-table-mobile')).toContainText('Sanitized article one')
+  await page.goto('/settings')
+  const mobileTables = page.locator('.presentation-data-table-mobile')
+  await expect(mobileTables).toHaveCount(3)
+  await expect(mobileTables.nth(0)).toContainText('Fixture Account')
+  await expect(mobileTables.nth(1)).toContainText('Sanitized proxy')
+  await expect(mobileTables.nth(2)).toContainText('Local connection')
+  await expect(mobileTables.nth(0).getByRole('button', { name: 'Remove' })).toBeVisible()
+  await expect(mobileTables.nth(1).getByRole('button', { name: 'Disable' })).toBeVisible()
+  await expect(mobileTables.nth(1).getByRole('button', { name: 'Test' })).toBeVisible()
   await expectNoDocumentOverflow(page)
+  await expectOnlyLoopbackRequests(page)
+})
 
-  await page.goto('/albums')
-  await expect(page.locator('.resource-table-mobile')).toBeVisible()
-  await expect(page.locator('.resource-table-mobile')).toContainText('Sanitized album')
-  await expectNoDocumentOverflow(page)
+test('desktop table column controls stay compact without changing their accessible names', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await installLoopbackFixture(page)
 
-  await page.goto('/jobs')
-  await expect(page.getByRole('heading', { name: 'Jobs', level: 1 })).toBeVisible()
-  await expect(page.locator('.resource-table-mobile')).toBeVisible()
-  await expect(page.locator('.resource-table-mobile')).toContainText('Export')
-  await expectNoDocumentOverflow(page)
+  for (const view of [
+    { path: '/articles', label: 'Visible article columns' },
+    { path: '/accounts', label: 'Visible account columns' },
+    { path: '/albums', label: 'Visible album columns' },
+    { path: '/jobs', label: 'Visible job columns' },
+    { path: '/saved-queries', label: 'Visible saved-query columns' }
+  ]) {
+    await page.goto(view.path)
+    const surface = page.locator('.presentation-data-table-surface')
+    const toolbar = surface.locator('.presentation-data-table-toolbar')
+    const selector = page.getByRole('combobox', { name: view.label, exact: true })
+    await expect(selector).toBeVisible()
+    await expect.poll(async () => {
+      const [fieldWidth, surfaceWidth] = await Promise.all([
+        selector.evaluate((element) => element.closest("[data-slot='field']")?.getBoundingClientRect().width),
+        surface.evaluate((element) => element.getBoundingClientRect().width)
+      ])
+      if (fieldWidth === undefined) throw new Error('Table column selector is missing its field wrapper.')
+      return fieldWidth < surfaceWidth
+    }).toBe(true)
+    await expect(toolbar).toBeVisible()
+    await expect(surface.locator('.presentation-data-table-desktop')).toBeVisible()
+  }
   await expectOnlyLoopbackRequests(page)
 })
 
@@ -140,7 +191,7 @@ test('200% page zoom keeps the staged export primary flow usable without whole-d
   await session.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 })
   await expect.poll(() => page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(2)
 
-  await selectRemoteTypeaheadOption(page, 'Selected articles', 'Sanitized article one')
+  await selectRemoteSelectorOption(page, 'Selected articles', 'Sanitized article one')
   await clickButton(page, 'Continue to format')
   await expect(page.getByRole('heading', { name: 'Format and options' })).toBeVisible()
   await clickButton(page, 'Continue to destination')
@@ -157,24 +208,6 @@ async function toggleCheckbox(checkbox: Locator) {
 
 async function clickButton(page: Page, name: string) {
   await page.getByRole('button', { name, exact: true }).evaluate((element) => (element as HTMLButtonElement).click())
-}
-
-async function selectRemoteTypeaheadOption(page: Page, label: string, option: string) {
-  const input = page.getByRole('combobox', { name: label, exact: true })
-  await input.scrollIntoViewIfNeeded()
-  await input.focus()
-  await input.evaluate((element, value) => {
-    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-    nativeSetter?.call(element, value)
-    element.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }))
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-  }, option)
-  const listboxID = await input.getAttribute('aria-controls')
-  if (!listboxID) throw new Error(`Remote selector ${label} did not expose its listbox relationship.`)
-  const listbox = page.locator(`[id=${JSON.stringify(listboxID)}]`)
-  const result = listbox.getByRole('option').filter({ hasText: option }).first()
-  await expect(result).toBeVisible()
-  await result.evaluate((element) => (element as HTMLElement).click())
 }
 
 async function focusWithKeyboard(page: Page, target: Locator) {

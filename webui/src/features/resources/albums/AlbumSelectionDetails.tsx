@@ -16,8 +16,8 @@ export function AlbumSelectionDetails({ album, messages }: AlbumSelectionDetails
   return <TechnicalDetails
     label={`${messages.resources.albums.title}: ${albumIDLabel}`}
     items={[
-      { label: albumIDLabel, value: album.id, copyLabel: albumIDLabel },
-      { label: accountIDLabel, value: album.accountId, copyLabel: accountIDLabel }
+      { label: albumIDLabel, value: album.id, copyLabel: albumIDLabel, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable },
+      { label: accountIDLabel, value: album.accountId, copyLabel: accountIDLabel, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }
     ]}
   />
 }

@@ -24,7 +24,7 @@
 .export-stage-nav li:first-child { border-radius: var(--radius-element) 0 0 var(--radius-element); }
 .export-stage-nav li:last-child { border-radius: 0 var(--radius-element) var(--radius-element) 0; }
 
-.export-stage-nav .astryx-button {
+.export-stage-nav [data-slot='button'] {
   justify-content: flex-start;
   min-width: 0;
 }
@@ -36,7 +36,7 @@
 
 .export-stage {
   display: grid;
-  gap: var(--spacing-4);
+  gap: var(--spacing-3);
 }
 
 .export-stage h2,
@@ -48,8 +48,8 @@
 .export-destination-default,
 .export-destination-advanced {
   display: grid;
-  gap: var(--spacing-3);
-  padding: var(--spacing-3);
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
   border: 0;
   border-radius: var(--radius-inner);
   background: var(--color-background-muted);
@@ -83,7 +83,7 @@
   display: grid;
   gap: var(--spacing-2);
   margin: 0;
-  padding: var(--spacing-3);
+  padding: var(--spacing-2);
   border: 0;
   border-radius: var(--radius-inner);
   background: var(--color-background-muted);
@@ -106,10 +106,6 @@
   font-size: var(--text-body-small-size);
 }
 
-.export-records-mobile {
-  display: none;
-}
-
 @media (max-width: 45rem) {
   .export-stage-nav {
     grid-template-columns: 1fr;
@@ -122,9 +118,9 @@
 
   .export-stage-primary {
     position: sticky;
-    bottom: 0;
+    bottom: var(--safe-area-bottom);
     z-index: 9;
-    padding: var(--spacing-3);
+    padding: var(--spacing-2);
     border: 0;
     border-radius: var(--radius-element);
     background: var(--color-background-surface);
@@ -132,20 +128,12 @@
     justify-content: stretch;
   }
 
-  .export-stage-primary .astryx-button {
+  .export-stage-primary [data-slot='button'] {
     flex: 1 1 0;
   }
 
   .export-stage-primary {
     margin-inline: 0;
     justify-content: stretch;
-  }
-
-  .export-records-table {
-    display: none;
-  }
-
-  .export-records-mobile {
-    display: grid;
   }
 }

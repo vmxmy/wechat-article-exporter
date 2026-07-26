@@ -1,5 +1,6 @@
-import { Toolbar } from '@astryxdesign/core/Toolbar'
+import { Toolbar } from '@/components/controls/Toolbar'
 import type { ReactNode } from 'react'
+import { ActionGroup } from './ActionGroup'
 import './presentation.css'
 
 export interface SelectionActionBarProps {
@@ -19,7 +20,7 @@ export function SelectionActionBar({ selectedCount, countLabel, toolbarLabel, ac
         size="sm"
         variant="muted"
         startContent={<strong className="presentation-selection-count">{countLabel(selectedCount)}</strong>}
-        endContent={<div className="presentation-actions">{actions}{moreActions}</div>}
+        endContent={<ActionGroup align="start">{actions}{moreActions}</ActionGroup>}
       />
     </div>
   )

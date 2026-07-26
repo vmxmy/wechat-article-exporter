@@ -63,6 +63,26 @@ const defaultDraftOptions: ExportBrowserDraftOptions = {
   includeContent: true, includeMetadata: true, includeComments: false, htmlResourcePolicy: 'best-effort'
 }
 
+export interface PagedBrowserView {
+  readonly page: number
+}
+
+const pagedOwnedParameters = new Set(['page'])
+
+export function parsePagedBrowserView(search: string): { readonly state: PagedBrowserView; readonly canonicalSearch: string; readonly needsReplace: boolean } {
+  const source = new URLSearchParams(normalizeSearch(search))
+  const page = parsePositiveInteger(oneValue(source, 'page'), maximumPage) ?? 1
+  const state: PagedBrowserView = { page }
+  const canonicalSearch = serializePagedBrowserView(state, search)
+  return { state, canonicalSearch, needsReplace: canonicalSearch !== normalizeSearch(search) }
+}
+
+export function serializePagedBrowserView(state: PagedBrowserView, currentSearch = ''): string {
+  const params = foreignParametersFor(currentSearch, pagedOwnedParameters)
+  if (state.page > 1 && state.page <= maximumPage) params.set('page', String(state.page))
+  return searchFrom(params)
+}
+
 export function parseArticleBrowserView(search: string): { readonly state: ArticleBrowserView; readonly canonicalSearch: string; readonly needsReplace: boolean } {
   const source = new URLSearchParams(normalizeSearch(search))
   const query: Record<string, unknown> = {}
@@ -255,9 +275,13 @@ function projectArticleQuery(value: unknown): ArticleQuery | undefined {
 }
 
 function foreignArticleParameters(search: string): URLSearchParams {
+  return foreignParametersFor(search, articleOwnedParameters)
+}
+
+function foreignParametersFor(search: string, owned: ReadonlySet<string>): URLSearchParams {
   const source = new URLSearchParams(normalizeSearch(search))
   const params = new URLSearchParams()
-  for (const [key, value] of source) if (!articleOwnedParameters.has(key)) params.append(key, value)
+  for (const [key, value] of source) if (!owned.has(key)) params.append(key, value)
   return params
 }
 

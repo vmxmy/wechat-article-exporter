@@ -78,16 +78,21 @@ test('mobile drawer is labelled, exposes the current page, closes on navigation,
   await installLoopbackFixture(page)
   await page.goto('/articles')
 
-  const toggle = page.getByRole('button', { name: /Open navigation|Open workspace navigation/ })
+  const toggle = page.getByRole('button', { name: 'Open workspace navigation', exact: true })
   await expect(toggle).toBeVisible()
   await toggle.focus()
   await page.keyboard.press('Enter')
 
   const drawer = page.getByRole('dialog', { name: 'Workspace navigation' })
   await expect(drawer).toBeVisible()
-  await expect(drawer.getByText('Current page: Articles', { exact: true })).toBeVisible()
-  await expect(drawer.getByRole('link', { name: 'Articles', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(drawer.getByText('Current page: Articles', { exact: true }).first()).toBeVisible()
+  const currentRouteLink = drawer.getByRole('link', { name: 'Articles', exact: true })
+  await expect(currentRouteLink).toHaveAttribute('aria-current', 'page')
+  await currentRouteLink.click()
+  await expect(drawer).toBeHidden()
 
+  await toggle.click()
+  await expect(drawer).toBeVisible()
   await drawer.getByRole('link', { name: 'Jobs', exact: true }).click()
   await expect(page).toHaveURL(/\/jobs$/)
   await expect(drawer).toBeHidden()
@@ -96,11 +101,58 @@ test('mobile drawer is labelled, exposes the current page, closes on navigation,
   await toggle.focus()
   await page.keyboard.press('Enter')
   await expect(drawer).toBeVisible()
+  await expect(drawer.getByRole('button', { name: 'Close workspace navigation', exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(drawer).toBeHidden()
   await expect(toggle).toBeFocused()
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   expect(pageErrors).toEqual([])
+})
+
+test('route headers expose one level-one heading with their supporting copy', async ({ page }) => {
+  await installLoopbackFixture(page)
+
+  const routes = [
+    { path: '/', title: 'Your local article workspace', description: 'Manage library records, persistent jobs, and local exports' },
+    { path: '/import', title: 'Import one article URL', description: 'Paste one public article URL to import it into this local workspace.' },
+    { path: '/login', title: 'WeChat login', description: 'Check the current local session or start a QR-code login flow.' },
+    { path: '/exports', title: 'Export articles', description: 'Queue a local export using an authorized directory capability.' },
+    { path: '/settings', title: 'Settings and maintenance', description: 'Manage browser-safe local settings and run explicit maintenance checks.' },
+    { path: '/accounts', title: 'Accounts', description: 'Saved local accounts are shown in bounded server pages.' },
+    { path: '/articles', title: 'Articles', description: 'A server-paginated local library view.' },
+    { path: '/albums', title: 'Albums', description: 'Browse saved albums, then traverse their ordered contents' },
+    { path: '/jobs', title: 'Jobs', description: 'Inspect shared persistent jobs' },
+    { path: '/saved-queries', title: 'Saved queries', description: 'Save, update, and remove reusable local article-query definitions.' }
+  ] as const
+
+  for (const route of routes) {
+    await page.goto(route.path)
+    const main = page.locator('#astryx-app-shell-main')
+    const header = main.locator('.presentation-page-header')
+    await expect(main.getByRole('heading', { name: route.title, level: 1 })).toBeVisible()
+    await expect(main.locator('h1')).toHaveCount(1)
+    await expect(header).toContainText(route.description)
+  }
+
+  const loginHeader = page.locator('.presentation-page-header')
+  await page.goto('/login')
+  await expect(loginHeader).toContainText('This legacy deep link remains available.')
+  await expect(loginHeader.locator('.presentation-supporting-copy')).toBeVisible()
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('import keeps its page title out of subordinate headings and navigation focuses the destination title', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/import')
+
+  const main = page.locator('#astryx-app-shell-main')
+  await expect(main.getByRole('heading', { name: 'Import one article URL', level: 1 })).toHaveCount(1)
+  await expect(main.getByRole('heading', { name: 'Import one article URL', level: 2 })).toHaveCount(0)
+
+  await page.getByRole('link', { name: 'Settings', exact: true }).click()
+  await expect(page).toHaveURL(/\/settings$/)
+  await expect(page.getByRole('heading', { name: 'Settings and maintenance', level: 1 })).toBeFocused()
+  await expectOnlyLoopbackRequests(page)
 })
 
 test('legacy login and saved-query deep links remain compatible', async ({ page }) => {

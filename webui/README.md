@@ -8,7 +8,6 @@ This directory builds the local browser workspace embedded by the Go release. It
 pnpm install --frozen-lockfile
 pnpm run lint
 pnpm run typecheck
-pnpm run astryx:doctor
 pnpm run build
 pnpm run sync:go-assets
 pnpm run verify:go-assets
