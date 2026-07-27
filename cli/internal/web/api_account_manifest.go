@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 )
 
 const accountManifestFormField = "manifest"
@@ -25,7 +26,12 @@ func (server *Server) accountManifestRead(writer http.ResponseWriter, request *h
 	if service == nil {
 		return true
 	}
-	manifest, err := service.Export(request.Context())
+	query, err := accountManifestQuery(request)
+	if err != nil {
+		server.invalidAccountManifestInput(writer)
+		return true
+	}
+	manifest, err := service.Export(request.Context(), query)
 	if err != nil {
 		server.accountManifestError(writer, err)
 		return true
@@ -37,6 +43,36 @@ func (server *Server) accountManifestRead(writer http.ResponseWriter, request *h
 	writer.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(writer, manifest)
 	return true
+}
+
+func accountManifestQuery(request *http.Request) (domain.AccountQuery, error) {
+	values := request.URL.Query()
+	for key := range values {
+		if key != "accountId" {
+			return domain.AccountQuery{}, errors.New("account manifest query is invalid")
+		}
+	}
+	ids := values["accountId"]
+	if len(ids) > 50 {
+		return domain.AccountQuery{}, errors.New("account manifest query is invalid")
+	}
+	if len(ids) == 0 {
+		return domain.AccountQuery{}, nil
+	}
+	query := domain.AccountQuery{IDs: make([]domain.AccountID, 0, len(ids))}
+	seen := make(map[domain.AccountID]struct{}, len(ids))
+	for _, value := range ids {
+		id := domain.AccountID(strings.TrimSpace(value))
+		if id == "" {
+			return domain.AccountQuery{}, errors.New("account manifest query is invalid")
+		}
+		if _, exists := seen[id]; exists {
+			return domain.AccountQuery{}, errors.New("account manifest query is invalid")
+		}
+		seen[id] = struct{}{}
+		query.IDs = append(query.IDs, id)
+	}
+	return query, nil
 }
 
 func (server *Server) accountManifestControl(writer http.ResponseWriter, request *http.Request) bool {

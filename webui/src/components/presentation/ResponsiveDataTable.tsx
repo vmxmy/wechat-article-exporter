@@ -13,12 +13,13 @@ interface ResponsiveDataTableProps<T> {
   readonly renderMobileRows: (rows: ReturnType<Table<T>['getRowModel']>['rows']) => ReactNode
   readonly footer?: ReactNode
   readonly isBusy?: boolean
+  readonly toolbarContent?: ReactNode
   readonly renderHeader?: (header: Header<T, unknown>) => ReactNode
   readonly getHeaderAriaSort?: (header: Header<T, unknown>) => 'ascending' | 'descending' | 'none' | undefined
   readonly className?: string
 }
 
-export function ResponsiveDataTable<T>({ table, ariaLabel, visibleColumnsLabel, selectorCopy, emptyContent, renderMobileRows, footer, isBusy = false, renderHeader, getHeaderAriaSort, className }: ResponsiveDataTableProps<T>) {
+export function ResponsiveDataTable<T>({ table, ariaLabel, visibleColumnsLabel, selectorCopy, emptyContent, renderMobileRows, footer, isBusy = false, toolbarContent, renderHeader, getHeaderAriaSort, className }: ResponsiveDataTableProps<T>) {
   const hideableColumns = table.getAllLeafColumns().filter((column) => column.getCanHide())
   const hideableColumnIDs = hideableColumns.map((column) => column.id)
   const visibleColumnIDs = hideableColumns.filter((column) => column.getIsVisible()).map((column) => column.id)
@@ -26,6 +27,7 @@ export function ResponsiveDataTable<T>({ table, ariaLabel, visibleColumnsLabel, 
 
   return <section className={`presentation-data-table-surface${className ? ` ${className}` : ''}`} aria-label={ariaLabel} aria-busy={isBusy || undefined}>
     <div className="presentation-data-table-toolbar">
+      {toolbarContent}
       <MultiSelector
         label={visibleColumnsLabel}
         options={hideableColumns.map((column) => ({ value: column.id, label: typeof column.columnDef.header === 'string' ? column.columnDef.header : column.id }))}

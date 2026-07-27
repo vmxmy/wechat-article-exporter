@@ -26,6 +26,7 @@ import {
   clearExportHandoffForMount,
   saveExportHandoff,
   syncAccount,
+  syncAccounts,
   traverseAlbums,
   validateCredential
 } from '../src/lib/api'
@@ -321,8 +322,10 @@ describe('browser API client', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/jobs/job%20%2F%20one/resume', expect.objectContaining({ body: '{}' }))
   })
 
-  it('sends the selected account synchronization mode without exposing local state', async () => {
+  it('sends selected account synchronization requests without exposing local state', async () => {
     fetchMock
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
+      .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { id: 'job-account-sync' } }))
       .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
       .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { id: 'job-account-sync' } }))
       .mockResolvedValueOnce(jsonResponse({ apiVersion: 'v1', data: { csrfToken: 'csrf-fixture' } }))
@@ -331,12 +334,16 @@ describe('browser API client', () => {
 
     await syncAccount('account / one')
     await syncAccount('account / one', 'full')
+    await syncAccounts(['account / one', 'account / two'], 'full')
 
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/accounts/account%20%2F%20one/sync', expect.objectContaining({
       method: 'POST', body: JSON.stringify({ incremental: true })
     }))
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/v1/accounts/account%20%2F%20one/sync', expect.objectContaining({
       method: 'POST', body: JSON.stringify({ incremental: false })
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/v1/accounts/sync', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ accountIds: ['account / one', 'account / two'], incremental: false })
     }))
   })
 

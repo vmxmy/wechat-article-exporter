@@ -90,6 +90,8 @@ func (server *Server) apiControl(writer http.ResponseWriter, request *http.Reque
 				default:
 					return false
 				}
+			case "/api/v1/accounts/sync":
+				server.accountsSync(writer, request)
 			case "/api/v1/accounts/search":
 				return false
 			case "/api/v1/accounts/resolve", "/api/v1/accounts/resolve-name":
@@ -379,6 +381,38 @@ func (server *Server) accountSync(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 	input.AccountID, input.AccountIDs = id, nil
+	server.startAccountSync(writer, request, input)
+}
+
+func (server *Server) accountsSync(writer http.ResponseWriter, request *http.Request) {
+	if !server.apiMutation(writer, request, http.MethodPost) {
+		return
+	}
+	var input domain.SynchronizeAccountRequest
+	if err := decodeControl(request, &input); err != nil {
+		server.workspaceError(writer, err)
+		return
+	}
+	if input.AccountID != "" || len(input.AccountIDs) == 0 || len(input.AccountIDs) > 50 {
+		server.apiError(writer, http.StatusBadRequest, "invalid_argument", "one to 50 account identifiers are required")
+		return
+	}
+	seen := make(map[domain.AccountID]struct{}, len(input.AccountIDs))
+	for _, id := range input.AccountIDs {
+		if strings.TrimSpace(string(id)) == "" {
+			server.apiError(writer, http.StatusBadRequest, "invalid_argument", "account identifier is invalid")
+			return
+		}
+		if _, exists := seen[id]; exists {
+			server.apiError(writer, http.StatusBadRequest, "invalid_argument", "account identifiers must be unique")
+			return
+		}
+		seen[id] = struct{}{}
+	}
+	server.startAccountSync(writer, request, input)
+}
+
+func (server *Server) startAccountSync(writer http.ResponseWriter, request *http.Request, input domain.SynchronizeAccountRequest) {
 	job, err := server.workspace.SynchronizeAccount(request.Context(), input)
 	if err != nil {
 		server.workspaceError(writer, err)

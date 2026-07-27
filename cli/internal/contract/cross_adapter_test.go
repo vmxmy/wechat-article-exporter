@@ -243,7 +243,7 @@ func newFixture() contractFixture {
 
 func assertDefaultQueries(t *testing.T, fixture contractFixture) {
 	t.Helper()
-	if fixture.library.accountQuery != (domain.AccountQuery{Limit: 50}) || !reflect.DeepEqual(fixture.library.articleQuery, domain.ArticleQuery{Limit: 50}) ||
+	if !reflect.DeepEqual(fixture.library.accountQuery, domain.AccountQuery{Limit: 50}) || !reflect.DeepEqual(fixture.library.articleQuery, domain.ArticleQuery{Limit: 50}) ||
 		!reflect.DeepEqual(fixture.jobs.query, domain.JobQuery{Limit: 50}) {
 		t.Fatalf("adapter queries account=%#v article=%#v job=%#v", fixture.library.accountQuery, fixture.library.articleQuery, fixture.jobs.query)
 	}

@@ -13,6 +13,7 @@ import { ResourceTable } from './ResourceTable'
 import { navigateTo } from '../../app/navigation'
 import { handoffCreatedJob } from '../../lib/jobHandoff'
 import { AccountAddDrawer } from './accounts/AccountAddDrawer'
+import { AccountTableToolbar } from './accounts/AccountTableToolbar'
 import type { AccountDraft, AccountEntryMode } from './accounts/accountEntryTypes'
 import { AlbumSelectionDetails, type AlbumRecordWithAccountName } from './albums/AlbumSelectionDetails'
 export { JobsPage } from './jobs/JobsPage'
@@ -28,7 +29,6 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   const [draft, setDraft] = useState<AccountDraft>({ fakeid: '', name: '', alias: '' })
   const [entryMode, setEntryMode] = useState<AccountEntryMode>('create')
   const [isEntryOpen, setEntryOpen] = useState(false)
-  const [manifest, setManifest] = useState<File | null>(null)
   const [syncMode, setSyncMode] = useState<AccountSyncMode>('incremental')
   const [notice, setNotice] = useState<string>()
   const [discoveryError, setDiscoveryError] = useState<string | undefined>()
@@ -50,8 +50,10 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   const columns = useMemo<ColumnDef<AccountRecord>[]>(() => [
     { accessorKey: 'name', header: messages.resources.accounts.columns.name, meta: { role: 'primaryText' } },
     { accessorKey: 'alias', header: messages.resources.accounts.columns.alias, meta: { role: 'secondaryText' }, cell: ({ getValue }) => getValue<string | undefined>() ?? '—' },
-    { accessorKey: 'articleCount', header: messages.resources.accounts.columns.articles, meta: { role: 'numeric' }, cell: ({ getValue }) => getValue<number | undefined>() ?? 0 },
     { accessorKey: 'lastSyncAt', header: messages.resources.accounts.columns.synced, meta: { role: 'dateTime' }, cell: ({ getValue }) => formatDate(getValue<string | undefined>(), locale) },
+    { accessorKey: 'messageCount', header: messages.resources.accounts.columns.messages, meta: { role: 'numeric' }, cell: ({ getValue }) => getValue<number | undefined>() ?? 0 },
+    { accessorKey: 'articleCount', header: messages.resources.accounts.columns.articles, meta: { role: 'numeric' }, cell: ({ getValue }) => getValue<number | undefined>() ?? 0 },
+    { id: 'syncProgress', header: messages.resources.accounts.columns.progress, meta: { role: 'numeric' }, cell: ({ row }) => formatSyncProgress(row.original) },
     { accessorKey: 'syncCompleted', header: messages.resources.accounts.columns.state, meta: { role: 'status' }, cell: ({ getValue }) => <Status value={getValue<boolean | undefined>() ? 'ready' : 'queued'} locale={locale} /> }
   ], [locale, messages])
   const actions = messages.resources.accounts.actions
@@ -146,15 +148,57 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
     setDeleteConfirmation('')
   }
   const isEmpty = !query.isLoading && !query.isError && (query.data?.data.length ?? 0) === 0
+  const syncSelected = () => {
+    if (selected.length === 0) return
+    if (one) {
+      mutations.syncAccount.mutate({ id: one, mode: syncMode }, {
+        onSuccess: () => setNotice(undefined),
+        onError: () => setNotice(actions.actionFailed)
+      })
+      return
+    }
+    mutations.syncAccounts.mutate({ ids: selected, mode: syncMode }, {
+      onSuccess: () => setNotice(undefined),
+      onError: () => setNotice(actions.actionFailed)
+    })
+  }
+  const exportSelectedManifest = () => {
+    if (selected.length === 0) return
+    window.location.assign(getAccountManifestDownloadURL(selected))
+  }
   return (
     <PageStack as="div">
-      <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.accounts} selectorCopy={messages.selectors} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} headerActions={<Button label={actions.addAccount} variant="primary" onClick={openNewEntry} />} emptyState={isEmpty ? <EmptyState title={messages.resources.accounts.emptyState.title} description={messages.resources.accounts.emptyState.description} headingLevel={3} actions={<Button label={messages.resources.accounts.emptyState.addAccount} variant="primary" onClick={openNewEntry} />} /> : undefined} />
-      <SelectionActionBar selectedCount={selected.length} countLabel={(count) => `${count} ${messages.resources.accounts.selected}`} toolbarLabel={actions.title} actions={<>
-      {one ? <><Button label={actions.edit} variant="secondary" onClick={openEditEntry} /><Selector label={actions.syncMode} options={[{ value: 'incremental', label: actions.incremental }, { value: 'full', label: actions.full }]} value={syncMode} onChange={(next) => setSyncMode(next as AccountSyncMode)} /><Button label={actions.sync} variant="secondary" isLoading={mutations.syncAccount.isPending} onClick={() => mutations.syncAccount.mutate({ id: one, mode: syncMode }, { onSuccess: () => setNotice(undefined), onError: () => setNotice(actions.actionFailed) })} /></> : <p>{actions.selectOne}</p>}
-      </>} moreActions={<div role="group" aria-label={actions.deleteTitle}><Button label={actions.remove} variant="destructive" isLoading={mutations.deleteAccounts.isPending} onClick={openDeleteConfirmation} /></div>} />
-      {one ? <FieldHint>{syncMode === 'incremental' ? actions.incrementalHint : actions.fullHint}</FieldHint> : null}
+      <ResourceTable
+        eyebrow={messages.navigation.library}
+        messages={messages.resources.accounts}
+        selectorCopy={messages.selectors}
+        columns={columns}
+        query={query}
+        pageIndex={pageIndex}
+        onPageChange={setPageIndex}
+        onSelectionChange={setSelected}
+        tableToolbar={<AccountTableToolbar
+          actions={actions}
+          toolbarLabel={actions.title}
+          selectedCount={selected.length}
+          syncMode={syncMode}
+          isSyncing={mutations.syncAccount.isPending || mutations.syncAccounts.isPending}
+          isDeleting={mutations.deleteAccounts.isPending}
+          isManifestImporting={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending}
+          onAdd={openNewEntry}
+          onImport={importManifest}
+          onExport={exportSelectedManifest}
+          exportLabel={actions.downloadManifest}
+          onEdit={openEditEntry}
+          onDelete={openDeleteConfirmation}
+          onSync={syncSelected}
+          onSyncModeChange={setSyncMode}
+        />}
+        emptyState={isEmpty ? <EmptyState title={messages.resources.accounts.emptyState.title} description={messages.resources.accounts.emptyState.description} headingLevel={3} actions={<Button label={messages.resources.accounts.emptyState.addAccount} variant="primary" onClick={openNewEntry} />} /> : undefined}
+      />
+      {selected.length > 0 ? <FieldHint>{syncMode === 'incremental' ? actions.incrementalHint : actions.fullHint}</FieldHint> : null}
       {notice ? <p role="status">{notice}</p> : null}
-      {isEntryOpen ? <AccountAddDrawer isOpen onOpenChange={closeEntry} mode={entryMode} actions={actions} closeLabel={messages.a11y.closeDialog} draft={draft} onDraftChange={setDraft} onSubmit={entryMode === 'edit' ? updateAccount : saveAccount} isSubmitting={entryMode === 'edit' ? mutations.updateAccount.isPending : mutations.saveAccount.isPending} isAuthenticated={isAuthenticated} isSessionResolved={isSessionResolved} search={search} onSearchChange={setSearch} onDiscover={() => { void discoverAccounts() }} isDiscovering={discovery.isFetching} discoveryError={discoveryError} candidates={discovery.data?.data} onCandidateSelect={selectDiscoveryCandidate} articleURL={articleURL} onArticleURLChange={setArticleURL} onResolve={() => { void resolveFromArticle() }} isResolving={isResolving} resolveError={resolveError} resolvedName={resolvedName} manifest={manifest} onManifestChange={setManifest} onManifestImport={importManifest} isManifestImporting={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending} manifestDownloadURL={getAccountManifestDownloadURL()} /> : null}
+      {isEntryOpen ? <AccountAddDrawer isOpen onOpenChange={closeEntry} mode={entryMode} actions={actions} closeLabel={messages.a11y.closeDialog} draft={draft} onDraftChange={setDraft} onSubmit={entryMode === 'edit' ? updateAccount : saveAccount} isSubmitting={entryMode === 'edit' ? mutations.updateAccount.isPending : mutations.saveAccount.isPending} isAuthenticated={isAuthenticated} isSessionResolved={isSessionResolved} search={search} onSearchChange={setSearch} onDiscover={() => { void discoverAccounts() }} isDiscovering={discovery.isFetching} discoveryError={discoveryError} candidates={discovery.data?.data} onCandidateSelect={selectDiscoveryCandidate} articleURL={articleURL} onArticleURLChange={setArticleURL} onResolve={() => { void resolveFromArticle() }} isResolving={isResolving} resolveError={resolveError} resolvedName={resolvedName} /> : null}
       {isDeleteConfirmationOpen ? <TypedConfirmationDialog isOpen onOpenChange={closeDeleteConfirmation} triggerRef={deleteTriggerRef} title={actions.deleteTitle} closeLabel={messages.a11y.closeDialog} description={actions.deleteConfirm} expected={actions.deleteConfirmation(selected)} inputLabel={actions.deleteConfirmationLabel} inputHint={actions.deleteConfirmationHint} actionLabel={actions.confirmDelete} cancelLabel={actions.cancelDelete} confirmation={deleteConfirmation} onConfirmationChange={setDeleteConfirmation} isActionLoading={mutations.deleteAccounts.isPending} onAction={() => mutations.deleteAccounts.mutate({ ids: selected, confirmation: deleteConfirmation }, { onSuccess: () => { setSelected([]); setNotice(undefined); setDeleteConfirmationOpen(false); setDeleteConfirmation('') }, onError: () => setNotice(actions.actionFailed) })} /> : null}
     </PageStack>
   )
@@ -218,6 +262,13 @@ function formatDate(value: string | undefined, locale: Locale) {
   if (!value) return '—'
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+}
+
+function formatSyncProgress(account: AccountRecord) {
+  const total = account.upstreamTotal ?? 0
+  const synchronized = account.messageCount ?? account.syncCursor ?? 0
+  if (total <= 0) return '—'
+  return `${Math.min(100, Math.round((synchronized / total) * 100))}%`
 }
 
 function albumAccountName(album: AlbumRecordWithAccountName, unavailable: string) {

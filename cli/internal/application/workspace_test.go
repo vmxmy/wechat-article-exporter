@@ -233,7 +233,7 @@ func TestWorkspaceReadFacadeUsesApplicationAndReturnsSafeDTOs(t *testing.T) {
 	if err != nil || accounts.Total != 1 || accounts.Items[0].ID != "account-1" {
 		t.Fatalf("Accounts() = %#v, %v", accounts, err)
 	}
-	if library.accountQuery != (domain.AccountQuery{Keyword: "fixture", Offset: 3, Limit: 20}) {
+	if !reflect.DeepEqual(library.accountQuery, domain.AccountQuery{Keyword: "fixture", Offset: 3, Limit: 20}) {
 		t.Fatalf("account query = %#v", library.accountQuery)
 	}
 

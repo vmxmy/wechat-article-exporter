@@ -108,6 +108,9 @@ export interface AccountRecord {
   readonly alias?: string
   readonly description?: string
   readonly articleCount?: number
+  readonly messageCount?: number
+  readonly upstreamTotal?: number
+  readonly syncCursor?: number
   readonly lastSyncAt?: string
   readonly syncCompleted?: boolean
 }
@@ -613,7 +616,13 @@ export async function getArticleSelectorPage(params: ArticleSelectorPageParams, 
 export async function saveAccount(input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>('accounts', 'POST', input) }
 export async function updateAccount(id: string, input: AccountInput): Promise<AccountRecord> { return mutate<AccountRecord>(`accounts/${encodeURIComponent(id)}`, 'PATCH', input) }
 export async function deleteAccounts(ids: readonly string[], confirmation: string): Promise<void> { await mutate('accounts', 'DELETE', { ids, confirm: confirmation }) }
-export function getAccountManifestDownloadURL(): string { return `${apiBase}/accounts/manifest` }
+export function getAccountManifestDownloadURL(ids: readonly string[] = []): string {
+  const selected = ids.map((id) => id.trim()).filter(Boolean)
+  if (selected.length === 0) return `${apiBase}/accounts/manifest`
+  const query = new URLSearchParams()
+  selected.forEach((id) => query.append('accountId', id))
+  return `${apiBase}/accounts/manifest?${query.toString()}`
+}
 export async function uploadAccountManifest(manifest: File): Promise<RestoreUploadReceipt> {
   const csrfToken = await getCSRFToken()
   const form = new FormData()
@@ -627,6 +636,9 @@ export async function importAccountManifest(uploadHandle: string): Promise<Accou
 }
 export async function syncAccount(id: string, mode: AccountSyncMode = 'incremental'): Promise<JobRecord> {
   return mutate<JobRecord>(`accounts/${encodeURIComponent(id)}/sync`, 'POST', { incremental: mode === 'incremental' })
+}
+export async function syncAccounts(ids: readonly string[], mode: AccountSyncMode = 'incremental'): Promise<JobRecord> {
+  return mutate<JobRecord>('accounts/sync', 'POST', { accountIds: ids, incremental: mode === 'incremental' })
 }
 export async function ingestURL(url: string, force = false): Promise<JobRecord> { return mutate<JobRecord>('ingest/url', 'POST', { url, force }) }
 export async function downloadArticles(articleIds: readonly string[], kind: ArticleDownloadKind, force = false): Promise<JobRecord> {

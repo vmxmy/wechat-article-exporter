@@ -412,7 +412,7 @@ func (model Model) areaLoadMatches(message areaLoadedMsg) bool {
 	current := model.areaLoadSnapshot()
 	switch message.area {
 	case AreaAccounts:
-		return message.query.accounts == current.accounts
+		return reflect.DeepEqual(message.query.accounts, current.accounts)
 	case AreaArticles:
 		return reflect.DeepEqual(message.query.articles, current.articles)
 	case AreaAlbums:

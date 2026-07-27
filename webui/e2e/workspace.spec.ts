@@ -35,12 +35,22 @@ test('login clearly reports unavailable account switching', async ({ page }) => 
   await expect(page.getByRole('status').filter({ hasText: 'Account switching is not available for this local session.' })).toBeVisible()
 })
 
-test('account resources keep their primary action and column controls with the table', async ({ page }) => {
+test('account resources keep batch controls and column options in the table toolbar', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.goto('/accounts')
 
-  const pageHeader = page.locator('.presentation-page-header')
-  await expect(pageHeader.getByRole('button', { name: 'Add account', exact: true })).toBeVisible()
+  const surface = page.locator('.presentation-data-table-surface')
+  const toolbar = surface.locator('.presentation-data-table-toolbar')
+  await expect(toolbar.getByRole('button', { name: 'Add account', exact: true })).toBeVisible()
+  await expect(toolbar.getByRole('button', { name: 'Import account manifest', exact: true })).toBeVisible()
+  await expect(toolbar.getByRole('button', { name: 'Download selected account manifest', exact: true })).toBeDisabled()
+  await expect(toolbar.getByRole('button', { name: 'Delete selected account', exact: true })).toBeDisabled()
+  await expect(toolbar.getByRole('button', { name: 'Sync selected account', exact: true })).toBeDisabled()
+
+  await page.getByRole('checkbox', { name: 'Select Fixture Account' }).check()
+  await expect(toolbar.getByRole('button', { name: 'Download selected account manifest', exact: true })).toBeEnabled()
+  await expect(toolbar.getByRole('button', { name: 'Delete selected account', exact: true })).toBeEnabled()
+  await expect(toolbar.getByRole('button', { name: 'Sync selected account', exact: true })).toBeEnabled()
 
   const visibleColumns = page.getByRole('combobox', { name: 'Visible account columns', exact: true })
   await visibleColumns.click()
@@ -108,7 +118,7 @@ test('sanitized account and article selections remain browser-local', async ({ p
   await page.getByRole('checkbox', { name: 'Select Fixture Account' }).check()
   await expect(page.getByRole('checkbox', { name: 'Select account-fixture' })).toHaveCount(0)
   await expect(page.getByRole('table')).not.toContainText('account-fixture')
-  await expect(page.getByRole('region', { name: 'Account actions' })).toContainText('1 selected')
+  await expect(page.getByRole('group', { name: 'Account actions' })).toBeVisible()
   await page.goto('/articles')
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized article one' }))
   await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 selected')
@@ -463,17 +473,21 @@ test('article metrics and resource details stay bounded and sanitized while reso
   await expectOnlyLoopbackRequests(page)
 })
 
-test('account manifest controls download and import locally without retaining file details', async ({ page }) => {
+test('account manifest controls export selected records and import locally without retaining file details', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
   await page.goto('/accounts')
-  await page.getByRole('button', { name: 'Add account', exact: true }).click()
+  const toolbar = page.locator('.presentation-data-table-toolbar')
 
-  const downloadLink = page.getByRole('link', { name: 'Download account manifest' })
-  await expect(downloadLink).toHaveAttribute('href', '/api/v1/accounts/manifest')
+  const exportButton = toolbar.getByRole('button', { name: 'Download selected account manifest' })
+  await expect(exportButton).toBeDisabled()
+  await page.getByRole('checkbox', { name: 'Select Fixture Account' }).check()
+  const exportRequest = page.waitForRequest((request) => request.method() === 'GET' && request.url().endsWith('/api/v1/accounts/manifest?accountId=account-fixture'))
+  await exportButton.click()
+  await exportRequest
 
   const uploadRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/accounts/manifest/upload'))
   const importRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/accounts/manifest/import'))
-  const manifestInput = page.getByRole('button', { name: 'Import account manifest' }).locator('input[type="file"]')
+  const manifestInput = toolbar.getByRole('button', { name: 'Import account manifest' }).locator('input[type="file"]')
   await manifestInput.setInputFiles({ name: 'private-accounts.json', mimeType: 'application/json', buffer: Buffer.from('{"schemaVersion":1,"accounts":[]}') })
   const upload = await uploadRequest
   expect(await upload.headerValue('content-type')).toContain('multipart/form-data')

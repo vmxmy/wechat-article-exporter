@@ -172,7 +172,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
     state.savedAccounts.push(body)
     return json(route, { id: 'account-discovered', fakeid: body?.fakeid, name: body?.name, alias: body?.alias, articleCount: 0, syncCompleted: false })
   }
-  if (url.pathname === '/api/v1/accounts/account-discovered/sync' && method === 'POST') {
+  if ((url.pathname === '/api/v1/accounts/account-discovered/sync' || url.pathname === '/api/v1/accounts/sync') && method === 'POST') {
     state.accountSyncs.push({ path: url.pathname, incremental: body?.incremental === true })
     return json(route, { id: 'job-account-sync-fixture', kind: 'account_sync', label: 'Account Sync', state: 'queued', createdAt: now, updatedAt: now })
   }
@@ -195,7 +195,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
     if (state.loginState !== 'authenticated') return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'authentication_required', message: 'workspace session must be authenticated' } }) })
     return json(route, { id: 'resolved-account', fakeid: 'fixture-resolved', name: 'Resolved Account', alias: 'resolved', articleCount: 0, syncCompleted: false })
   }
-  if (url.pathname === '/api/v1/accounts/manifest') return route.fulfill({ contentType: 'application/json', headers: { 'content-disposition': 'attachment; filename="wechat-article-accounts-manifest.json"' }, body: '{"schemaVersion":1,"accounts":[]}' })
+  if (url.pathname === '/api/v1/accounts/manifest') return route.fulfill({ contentType: 'application/json', headers: { 'content-disposition': 'attachment; filename="wechat-article-accounts-manifest.json"' }, body: JSON.stringify({ schemaVersion: 1, accounts: url.searchParams.getAll('accountId').map((id) => ({ id, fakeid: 'fixture-account', name: 'Fixture Account' })) }) })
   if (url.pathname === '/api/v1/accounts/manifest/upload') return json(route, { handle: 'account-manifest-upload-fixture', sizeBytes: 24, sha256: 'e'.repeat(64), expiresAt: '2026-07-24T09:45:00.000Z' })
   if (url.pathname === '/api/v1/accounts/manifest/import') { state.accountManifestImports.push(body); return json(route, { report: { added: 1, merged: 2, unchanged: 3 } }) }
   if (url.pathname === '/api/v1/articles') {

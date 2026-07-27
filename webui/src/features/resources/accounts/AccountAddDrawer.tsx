@@ -1,7 +1,5 @@
 import { Button } from '@/components/controls/Button'
 import { Collapsible } from '@/components/controls/Collapsible'
-import { FileInput } from '@/components/controls/FileInput'
-import { Link } from '@/components/controls/Link'
 import { TextInput } from '@/components/controls/TextInput'
 import { ActionGroup, FieldHint, FormDrawer, FormGrid, Panel } from '../../../components/presentation'
 import { navigateTo } from '../../../app/navigation'
@@ -34,11 +32,6 @@ export interface AccountAddDrawerProps {
   readonly isResolving: boolean
   readonly resolveError?: string
   readonly resolvedName?: string
-  readonly manifest: File | null
-  readonly onManifestChange: (manifest: File | null) => void
-  readonly onManifestImport: (manifest: File) => Promise<void>
-  readonly isManifestImporting: boolean
-  readonly manifestDownloadURL: string
 }
 
 export function AccountAddDrawer({
@@ -65,12 +58,7 @@ export function AccountAddDrawer({
   onResolve,
   isResolving,
   resolveError,
-  resolvedName,
-  manifest,
-  onManifestChange,
-  onManifestImport,
-  isManifestImporting,
-  manifestDownloadURL
+  resolvedName
 }: AccountAddDrawerProps) {
   const candidateSelected = Boolean(draft.fakeid.trim())
   // A discovered candidate OR a manually entered fakeid both satisfy the save contract.
@@ -79,14 +67,6 @@ export function AccountAddDrawer({
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (canSubmit) onSubmit()
-  }
-  const importManifest = async (selected: File | File[] | null) => {
-    if (!(selected instanceof File)) return
-    try {
-      await onManifestImport(selected)
-    } finally {
-      onManifestChange(null)
-    }
   }
   const goToLogin = () => {
     onOpenChange(false)
@@ -190,22 +170,6 @@ export function AccountAddDrawer({
         <FieldHint>{actions.fakeidHint}</FieldHint>
         <TextInput label={actions.fakeid} value={draft.fakeid} onChange={(fakeid) => onDraftChange({ ...draft, fakeid })} isRequired />
       </Collapsible>
-
-      <section aria-labelledby="account-manifest-title">
-        <h3 id="account-manifest-title">{actions.importManifest}</h3>
-        <Link href={manifestDownloadURL} isStandalone>{actions.downloadManifest}</Link>
-        <FileInput
-          label={actions.importManifest}
-          value={manifest}
-          onChange={(next) => onManifestChange(next instanceof File ? next : null)}
-          changeAction={importManifest}
-          accept="application/json,.json"
-          description={actions.manifestHint}
-          isDisabled={isManifestImporting}
-          isLoading={isManifestImporting}
-          mode="input"
-        />
-      </section>
     </FormDrawer>
   )
 }

@@ -27,7 +27,7 @@ func TestAccountManifestServiceExportsAndImportsThroughApplication(t *testing.T)
 		t.Fatal(err)
 	}
 
-	exported, err := service.Export(context.Background())
+	exported, err := service.Export(context.Background(), domain.AccountQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}

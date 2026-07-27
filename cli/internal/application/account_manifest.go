@@ -47,11 +47,11 @@ func NewAccountManifestService(application Application, uploads *UploadStagingSe
 	return &AccountManifestService{application: application, uploads: uploads}, nil
 }
 
-func (service *AccountManifestService) Export(ctx context.Context) (io.ReadCloser, error) {
+func (service *AccountManifestService) Export(ctx context.Context, query domain.AccountQuery) (io.ReadCloser, error) {
 	if service == nil || service.application == nil {
 		return nil, ErrUnavailable
 	}
-	manifest, err := service.application.ExportAccounts(ctx, domain.AccountQuery{})
+	manifest, err := service.application.ExportAccounts(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("export account manifest: %w", err)
 	}

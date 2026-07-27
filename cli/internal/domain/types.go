@@ -126,9 +126,10 @@ type StorageStatus struct {
 }
 
 type AccountQuery struct {
-	Keyword string `json:"keyword,omitempty"`
-	Offset  int    `json:"offset,omitempty"`
-	Limit   int    `json:"limit,omitempty"`
+	IDs     []AccountID `json:"ids,omitempty"`
+	Keyword string      `json:"keyword,omitempty"`
+	Offset  int         `json:"offset,omitempty"`
+	Limit   int         `json:"limit,omitempty"`
 }
 
 type AccountManifest struct {

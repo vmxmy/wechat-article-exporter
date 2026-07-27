@@ -486,6 +486,7 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 		{"/api/v1/login/poll", `{}`, http.StatusOK, false},
 		{"/api/v1/login/complete", `{}`, http.StatusOK, false},
 		{"/api/v1/accounts/account-1/sync", `{"incremental":true,"pageSize":20}`, http.StatusAccepted, true},
+		{"/api/v1/accounts/sync", `{"accountIds":["account-1","account-2"],"incremental":true}`, http.StatusAccepted, true},
 		{"/api/v1/ingest/url", `{"url":"https://mp.weixin.qq.com/s/fixture"}`, http.StatusAccepted, true},
 		{"/api/v1/articles/download", `{"articleIds":["article-1"]}`, http.StatusAccepted, true},
 		{"/api/v1/articles/metadata", `{"articleIds":["article-1"]}`, http.StatusAccepted, true},
@@ -507,11 +508,11 @@ func TestControlAPIUsesWorkspaceFacadeWithExactConfirmations(t *testing.T) {
 		}
 		response.Body.Close()
 	}
-	if app.loginSessionID != "browser-session" || app.syncRequest.AccountID != "account-1" || app.albumRequest.AccountID != "account-1" || app.albumRequest.AlbumID != "album-1" || app.albumRequest.Order != wechat.AlbumReverse || !app.albumBatch || len(app.downloadRequests) != 5 {
+	if app.loginSessionID != "browser-session" || app.albumRequest.AccountID != "account-1" || app.albumRequest.AlbumID != "album-1" || app.albumRequest.Order != wechat.AlbumReverse || !app.albumBatch || len(app.downloadRequests) != 5 {
 		t.Fatalf("control inputs were not routed through application: login=%q sync=%#v album=%#v batch=%t downloads=%#v", app.loginSessionID, app.syncRequest, app.albumRequest, app.albumBatch, app.downloadRequests)
 	}
-	if !app.syncRequest.Incremental || app.syncRequest.PageSize != 20 {
-		t.Fatalf("incremental account sync request = %#v", app.syncRequest)
+	if !app.syncRequest.Incremental || len(app.syncRequest.AccountIDs) != 2 || app.syncRequest.AccountIDs[0] != "account-1" || app.syncRequest.AccountIDs[1] != "account-2" {
+		t.Fatalf("batch account sync request = %#v", app.syncRequest)
 	}
 	response := mutate("/api/v1/accounts/account-1/sync", `{"incremental":false}`)
 	if response.StatusCode != http.StatusAccepted {
@@ -784,7 +785,7 @@ func TestSelectorAndReadableProjectionAPIContracts(t *testing.T) {
 		t.Fatalf("account selector status=%d body=%s", response.StatusCode, readResponse(t, response))
 	}
 	accountBody := readResponse(t, response)
-	if app.accountQuery != (domain.AccountQuery{Keyword: "read", Offset: 25, Limit: 25}) {
+	if !reflect.DeepEqual(app.accountQuery, domain.AccountQuery{Keyword: "read", Offset: 25, Limit: 25}) {
 		t.Fatalf("account selector query=%#v", app.accountQuery)
 	}
 	for _, required := range []string{`"id":"account-1"`, `"displayName":"Readable"`, `"displayNameAvailable":true`, `"id":"account-2"`, `"displayNameAvailable":false`, `"pageSize":25`} {

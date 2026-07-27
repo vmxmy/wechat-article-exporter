@@ -285,6 +285,25 @@ func (database *Database) QueryAccounts(ctx context.Context, query domain.Accoun
 	keyword := "%" + strings.TrimSpace(query.Keyword) + "%"
 	where := "profile_id = ?"
 	arguments := []any{database.profileID}
+	if len(query.IDs) > 0 {
+		placeholders := make([]string, 0, len(query.IDs))
+		seen := make(map[domain.AccountID]struct{}, len(query.IDs))
+		for _, id := range query.IDs {
+			if strings.TrimSpace(string(id)) == "" {
+				return domain.Page[domain.Account]{}, errors.New("account identifier is required")
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			placeholders = append(placeholders, "?")
+			arguments = append(arguments, id)
+		}
+		if len(placeholders) == 0 {
+			return domain.Page[domain.Account]{}, errors.New("account identifier is required")
+		}
+		where += " AND id IN (" + strings.Join(placeholders, ",") + ")"
+	}
 	if query.Keyword != "" {
 		where += " AND (nickname LIKE ? OR alias LIKE ? OR fakeid LIKE ? OR signature LIKE ?)"
 		arguments = append(arguments, keyword, keyword, keyword, keyword)

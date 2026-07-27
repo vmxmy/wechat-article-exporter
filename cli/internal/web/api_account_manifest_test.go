@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -143,9 +144,36 @@ func TestAccountManifestReadAPIIsAuthenticatedGETOnlyAndStreamsBareManifest(t *t
 	if manifest.SchemaVersion != 1 || len(manifest.Accounts) != 1 || manifest.Accounts[0].ID != "account-1" || manifest.Accounts[0].AvatarURL != "https://example.invalid/avatar.png" {
 		t.Fatalf("manifest = %#v", manifest)
 	}
-	if app.exportCalls != 1 || app.exportQuery != (domain.AccountQuery{}) {
+	if app.exportCalls != 1 || !reflect.DeepEqual(app.exportQuery, domain.AccountQuery{}) {
 		t.Fatalf("export calls=%d query=%#v; want one unfiltered export", app.exportCalls, app.exportQuery)
 	}
+}
+
+func TestAccountManifestReadAPIExportsOnlyRequestedAccountIDs(t *testing.T) {
+	app := &accountManifestApplication{manifest: domain.AccountManifest{SchemaVersion: 1, Accounts: []domain.Account{{ID: "account-1", FakeID: "fixture", Name: "Fixture"}}}}
+	server, client := startAccountManifestServer(t, app, 1024)
+	base := authorizeAPI(t, client, server.URL())
+
+	response, err := client.Get(base + "/api/v1/accounts/manifest?accountId=account-1&accountId=account-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("selected manifest status=%d", response.StatusCode)
+	}
+	if !reflect.DeepEqual(app.exportQuery, domain.AccountQuery{IDs: []domain.AccountID{"account-1", "account-2"}}) {
+		t.Fatalf("selected export query=%#v", app.exportQuery)
+	}
+
+	response, err = client.Get(base + "/api/v1/accounts/manifest?accountId=account-1&accountId=account-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("duplicate selected manifest status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	assertAPIError(t, response, "invalid_argument")
 }
 
 func TestAccountManifestReadAPIReportsUnavailable(t *testing.T) {
@@ -161,7 +189,7 @@ func TestAccountManifestReadAPIReportsUnavailable(t *testing.T) {
 		t.Fatalf("unavailable export status=%d body=%s", response.StatusCode, readResponse(t, response))
 	}
 	assertAPIError(t, response, "unavailable")
-	if app.exportCalls != 1 || app.exportQuery != (domain.AccountQuery{}) {
+	if app.exportCalls != 1 || !reflect.DeepEqual(app.exportQuery, domain.AccountQuery{}) {
 		t.Fatalf("export calls=%d query=%#v; want one unfiltered attempted export", app.exportCalls, app.exportQuery)
 	}
 }

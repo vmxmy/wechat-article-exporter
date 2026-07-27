@@ -27,11 +27,12 @@ export interface ResourceTableProps<T> {
   readonly selectionScope?: string
   readonly hideHeader?: boolean
   readonly headerActions?: ReactNode
+  readonly tableToolbar?: ReactNode
   /** Custom empty-state body shown in place of the default empty row when there are zero rows. */
   readonly emptyState?: ReactNode
 }
 
-export function ResourceTable<T extends { readonly id?: string; readonly name?: string }>({ eyebrow, messages, selectorCopy, columns, query, pageIndex, onPageChange, onSelectionChange, preserveSelectionAcrossPages = false, maximumSelectedIDs, selectionScope, hideHeader = false, headerActions, emptyState }: ResourceTableProps<T>) {
+export function ResourceTable<T extends { readonly id?: string; readonly name?: string }>({ eyebrow, messages, selectorCopy, columns, query, pageIndex, onPageChange, onSelectionChange, preserveSelectionAcrossPages = false, maximumSelectedIDs, selectionScope, hideHeader = false, headerActions, tableToolbar, emptyState }: ResourceTableProps<T>) {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({})
   const selectionChangeRef = useRef(onSelectionChange)
@@ -106,6 +107,7 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
             selectorCopy={selectorCopy}
             emptyContent={emptyState ?? messages.empty}
             isBusy={query.isFetching}
+            toolbarContent={tableToolbar}
             footer={<nav className="pagination" aria-label={messages.pagination}>
               <Button label={messages.previous} variant="secondary" size="sm" isDisabled={pageIndex === 0} onClick={() => onPageChange(pageIndex - 1)} />
               <span>{messages.page(pageIndex + 1, totalPages)}</span>
