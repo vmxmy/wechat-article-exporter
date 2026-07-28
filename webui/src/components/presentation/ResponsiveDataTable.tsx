@@ -1,14 +1,10 @@
-import { MultiSelector } from '@/components/controls/MultiSelector'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type Header, type Table, type VisibilityState } from '@tanstack/react-table'
 import { useMemo, useState, type ReactNode } from 'react'
-import type { SelectorCopy } from '@/components/controls/selector-parts'
-import { getNextVisibleColumnIDs, getTableColumnClassName } from '@/lib/presentation'
+import { getTableColumnClassName } from '@/lib/presentation'
 
 interface ResponsiveDataTableProps<T> {
   readonly table: Table<T>
   readonly ariaLabel: string
-  readonly visibleColumnsLabel: string
-  readonly selectorCopy: Pick<SelectorCopy, 'clear' | 'search' | 'noResults' | 'selectAll' | 'selected'>
   readonly emptyContent: ReactNode
   readonly renderMobileRows: (rows: ReturnType<Table<T>['getRowModel']>['rows']) => ReactNode
   readonly footer?: ReactNode
@@ -19,29 +15,11 @@ interface ResponsiveDataTableProps<T> {
   readonly className?: string
 }
 
-export function ResponsiveDataTable<T>({ table, ariaLabel, visibleColumnsLabel, selectorCopy, emptyContent, renderMobileRows, footer, isBusy = false, toolbarContent, renderHeader, getHeaderAriaSort, className }: ResponsiveDataTableProps<T>) {
-  const hideableColumns = table.getAllLeafColumns().filter((column) => column.getCanHide())
-  const hideableColumnIDs = hideableColumns.map((column) => column.id)
-  const visibleColumnIDs = hideableColumns.filter((column) => column.getIsVisible()).map((column) => column.id)
+export function ResponsiveDataTable<T>({ table, ariaLabel, emptyContent, renderMobileRows, footer, isBusy = false, toolbarContent, renderHeader, getHeaderAriaSort, className }: ResponsiveDataTableProps<T>) {
   const rows = table.getRowModel().rows
 
   return <section className={`presentation-data-table-surface${className ? ` ${className}` : ''}`} aria-label={ariaLabel} aria-busy={isBusy || undefined}>
-    <div className="presentation-data-table-toolbar">
-      {toolbarContent}
-      <MultiSelector
-        label={visibleColumnsLabel}
-        options={hideableColumns.map((column) => ({ value: column.id, label: typeof column.columnDef.header === 'string' ? column.columnDef.header : column.id }))}
-        value={visibleColumnIDs}
-        onChange={(requestedVisibleColumnIDs) => {
-          const nextVisible = new Set(getNextVisibleColumnIDs(hideableColumnIDs, requestedVisibleColumnIDs))
-          hideableColumns.forEach((column) => column.toggleVisibility(nextVisible.has(column.id)))
-        }}
-        copy={selectorCopy}
-        triggerDisplay="count"
-        hasSelectAll
-        isLabelHidden
-      />
-    </div>
+    {toolbarContent ? <div className="presentation-data-table-toolbar">{toolbarContent}</div> : null}
     <div className="presentation-data-table-desktop data-table-wrap">
       <table className="data-table">
         <thead>{table.getHeaderGroups().map((group) => <tr key={group.id}>{group.headers.map((header) => <th key={header.id} scope="col" className={getTableColumnClassName(header.column.columnDef)} aria-sort={getHeaderAriaSort?.(header)}>{header.isPlaceholder ? null : renderHeader ? renderHeader(header) : flexRender(header.column.columnDef.header, header.getContext())}</th>)}</tr>)}</thead>

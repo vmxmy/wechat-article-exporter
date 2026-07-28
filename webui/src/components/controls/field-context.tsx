@@ -14,6 +14,10 @@ export interface ControlFieldProps {
   htmlFor?: string
   labelId?: string
   descriptionId?: string
+  /** `inline` places the label on the same row as the control; `compact` stacks it above. */
+  layout?: 'inline' | 'compact'
+  /** `lg` is the roomier control size used in toolbars; `sm` is the default compact size. */
+  size?: 'sm' | 'lg'
   children: React.ReactNode
 }
 
@@ -26,10 +30,12 @@ export function ControlField({
   htmlFor,
   labelId,
   descriptionId,
+  layout = 'compact',
+  size = 'sm',
   children,
 }: ControlFieldProps) {
   return (
-    <ShadcnField>
+    <ShadcnField data-control-layout={layout} data-control-size={size}>
       {isLabelHidden ? null : (
         <FieldLabel id={labelId} htmlFor={htmlFor}>
           {label}

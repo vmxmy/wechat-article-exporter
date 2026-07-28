@@ -171,15 +171,16 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
       <ResourceTable
         eyebrow={messages.navigation.library}
         messages={messages.resources.accounts}
-        selectorCopy={messages.selectors}
         columns={columns}
         query={query}
         pageIndex={pageIndex}
         onPageChange={setPageIndex}
         onSelectionChange={setSelected}
+        selectionLabel={(count) => `${count} ${messages.resources.accounts.selected}`}
         tableToolbar={<AccountTableToolbar
           actions={actions}
-          toolbarLabel={actions.title}
+          toolbarLabel={actions.toolbarLabel}
+          selectionActionsLabel={actions.selectionActions}
           selectedCount={selected.length}
           syncMode={syncMode}
           isSyncing={mutations.syncAccount.isPending || mutations.syncAccounts.isPending}
@@ -251,7 +252,7 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
       <SectionHeader title={messages.resources.albums.filters.title} titleId="album-filters-title" description={messages.resources.albums.filters.description} />
       <div className="account-action-form"><AccountRemoteSelector label={messages.resources.accounts.columns.name} value={accountId} onChange={(next) => { setAccountId(next); setPageIndex(0); setSelected([]) }} placeholder={messages.articles.filters.any} copy={messages.selectors} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={updateFilter(setKeyword)} /></div>
     </Panel>
-    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} selectorCopy={messages.selectors} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} preserveSelectionAcrossPages maximumSelectedIDs={maximumSelectedAlbumIDs} selectionScope={selectionScope} hideHeader />
+    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} preserveSelectionAcrossPages maximumSelectedIDs={maximumSelectedAlbumIDs} selectionScope={selectionScope} hideHeader />
     <SelectionActionBar selectedCount={selected.length} countLabel={(count) => `${count} ${messages.resources.albums.selected}`} toolbarLabel={messages.resources.albums.actions.title} actions={<><Selector label={messages.resources.albums.actions.order} options={[{ value: 'forward', label: messages.resources.albums.actions.forward }, { value: 'reverse', label: messages.resources.albums.actions.reverse }]} value={order} onChange={(next) => setOrder(next as AlbumTraversalOrder)} /><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" onClick={handoffExport} /></>} />
     <AlbumSelectionDetails album={album} messages={messages} />
     {notice ? <p role="status">{notice}</p> : null}

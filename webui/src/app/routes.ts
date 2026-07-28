@@ -32,6 +32,7 @@ const sidebarRoutes: readonly RouteEntry[] = navigationItems.map((item) => ({
 
 const hiddenRoutes: readonly RouteEntry[] = [
   { key: 'login', href: '/login', visibility: 'hidden', titleKey: 'login' },
+  { key: 'import', href: '/import', visibility: 'hidden', titleKey: 'import' },
   { key: 'saved-queries', href: '/saved-queries', visibility: 'hidden', titleKey: 'savedQueries' }
 ]
 

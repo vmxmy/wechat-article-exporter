@@ -6,6 +6,8 @@ export interface ToolbarProps {
   label: string
   size?: 'sm'
   variant?: 'muted'
+  /** Narrow viewport at which the toolbar's groups wrap to stacked rows. */
+  stackAt?: 'never' | 'compact' | 'medium'
   startContent?: ReactNode
   endContent?: ReactNode
   children?: ReactNode
@@ -16,6 +18,7 @@ export function Toolbar({
   label,
   size,
   variant,
+  stackAt = 'medium',
   startContent,
   endContent,
   children,
@@ -25,6 +28,7 @@ export function Toolbar({
     <div
       role="toolbar"
       aria-label={label}
+      data-stack-at={stackAt}
       className={cn(
         'flex items-center justify-between gap-2',
         size === 'sm' && 'min-h-8 px-2 py-1',
@@ -32,7 +36,7 @@ export function Toolbar({
         className,
       )}
     >
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         {startContent}
         {children}
       </div>

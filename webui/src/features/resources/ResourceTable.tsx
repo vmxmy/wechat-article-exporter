@@ -10,7 +10,6 @@ import type { PaginatedResponse } from '../../lib/api'
 export interface ResourceTableProps<T> {
   readonly eyebrow: string
   readonly messages: MessageCatalog['resources'][keyof MessageCatalog['resources']]
-  readonly selectorCopy: MessageCatalog['selectors']
   readonly columns: ColumnDef<T>[]
   readonly query: {
     readonly data?: PaginatedResponse<T>
@@ -30,9 +29,12 @@ export interface ResourceTableProps<T> {
   readonly tableToolbar?: ReactNode
   /** Custom empty-state body shown in place of the default empty row when there are zero rows. */
   readonly emptyState?: ReactNode
+  /** Localizes the selection count shown in the footer summary (desktop only;
+      the toolbar is hidden at 390px so this keeps the count reachable). */
+  readonly selectionLabel?: (count: number) => string
 }
 
-export function ResourceTable<T extends { readonly id?: string; readonly name?: string }>({ eyebrow, messages, selectorCopy, columns, query, pageIndex, onPageChange, onSelectionChange, preserveSelectionAcrossPages = false, maximumSelectedIDs, selectionScope, hideHeader = false, headerActions, tableToolbar, emptyState }: ResourceTableProps<T>) {
+export function ResourceTable<T extends { readonly id?: string; readonly name?: string }>({ eyebrow, messages, columns, query, pageIndex, onPageChange, onSelectionChange, preserveSelectionAcrossPages = false, maximumSelectedIDs, selectionScope, hideHeader = false, headerActions, tableToolbar, emptyState, selectionLabel }: ResourceTableProps<T>) {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({})
   const selectionChangeRef = useRef(onSelectionChange)
@@ -87,6 +89,12 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
   const totalPages = query.data ? Math.max(1, Math.ceil(query.data.pagination.total / query.data.pagination.pageSize)) : 1
   const titleID = `${eyebrow.toLowerCase().replaceAll(' ', '-')}-title`
   const hasResults = !query.isLoading && !query.isError
+  const selectedCount = Object.values(rowSelection).filter(Boolean).length
+  const pageSize = query.data?.pagination.pageSize ?? 0
+  const pageRowCount = query.data?.data.length ?? 0
+  const rangeStart = pageRowCount === 0 ? 0 : pageIndex * pageSize + 1
+  const rangeEnd = pageRowCount === 0 ? 0 : rangeStart + pageRowCount - 1
+  const totalRows = query.data?.pagination.total
 
   return (
     <SectionStack as="section" gap="section" aria-labelledby={hideHeader ? undefined : titleID}>
@@ -103,16 +111,21 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
           <ResponsiveDataTable
             table={table}
             ariaLabel={messages.title}
-            visibleColumnsLabel={messages.visibleColumns}
-            selectorCopy={selectorCopy}
             emptyContent={emptyState ?? messages.empty}
             isBusy={query.isFetching}
             toolbarContent={tableToolbar}
-            footer={<nav className="pagination" aria-label={messages.pagination}>
-              <Button label={messages.previous} variant="secondary" size="sm" isDisabled={pageIndex === 0} onClick={() => onPageChange(pageIndex - 1)} />
-              <span>{messages.page(pageIndex + 1, totalPages)}</span>
-              <Button label={messages.next} variant="secondary" size="sm" isDisabled={pageIndex + 1 >= totalPages} onClick={() => onPageChange(pageIndex + 1)} />
-            </nav>}
+            footer={<>
+              <p className="presentation-data-table-summary" aria-live="polite">
+                {messages.rangeSummary(rangeStart, rangeEnd, totalRows)}
+                {selectedCount > 0 && selectionLabel ? <span className="presentation-data-table-summary-selection">{selectionLabel(selectedCount)}</span> : null}
+                {query.isFetching ? <span className="presentation-data-table-summary-updating">{messages.updating}</span> : null}
+              </p>
+              <nav className="pagination" aria-label={messages.pagination}>
+                <Button label={messages.previous} variant="secondary" size="sm" isDisabled={pageIndex === 0} onClick={() => onPageChange(pageIndex - 1)} />
+                <span>{messages.page(pageIndex + 1, totalPages)}</span>
+                <Button label={messages.next} variant="secondary" size="sm" isDisabled={pageIndex + 1 >= totalPages} onClick={() => onPageChange(pageIndex + 1)} />
+              </nav>
+            </>}
             renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow
               key={row.id}
               title={resourcePrimaryCell(row, columns)}

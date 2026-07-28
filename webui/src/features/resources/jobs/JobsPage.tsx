@@ -1,4 +1,5 @@
 import { Button } from '@/components/controls/Button'
+import { Toolbar } from '@/components/controls/Toolbar'
 import { ActionGroup, DefinitionList, DetailPanel, PageStack, SectionHeader, Status, TechnicalDetails, TypedConfirmationDialog } from '../../../components/presentation'
 import { formatCount, formatDateTime, formatDuration, formatJobKind, formatStatus } from '../../../lib/presentation'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -22,12 +23,15 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   const [notice, setNotice] = useState<string>()
   const [confirmationAction, setConfirmationAction] = useState<JobConfirmationAction>()
   const [confirmationProof, setConfirmationProof] = useState('')
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>('all')
   const confirmationTrigger = useRef<HTMLElement | null>(null)
   const query = useJobPage({ page: pageIndex + 1, pageSize })
   const selectedID = selected.length === 1 ? selected[0] : undefined
   const detail = useJobDetail(selectedID)
   const mutations = useWorkspaceMutations()
   const actions = messages.resources.jobs.actions
+  const filterCounts = useMemo(() => countByFilter(query.data?.data ?? []), [query.data])
+  const filteredQuery = useMemo(() => filterQuery(query, taskFilter), [query, taskFilter])
   const columns = useMemo<ColumnDef<JobRecord>[]>(() => [
     { id: 'label', header: messages.resources.jobs.title, meta: { role: 'primaryText' }, cell: ({ row }) => <JobLabel job={row.original} locale={locale} /> },
     { accessorKey: 'kind', header: messages.resources.jobs.columns.kind, meta: { role: 'secondaryText' }, cell: ({ getValue }) => formatJobKind(getValue<string>(), locale).label },
@@ -74,8 +78,28 @@ export function JobsPage({ messages, locale }: { readonly messages: MessageCatal
   }
 
   const confirmation = confirmationAction && selectedID ? jobConfirmation(actions, confirmationAction, selectedID) : undefined
+  const tabs = messages.resources.jobs.filterTabs
+  const filterToolbar = (
+    <Toolbar className="jobs-filter-toolbar" label={messages.resources.jobs.filterToolbarLabel} stackAt="medium">
+      <div className="jobs-filter-tabs" role="tablist" aria-label={messages.resources.jobs.title}>
+        {(['all', 'active', 'done', 'attention'] as const).map((filter) => (
+          <button
+            key={filter}
+            type="button"
+            role="tab"
+            aria-selected={taskFilter === filter}
+            className={`jobs-filter-tab${taskFilter === filter ? ' jobs-filter-tab-active' : ''}`}
+            onClick={() => { setTaskFilter(filter); setSelected([]); setDetailOpen(false) }}
+          >
+            <span>{tabs[filter]}</span>
+            <span className="jobs-filter-tab-count" aria-hidden="true">{tabs.count(filterCounts[filter])}</span>
+          </button>
+        ))}
+      </div>
+    </Toolbar>
+  )
   return <PageStack as="div">
-    <ResourceTable eyebrow={messages.navigation.operations} messages={messages.resources.jobs} selectorCopy={messages.selectors} columns={columns} query={query} pageIndex={pageIndex} onPageChange={changePage} onSelectionChange={updateSelection} />
+    <ResourceTable eyebrow={messages.navigation.operations} messages={messages.resources.jobs} columns={columns} query={filteredQuery} pageIndex={pageIndex} onPageChange={changePage} onSelectionChange={updateSelection} tableToolbar={filterToolbar} />
     {isDetailOpen && selectedID ? <DetailPanel isOpen onOpenChange={setDetailOpen} title={messages.resources.jobs.detail.title} description={messages.resources.jobs.detail.description} closeLabel={messages.a11y.closeDialog} footer={<JobControls actions={actions} permittedActions={permittedActions} isLoading={mutations.controlJob.isPending} onControl={control} />}>
       <JobDetailContents detail={detail} messages={messages} locale={locale} />
       {notice ? <p className="jobs-notice" role="alert">{notice}</p> : null}
@@ -168,4 +192,46 @@ function jobConfirmation(actions: MessageCatalog['resources']['jobs']['actions']
 function readJobHandoff(): string | undefined {
   const queryID = new URLSearchParams(window.location.search).get('job')?.trim()
   return queryID || loadJobHandoff()?.id.trim()
+}
+
+type TaskFilter = 'all' | 'active' | 'done' | 'attention'
+
+interface JobPageQuery {
+  readonly data?: { readonly data: readonly JobRecord[]; readonly pagination: { readonly page: number; readonly pageSize: number; readonly total: number } }
+  readonly isLoading: boolean
+  readonly isError: boolean
+  readonly isFetching: boolean
+  readonly refetch: () => Promise<unknown>
+}
+
+const ACTIVE_STATES = new Set(['running', 'queued', 'paused'])
+const DONE_STATES = new Set(['completed', 'partial'])
+
+function jobMatchesFilter(job: JobRecord, filter: TaskFilter): boolean {
+  if (filter === 'all') return true
+  if (filter === 'active') return ACTIVE_STATES.has(job.state)
+  if (filter === 'done') return DONE_STATES.has(job.state)
+  return job.state === 'failed'
+}
+
+function countByFilter(jobs: readonly JobRecord[]): Record<TaskFilter, number> {
+  const counts: Record<TaskFilter, number> = { all: jobs.length, active: 0, done: 0, attention: 0 }
+  for (const job of jobs) {
+    if (ACTIVE_STATES.has(job.state)) counts.active += 1
+    else if (DONE_STATES.has(job.state)) counts.done += 1
+    else if (job.state === 'failed') counts.attention += 1
+  }
+  return counts
+}
+
+function filterQuery(query: JobPageQuery, filter: TaskFilter): JobPageQuery {
+  if (filter === 'all' || !query.data) return query
+  const filtered = query.data.data.filter((job) => jobMatchesFilter(job, filter))
+  return {
+    ...query,
+    data: {
+      data: filtered,
+      pagination: { page: query.data.pagination.page, pageSize: query.data.pagination.pageSize, total: filtered.length }
+    }
+  }
 }

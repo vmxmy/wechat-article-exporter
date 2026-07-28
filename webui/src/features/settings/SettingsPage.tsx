@@ -19,7 +19,7 @@ import './settings.css'
 
 const proxyClasses: readonly ProxyRequestClass[] = ['public_content', 'public_resource', 'management_session', 'article_credential', 'engagement_metrics', 'comments', 'paid_content']
 
-const settingsSectionIDs = ['settings-general', 'settings-download-export', 'settings-credentials', 'settings-network', 'settings-storage', 'settings-diagnostics'] as const
+const settingsSectionIDs = ['settings-general', 'settings-download-export', 'settings-credentials', 'settings-network', 'settings-storage', 'settings-diagnostics', 'settings-danger'] as const
 
 type SettingsSectionID = typeof settingsSectionIDs[number]
 
@@ -161,7 +161,8 @@ function SettingsNavigation({ messages }: { readonly messages: MessageCatalog })
     { id: 'settings-credentials', label: messages.settings.navigation.credentials },
     { id: 'settings-network', label: messages.settings.navigation.network },
     { id: 'settings-storage', label: messages.settings.navigation.storage },
-    { id: 'settings-diagnostics', label: messages.settings.navigation.diagnostics }
+    { id: 'settings-diagnostics', label: messages.settings.navigation.diagnostics },
+    { id: 'settings-danger', label: messages.settings.navigation.danger }
   ] as const
 
   useEffect(() => {
@@ -397,8 +398,6 @@ function CredentialsPanel({ locale, messages, data, loading, pending, validation
           data={data}
           columns={columns}
           ariaLabel={copy.listTitle}
-          visibleColumnsLabel={copy.visibleColumns}
-          selectorCopy={messages.selectors}
           emptyContent={copy.empty}
           renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow key={row.original.id} title={<>{credentialAccountLabel(row.original, copy)}<TechnicalDetails label={copy.technicalDetails} items={[{ label: copy.accountId, value: row.original.accountId, copyLabel: copy.copyAccountId, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }]} /></>} fullTitle={credentialAccountLabel(row.original, copy)} status={<Status value={row.original.status} locale={locale} />} metadata={[{ id: 'kind', label: copy.columns.kind, value: humanizeIdentifier(row.original.kind, locale) }, { id: 'updated', label: copy.columns.updated, value: formatDateTime(row.original.updatedAt, locale), fullValue: row.original.updatedAt }]} actions={<Button label={copy.remove} variant="secondary" size="sm" isDisabled={pending || validationPending} onClick={() => { setRemovingID(row.original.id); setRemovalConfirmation('') }} />} />)}
         /> : !loading ? <p className="settings-empty">{copy.empty}</p> : null}
@@ -488,8 +487,6 @@ function ProxiesPanel({ locale, messages, data, loading, pending, onAdd, onRemov
           data={data}
           columns={columns}
           ariaLabel={copy.listTitle}
-          visibleColumnsLabel={copy.visibleColumns}
-          selectorCopy={messages.selectors}
           emptyContent={copy.empty}
           renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow key={row.original.id} title={row.original.name} fullTitle={row.original.name} description={<code className="settings-code" translate="no">{row.original.endpoint}</code>} status={<Status value={row.original.health.state} locale={locale} />} metadata={[{ id: 'trust', label: copy.columns.trust, value: <div className="settings-trust-cell"><span>{proxyTrustLabel(row.original.trust, copy)}</span><small>{proxyTrustSummary(row.original.trust, copy)}</small></div> }, { id: 'priority', label: copy.columns.priority, value: formatCount(row.original.priority, locale) }, { id: 'state', label: copy.columns.state, value: <Status value={row.original.enabled ? 'enabled' : 'disabled'} locale={locale} /> }]} actions={<><ActionGroup align="start" gap="cluster" nowrap><Button label={row.original.enabled ? copy.disable : copy.enable} variant="secondary" size="sm" onClick={() => onToggle(row.original.id, !row.original.enabled)} /><Button label={copy.test} variant="secondary" size="sm" onClick={() => onTest(row.original.id)} /><Button label={copy.remove} variant="secondary" size="sm" isDisabled={pending} onClick={() => { setRemovingID(row.original.id); setRemovalConfirmation('') }} /></ActionGroup>{probe?.route.id === row.original.id ? <small className="settings-probe-result">{copy.probe}: <Status value={probe.responseValid ? 'valid' : 'invalid'} locale={locale} />{probe.errorClass ? ` · ${humanizeIdentifier(probe.errorClass, locale)}` : ''}</small> : null}</>} />)}
         /> : !loading ? <p className="settings-empty">{copy.empty}</p> : null}
@@ -545,7 +542,7 @@ function StorageMaintenancePanel({ locale, messages, backup, backupID, backupDow
         </div>
       </div>
       <IntegrityPanel locale={locale} messages={messages} loading={integrityLoading} report={integrity} />
-      <section className="settings-danger-zone" aria-labelledby="danger-zone-title">
+      <section id="settings-danger" className="settings-danger-zone" aria-labelledby="danger-zone-title">
         <header><p className="settings-danger-eyebrow">{copy.storage.dangerEyebrow}</p><h3 id="danger-zone-title">{copy.storage.dangerTitle}</h3><p>{copy.storage.dangerDescription}</p></header>
         <RestorePanel messages={messages} mutations={mutations} onFailure={onFailure} />
         <section className="settings-danger-action" aria-labelledby="gc-title"><h4 id="gc-title">{copy.gc.title}</h4><p>{copy.gc.description}</p><div className="settings-form"><Button label={copy.gc.plan} variant="secondary" isLoading={mutations.planGarbageCollection.isPending} onClick={onPlanGarbageCollection} />{plan ? <GCPlan locale={locale} messages={messages} plan={plan} confirmation={confirmation} onConfirmation={onConfirmationChange} onApply={onApplyGarbageCollection} pending={mutations.applyGarbageCollection.isPending} /> : null}</div></section>
@@ -601,8 +598,6 @@ function IntegrityPanel({ locale, messages, loading, report }: { readonly locale
     data={report.issues}
     columns={columns}
     ariaLabel={copy.title}
-    visibleColumnsLabel={copy.visibleColumns}
-    selectorCopy={messages.selectors}
     emptyContent={copy.noIssues}
     renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow key={`${row.original.kind}-${row.index}`} title={humanizeIdentifier(row.original.kind, locale)} fullTitle={humanizeIdentifier(row.original.kind, locale)} description={row.original.message} metadata={[{ id: 'repairable', label: copy.columns.repairable, value: row.original.repairable ? messages.settings.common.yes : messages.settings.common.no }, { id: 'recommendation', label: copy.columns.recommendation, value: row.original.recommendation ?? '—' }]} />)}
   /> : <p className="settings-empty">{copy.noIssues}</p>}</> : null}</section>
@@ -625,8 +620,6 @@ function DiagnosticsPanel({ locale, messages, loading, report, bundle, bundleErr
     data={report.checks}
     columns={columns}
     ariaLabel={copy.title}
-    visibleColumnsLabel={copy.visibleColumns}
-    selectorCopy={messages.selectors}
     emptyContent={copy.empty}
     renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow key={row.original.name} title={humanizeIdentifier(row.original.name, locale)} fullTitle={humanizeIdentifier(row.original.name, locale)} status={<Status value={row.original.status} locale={locale} />} metadata={[{ id: 'summary', label: copy.columns.summary, value: row.original.summary ?? '—' }]} />)}
   /> : <p className="settings-empty">{copy.empty}</p>}</> : null}</div>

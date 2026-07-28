@@ -8,17 +8,16 @@ let navigationHistoryInitialized = false
 let restoringHistory = false
 let acceptedHistoryIndex: number | undefined
 
-export const navigationGroups = ['home', 'content', 'work', 'system'] as const
+export const navigationGroups = ['home', 'content', 'tasks', 'settings'] as const
 
 export const navigationItems = [
   { group: 'home', href: '/', key: 'overview' },
   { group: 'content', href: '/accounts', key: 'accounts' },
   { group: 'content', href: '/articles', key: 'articles' },
   { group: 'content', href: '/albums', key: 'albums' },
-  { group: 'work', href: '/jobs', key: 'jobs' },
-  { group: 'work', href: '/exports', key: 'exports' },
-  { group: 'work', href: '/import', key: 'import' },
-  { group: 'system', href: '/settings', key: 'settings' }
+  { group: 'tasks', href: '/jobs', key: 'jobs' },
+  { group: 'tasks', href: '/exports', key: 'exports' },
+  { group: 'settings', href: '/settings', key: 'settings' }
 ] as const
 
 export type NavigationGroup = typeof navigationGroups[number]

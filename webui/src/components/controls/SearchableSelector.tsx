@@ -18,6 +18,8 @@ export interface SearchableSelectorProps {
   readonly isDisabled?: boolean
   readonly description?: string
   readonly isLabelHidden?: boolean
+  readonly layout?: 'inline' | 'compact'
+  readonly size?: 'sm' | 'lg'
   readonly className?: string
 }
 
@@ -33,6 +35,8 @@ export function SearchableSelector({
   isDisabled = false,
   description,
   isLabelHidden = false,
+  layout,
+  size,
   className
 }: SearchableSelectorProps) {
   const labelId = useId()
@@ -49,7 +53,7 @@ export function SearchableSelector({
   const inputValue = isOpen ? query : selected?.label ?? ''
 
   return (
-    <ControlField label={label} description={description} isLabelHidden={isLabelHidden} labelId={labelId} descriptionId={descriptionId}>
+    <ControlField label={label} description={description} isLabelHidden={isLabelHidden} labelId={labelId} descriptionId={descriptionId} layout={layout} size={size}>
       <div className={cn('flex items-center gap-2', className)}>
         <Combobox.Root
           value={value}

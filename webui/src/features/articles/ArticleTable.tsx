@@ -2,6 +2,7 @@ import { Button } from '@/components/controls/Button'
 import { Collapsible } from '@/components/controls/Collapsible'
 import { SearchableSelector } from '@/components/controls/SearchableSelector'
 import { Timestamp } from '@/components/controls/Timestamp'
+import { Toolbar } from '@/components/controls/Toolbar'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type RowSelectionState, type SortingState, type Updater, type VisibilityState } from '@tanstack/react-table'
 import { useEffect, useMemo, useState } from 'react'
 import { navigateTo, navigationEvent } from '../../app/navigation'
@@ -262,7 +263,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
         />
 
         <DenseRegion>
-          <div className="article-query-toolbar">
+          <Toolbar className="article-query-toolbar" label={copy.savedViewsToolbar} stackAt="medium">
           <SavedQuerySelector locale={locale} messages={messages} names={articleQueryNames} value={selectedSavedQueryName} onChange={(name, savedQuery) => {
             setSelectedSavedQueryName(name)
             if (!savedQuery) return
@@ -272,7 +273,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
             setSelectedSavedQueryName(name)
           }} />
           <span className="selection-count" aria-live="polite">{selectedCount > 0 ? copy.selectedCount(selectedCount) : ''}</span>
-          </div>
+          </Toolbar>
 
           {articlePage.isLoading ? <p role="status">{messages.articles.loading}</p> : null}
           {articlePage.isError ? <div className="error-state" role="alert"><p>{messages.articles.unavailable}</p><Button label={messages.articles.retry} variant="secondary" onClick={() => void articlePage.refetch()} /></div> : null}
@@ -286,8 +287,6 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
             isFirstUse={!hasArticleQueryFilters(query) && (articlePage.data?.pagination.total ?? 0) === 0}
             isFilteredEmpty={hasArticleQueryFilters(query) && (articlePage.data?.pagination.total ?? 0) === 0}
             copy={copy}
-            visibleColumnsLabel={messages.articles.visibleColumns}
-            selectorCopy={messages.selectors}
             footer={<nav className="pagination" aria-label={messages.articles.pagination}>
               <Button label={messages.articles.previous} variant="secondary" size="sm" isDisabled={pageIndex === 0} onClick={() => commitBrowserView({ query, sort: activeSort, page: pageIndex })} />
               <span>{messages.articles.page(pageIndex + 1, totalPages)}</span>
@@ -319,7 +318,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   )
 }
 
-function ArticleResults({ table, locale, messages, onOpenDetail, onClearFilters, isFirstUse, isFilteredEmpty, copy, visibleColumnsLabel, selectorCopy, footer }: {
+function ArticleResults({ table, locale, messages, onOpenDetail, onClearFilters, isFirstUse, isFilteredEmpty, copy, footer }: {
   readonly table: ReturnType<typeof useReactTable<ArticleRecord>>
   readonly locale: Locale
   readonly messages: MessageCatalog
@@ -328,8 +327,6 @@ function ArticleResults({ table, locale, messages, onOpenDetail, onClearFilters,
   readonly isFirstUse: boolean
   readonly isFilteredEmpty: boolean
   readonly copy: MessageCatalog['articles']['ux']
-  readonly visibleColumnsLabel: string
-  readonly selectorCopy: MessageCatalog['selectors']
   readonly footer: import('react').ReactNode
 }) {
   if (isFirstUse) return <EmptyState title={copy.firstUseTitle} description={copy.firstUseDescription} actions={<Button label={copy.firstUseAction} variant="primary" onClick={() => navigateTo('/accounts')} />} />
@@ -337,8 +334,6 @@ function ArticleResults({ table, locale, messages, onOpenDetail, onClearFilters,
   return <ResponsiveDataTable
     table={table}
     ariaLabel={messages.articles.title}
-    visibleColumnsLabel={visibleColumnsLabel}
-    selectorCopy={selectorCopy}
     emptyContent={messages.articles.empty}
     footer={footer}
     getHeaderAriaSort={(header) => header.column.getCanSort() ? getSortLabel(header.column.getIsSorted()) : undefined}
@@ -376,6 +371,8 @@ function SavedQuerySelector({ locale, messages, names, value, onChange }: { read
     copy={messages.selectors}
     hasClear
     isLoading={savedQueries.isLoading}
+    layout="inline"
+    size="lg"
   />
 }
 

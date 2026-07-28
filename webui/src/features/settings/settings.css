@@ -17,13 +17,29 @@
   padding-inline-end: var(--spacing-4);
 }
 
-.settings-secondary-nav-label,
-.settings-danger-eyebrow {
+.settings-secondary-nav-label {
   margin: 0;
   color: var(--color-text-secondary);
   font-size: var(--text-body-small-size);
   font-weight: 600;
   letter-spacing: .04em;
+}
+
+.settings-danger-eyebrow {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  color: var(--color-text-danger);
+  font-size: var(--text-body-small-size);
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.settings-danger-eyebrow::before {
+  content: '⚠';
+  font-size: 0.9em;
 }
 
 .settings-secondary-nav ul {
@@ -189,10 +205,10 @@
 
 .settings-danger-zone {
   width: min(100%, 58rem);
-  padding: var(--spacing-3);
-  border: 1px solid color-mix(in srgb, var(--color-text-danger) 28%, var(--color-border));
+  padding: var(--spacing-4) var(--spacing-5);
+  border: 2px solid color-mix(in srgb, var(--color-text-danger) 38%, var(--color-border));
   border-radius: var(--radius-element);
-  background: color-mix(in srgb, var(--color-text-danger) 4%, var(--color-background-muted));
+  background: color-mix(in srgb, var(--color-text-danger) 9%, var(--color-background-muted));
 }
 
 .settings-danger-zone > header { display: grid; gap: var(--spacing-2); }

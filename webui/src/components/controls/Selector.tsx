@@ -33,6 +33,8 @@ export interface SelectorProps {
   isRequired?: boolean
   isOptional?: boolean
   isLabelHidden?: boolean
+  layout?: 'inline' | 'compact'
+  size?: 'sm' | 'lg'
   className?: string
 }
 
@@ -51,6 +53,8 @@ export function Selector({
   isRequired = false,
   isOptional = false,
   isLabelHidden = false,
+  layout,
+  size,
   className,
 }: SelectorProps) {
   const id = useControlId('selector')
@@ -72,6 +76,8 @@ export function Selector({
       htmlFor={id}
       labelId={labelId}
       descriptionId={descriptionId}
+      layout={layout}
+      size={size}
     >
       <div className={cn('flex items-center gap-2', className)}>
         <Select

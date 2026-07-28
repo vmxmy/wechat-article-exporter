@@ -405,7 +405,7 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
         <Button label={primaryAction} variant="primary" isLoading={stage === 'destination' && mutations.startExport.isPending} isDisabled={primaryDisabled} onClick={advanceStage} />
       </div>
 
-      <ExportRecords copy={copy} locale={locale} selectorCopy={messages.selectors} records={records} table={table} pageIndex={pageIndex} totalPages={totalPages} onPageChange={setPageIndex} />
+      <ExportRecords copy={copy} locale={locale} records={records} table={table} pageIndex={pageIndex} totalPages={totalPages} onPageChange={setPageIndex} />
 
       <Panel className="export-detail" aria-labelledby="export-detail-title">
         <SectionHeader title={copy.detailTitle} titleId="export-detail-title" description={copy.detailDescription} />
@@ -440,7 +440,7 @@ function ExportRecordLabel({ record, locale, copy }: { readonly record: ExportRe
   return <div className="export-record-label"><strong>{copy.workflow.recordLabel(record.format)}</strong><span>{formatDateTime(record.createdAt, locale)}</span></div>
 }
 
-function ExportRecords({ copy, locale, selectorCopy, records, table, pageIndex, totalPages, onPageChange }: { readonly copy: MessageCatalog['exports']; readonly locale: Locale; readonly selectorCopy: MessageCatalog['selectors']; readonly records: ReturnType<typeof useExportPage>; readonly table: ReturnType<typeof useReactTable<ExportRecord>>; readonly pageIndex: number; readonly totalPages: number; readonly onPageChange: (updater: number | ((value: number) => number)) => void }) {
+function ExportRecords({ copy, locale, records, table, pageIndex, totalPages, onPageChange }: { readonly copy: MessageCatalog['exports']; readonly locale: Locale; readonly records: ReturnType<typeof useExportPage>; readonly table: ReturnType<typeof useReactTable<ExportRecord>>; readonly pageIndex: number; readonly totalPages: number; readonly onPageChange: (updater: number | ((value: number) => number)) => void }) {
   return <section className="export-records" aria-labelledby="export-records-title">
     <SectionHeader title={copy.recordsTitle} titleId="export-records-title" description={copy.recordsDescription} />
     {records.isLoading ? <p role="status">{copy.loading}</p> : null}
@@ -448,8 +448,6 @@ function ExportRecords({ copy, locale, selectorCopy, records, table, pageIndex, 
     {!records.isLoading && !records.isError ? <ResponsiveDataTable
       table={table}
       ariaLabel={copy.recordsTitle}
-      visibleColumnsLabel={copy.visibleColumns}
-      selectorCopy={selectorCopy}
       emptyContent={copy.empty}
       isBusy={records.isFetching}
       footer={<nav className="pagination" aria-label={copy.pagination}><Button label={copy.previous} variant="secondary" size="sm" isDisabled={pageIndex === 0} onClick={() => onPageChange((value) => value - 1)} /><span>{copy.page(pageIndex + 1, totalPages)}</span><Button label={copy.next} variant="secondary" size="sm" isDisabled={pageIndex + 1 >= totalPages} onClick={() => onPageChange((value) => value + 1)} /></nav>}
@@ -472,8 +470,6 @@ function Manifest({ messages, manifest, locale }: { readonly messages: MessageCa
     data={manifest.files}
     columns={fileColumns}
     ariaLabel={copy.files}
-    visibleColumnsLabel={copy.visibleFileColumns}
-    selectorCopy={messages.selectors}
     emptyContent={copy.noFiles}
     renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow key={row.original.artifactId} title={safeFileName(row.original.path)} fullTitle={safeFileName(row.original.path)} status={<Status value={row.original.status} locale={locale} />} metadata={[{ id: 'size', label: copy.fileColumns.size, value: formatBytes(row.original.sizeBytes, locale) }, { id: 'checksum', label: copy.fileColumns.checksum, value: <code title={row.original.sha256}>{formatShortIdentifier(row.original.sha256, 8)}</code>, fullValue: row.original.sha256 }]} actions={<a className="artifact-download" href={getExportArtifactDownloadURL(manifest.exportId, row.original.artifactId)}>{copy.downloadArtifact}</a>} />)}
   /> : <p>{copy.noFiles}</p>}<TechnicalDetails label={copy.workflow.technicalDetails} items={manifest.files.map((file) => ({ label: safeFileName(file.path), value: file.path, copyLabel: copy.workflow.copyValue, copiedLabel: a11y.copied, copyFailedLabel: a11y.copyUnavailable }))} /></div>

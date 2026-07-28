@@ -48,12 +48,12 @@
 .export-destination-default,
 .export-destination-advanced {
   display: grid;
-  gap: var(--spacing-2);
-  padding: var(--spacing-2);
+  gap: var(--task-surface-gap);
+  padding: var(--task-surface-padding);
   border: 0;
-  border-radius: var(--radius-inner);
-  background: var(--color-background-muted);
-  box-shadow: 0 0 0 1px var(--workspace-ring);
+  border-radius: var(--task-surface-radius);
+  background: var(--task-surface-bg);
+  box-shadow: 0 0 0 1px var(--task-surface-ring);
 }
 
 .export-scope-summary p,
@@ -81,13 +81,13 @@
 
 .export-notice {
   display: grid;
-  gap: var(--spacing-2);
+  gap: var(--task-surface-gap);
   margin: 0;
-  padding: var(--spacing-2);
+  padding: var(--task-surface-padding);
   border: 0;
-  border-radius: var(--radius-inner);
-  background: var(--color-background-muted);
-  box-shadow: 0 0 0 1px var(--workspace-ring);
+  border-radius: var(--task-surface-radius);
+  background: var(--task-surface-bg);
+  box-shadow: 0 0 0 1px var(--task-surface-ring);
 }
 
 .export-notice p {

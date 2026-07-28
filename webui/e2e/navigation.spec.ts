@@ -7,13 +7,13 @@ test('desktop navigation is grouped by user task and session actions are global'
 
   const navigation = page.getByRole('navigation').filter({ has: page.getByRole('link', { name: 'Home overview' }) }).first()
   await expect(navigation.getByRole('button', { name: 'Home', exact: true })).toHaveAttribute('aria-expanded', 'true')
-  await expect(navigation.getByRole('button', { name: 'Content', exact: true })).toHaveAttribute('aria-expanded', 'true')
-  await expect(navigation.getByRole('button', { name: 'Work', exact: true })).toHaveAttribute('aria-expanded', 'true')
-  await expect(navigation.getByRole('button', { name: 'System', exact: true })).toHaveAttribute('aria-expanded', 'true')
+  await expect(navigation.getByRole('button', { name: 'Library', exact: true })).toHaveAttribute('aria-expanded', 'true')
+  await expect(navigation.getByRole('button', { name: 'Tasks', exact: true })).toHaveAttribute('aria-expanded', 'true')
+  await expect(navigation.getByRole('button', { name: 'Settings', exact: true })).toHaveAttribute('aria-expanded', 'true')
   await expect(navigation.getByRole('link', { name: 'Login', exact: true })).toHaveCount(0)
   await expect(navigation.getByRole('link', { name: 'Saved queries', exact: true })).toHaveCount(0)
 
-  const contentGroup = navigation.getByRole('button', { name: 'Content', exact: true })
+  const contentGroup = navigation.getByRole('button', { name: 'Library', exact: true })
   await contentGroup.click()
   await expect(contentGroup).toHaveAttribute('aria-expanded', 'false')
   await expect(navigation.getByRole('link', { name: 'Articles', exact: true })).toBeHidden()

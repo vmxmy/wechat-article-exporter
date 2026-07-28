@@ -87,7 +87,7 @@ export function SavedQueriesPage({ messages, locale }: { readonly messages: Mess
   }
 
   return <PageStack as="div">
-    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.savedQueries} selectorCopy={messages.selectors} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
+    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.savedQueries} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} />
     <section className="saved-query-editor" aria-labelledby="saved-query-editor-title">
       <SectionHeader title={copy.savedQuery.visualEditor} titleId="saved-query-editor-title" description={copy.savedQuery.visualDescription} />
       <TextInput label={actions.name} value={name} onChange={setName} isRequired />

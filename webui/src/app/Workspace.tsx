@@ -235,6 +235,12 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
             </div>
             <div className="header-actions">
               <span className="workspace-local-note">{messages.product.localOnly}</span>
+              <Button
+                label={messages.navigation.importAction}
+                variant="secondary"
+                size="sm"
+                onClick={() => navigateTo('/import')}
+              />
               <SessionControl messages={messages} />
               <Button
                 label={messages.localeSwitch}
@@ -274,8 +280,8 @@ function NavigationGroupIcon({ group }: { readonly group: typeof navigationGroup
   const path = {
     home: <><path d="M3.5 10.5 12 3l8.5 7.5" /><path d="M5.5 9.5v10h13v-10M9.5 19.5v-6h5v6" /></>,
     content: <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></>,
-    work: <><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7" /><rect x="3.5" y="7" width="17" height="12.5" rx="2" /><path d="M3.5 12h17M10 12v2h4v-2" /></>,
-    system: <><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.1M12 19.1v2.1M21.2 12h-2.1M4.9 12H2.8M18.5 5.5 17 7M7 17l-1.5 1.5M18.5 18.5 17 17M7 7 5.5 5.5" /></>
+    tasks: <><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7" /><rect x="3.5" y="7" width="17" height="12.5" rx="2" /><path d="M3.5 12h17M10 12v2h4v-2" /></>,
+    settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2.8v2.1M12 19.1v2.1M21.2 12h-2.1M4.9 12H2.8M18.5 5.5 17 7M7 17l-1.5 1.5M18.5 18.5 17 17M7 7 5.5 5.5" /></>
   }[group]
   return <svg className="workspace-nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{path}</svg>
 }
@@ -283,7 +289,7 @@ function NavigationGroupIcon({ group }: { readonly group: typeof navigationGroup
 function renderPage(path: string, locale: Locale, messages: MessageCatalog) {
   const route = matchRoute(path)
   switch (route?.key) {
-    case 'overview': return <HomePage messages={messages} />
+    case 'overview': return <HomePage messages={messages} locale={locale} />
     case 'login': return <LoginPage messages={messages} />
     case 'import': return <ImportPage messages={messages} />
     case 'accounts': return <AccountsPage locale={locale} messages={messages} />

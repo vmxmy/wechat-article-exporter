@@ -19,6 +19,20 @@
   background: var(--color-background-surface);
   box-shadow: var(--workspace-shadow-surface);
 }
+
+/* Task-surface card — shared inline surface for Jobs + Export task areas
+   (scope summaries, destination blocks, notices, failure summaries). Keeps the
+   two task surfaces reading as one visual system without touching pinned class
+   names or text. */
+.task-surface-card {
+  display: grid;
+  gap: var(--task-surface-gap);
+  padding: var(--task-surface-padding);
+  border: 0;
+  border-radius: var(--task-surface-radius);
+  background: var(--task-surface-bg);
+  box-shadow: 0 0 0 1px var(--task-surface-ring);
+}
 .presentation-panel[data-tone='muted'] {
   background: var(--color-background-muted);
   box-shadow: none;
@@ -102,7 +116,7 @@
 .presentation-form-grid {
   display: grid;
   gap: var(--form-grid-gap, 0.75rem);
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--form-grid-min, 280px)), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--form-grid-min, 280px)), calc((100% - (var(--form-grid-max, 4) - 1) * var(--form-grid-gap, 0.75rem)) / var(--form-grid-max, 4))));
 }
 .presentation-form-grid > * { min-width: 0; }
 .presentation-form-grid-full-span { grid-column: 1 / -1; }

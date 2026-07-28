@@ -122,7 +122,6 @@ test('390px resource views use readable mobile projections without whole-documen
     await expect(mobileTable).toBeVisible()
     await expect(mobileTable).toContainText(view.content)
     await expect(page.locator('.presentation-data-table-desktop')).toBeHidden()
-    await expect(page.locator('.presentation-data-table-toolbar')).toBeHidden()
     await expectNoDocumentOverflow(page)
   }
   await expectOnlyLoopbackRequests(page)
@@ -154,35 +153,6 @@ test('390px export and settings tables retain safe mobile identity, status, and 
   await expectOnlyLoopbackRequests(page)
 })
 
-test('desktop table column controls stay compact without changing their accessible names', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 })
-  await installLoopbackFixture(page)
-
-  for (const view of [
-    { path: '/articles', label: 'Visible article columns' },
-    { path: '/accounts', label: 'Visible account columns' },
-    { path: '/albums', label: 'Visible album columns' },
-    { path: '/jobs', label: 'Visible job columns' },
-    { path: '/saved-queries', label: 'Visible saved-query columns' }
-  ]) {
-    await page.goto(view.path)
-    const surface = page.locator('.presentation-data-table-surface')
-    const toolbar = surface.locator('.presentation-data-table-toolbar')
-    const selector = page.getByRole('combobox', { name: view.label, exact: true })
-    await expect(selector).toBeVisible()
-    await expect.poll(async () => {
-      const [fieldWidth, surfaceWidth] = await Promise.all([
-        selector.evaluate((element) => element.closest("[data-slot='field']")?.getBoundingClientRect().width),
-        surface.evaluate((element) => element.getBoundingClientRect().width)
-      ])
-      if (fieldWidth === undefined) throw new Error('Table column selector is missing its field wrapper.')
-      return fieldWidth < surfaceWidth
-    }).toBe(true)
-    await expect(toolbar).toBeVisible()
-    await expect(surface.locator('.presentation-data-table-desktop')).toBeVisible()
-  }
-  await expectOnlyLoopbackRequests(page)
-})
 
 test('200% page zoom keeps the staged export primary flow usable without whole-document overflow', async ({ page }) => {
   await installLoopbackFixture(page)

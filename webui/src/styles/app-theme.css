@@ -39,6 +39,9 @@
   --color-track: var(--border);
   --color-tint-hover: black;
   --color-neutral: color-mix(in oklch, var(--foreground) 10%, transparent);
+  /* Subtle hover/secondary surface. Previously consumed (e.g. .presentation-dialog-close:hover)
+     but never defined, so it silently fell back to transparent. */
+  --color-background-subtle: color-mix(in oklch, var(--foreground) 4%, var(--background));
 
   /* Legacy radius aliases */
   --radius-none: 0px;
@@ -89,7 +92,7 @@
   --measure-reading: 60ch;
   --measure-description: 44rem;
   --measure-form: 36rem;
-  --space-page-top: clamp(1.5rem, 3vw, 2rem);
+  --space-page-top: clamp(1.25rem, 3vw, 2rem);
   --space-page-bottom: clamp(2.5rem, 5vw, 3.5rem);
   --space-section: clamp(1.5rem, 3vw, 2.25rem);
   --space-subsection: clamp(1.125rem, 2.5vw, 1.5rem);
@@ -101,6 +104,17 @@
   --workspace-ring-strong: color-mix(in oklch, var(--foreground) 15%, transparent);
   --workspace-accent-wash: color-mix(in oklch, var(--primary) 7%, var(--background));
   --workspace-accent-wash-strong: color-mix(in oklch, var(--primary) 12%, var(--background));
+  /* Neutral selected-state for nav active + table row selection. Behavior is pinned
+     via aria-current / data-selected attributes; the color is free, so we use an
+     ink-neutral wash instead of accent-tinting the whole surface. */
+  --workspace-selected: color-mix(in oklch, var(--foreground) 9%, var(--background));
+  --workspace-selected-strong: color-mix(in oklch, var(--foreground) 14%, var(--background));
+  /* Shared task-surface model so Jobs + Exports read as one area (unified task center). */
+  --task-surface-bg: var(--color-background-muted);
+  --task-surface-ring: var(--workspace-ring);
+  --task-surface-radius: var(--radius-inner);
+  --task-surface-padding: var(--spacing-2);
+  --task-surface-gap: var(--spacing-2);
   --workspace-shadow-surface: 0 0 0 1px var(--workspace-ring), 0 1px 2px color-mix(in oklch, var(--color-shadow) 18%, transparent);
   --workspace-shadow-raised: 0 0 0 1px var(--workspace-ring-strong), 0 4px 12px -8px color-mix(in oklch, var(--color-shadow) 44%, transparent), 0 12px 24px -22px color-mix(in oklch, var(--primary) 24%, transparent);
 
@@ -112,6 +126,7 @@
 .dark {
   --color-text-warning: oklch(0.78 0.15 75);
   --color-tint-hover: white;
+  --color-background-subtle: color-mix(in oklch, var(--foreground) 8%, var(--background));
 }
 
 :root {

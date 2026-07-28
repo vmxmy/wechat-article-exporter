@@ -30,6 +30,8 @@ export function FormGrid({ columns = 2, minChildWidth = 280, gap = 'control', di
     <div
       className={cn('presentation-form-grid', direction === 'horizontal' && 'presentation-form-grid-horizontal', className)}
       style={style}
+      data-direction={direction}
+      {...(direction === 'vertical' ? { 'data-columns': columns } : {})}
     >
       {children}
     </div>
