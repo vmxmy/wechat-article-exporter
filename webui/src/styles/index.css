@@ -377,7 +377,6 @@
     overflow-x: auto;
   }
   .account-table-toolbar-actions { width: 100%; min-width: 0; margin-inline-end: 0; }
-  .account-table-toolbar-more { min-width: 0; }
   .presentation-data-table-toolbar > [data-slot='field'] {
     min-width: 0;
     max-width: 100%;
@@ -638,11 +637,6 @@
     .overview-fact .presentation-definition-list dd { white-space: normal; }
     .pagination { justify-content: space-between; }
     .import-form { align-items: stretch; flex-direction: column; }
-    /* Below the toolbar's stack breakpoint, let each Accounts action group wrap
-       internally so long labels never overflow the card. Override the nowrap
-       attribute selector with higher specificity. */
-    .presentation-toolbar .account-table-toolbar-primary,
-    .presentation-toolbar .account-table-toolbar-selection { flex-wrap: wrap !important; justify-content: flex-start; }
     .presentation-data-table-desktop { display: none; }
     .presentation-data-table-mobile {
       display: grid;

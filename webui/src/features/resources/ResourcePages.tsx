@@ -216,7 +216,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
       />
       <SelectionActionBar
         selectedCount={selected.length}
-        countLabel={(count) => `${count} ${messages.resources.accounts.selected}`}
+        countLabel={actions.selectedCount}
         toolbarLabel={actions.selectionActions}
         actions={<>
           <Selector label={actions.syncMode} options={[{ value: 'incremental', label: actions.incremental }, { value: 'full', label: actions.full }]} value={syncMode} onChange={(mode) => { if (mode) setSyncMode(mode as AccountSyncMode) }} isLabelHidden layout="inline" size="lg" />

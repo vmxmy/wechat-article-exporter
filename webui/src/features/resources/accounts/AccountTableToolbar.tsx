@@ -22,7 +22,7 @@ export function AccountTableToolbar({
   return (
     <Toolbar className="account-table-toolbar-actions" label={toolbarLabel} stackAt="medium"
       startContent={
-        <ActionGroup className="account-table-toolbar-primary" align="start" gap="control" nowrap>
+        <ActionGroup className="account-table-toolbar-primary" align="start" gap="control">
           <Button label={actions.addAccount} variant="primary" onClick={onAdd} />
           <FileInput
             label={actions.importManifest}
