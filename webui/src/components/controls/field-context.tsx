@@ -18,6 +18,7 @@ export interface ControlFieldProps {
   layout?: 'inline' | 'compact'
   /** `lg` is the roomier control size used in toolbars; `sm` is the default compact size. */
   size?: 'sm' | 'lg'
+  className?: string
   children: React.ReactNode
 }
 
@@ -32,10 +33,11 @@ export function ControlField({
   descriptionId,
   layout = 'compact',
   size = 'sm',
+  className,
   children,
 }: ControlFieldProps) {
   return (
-    <ShadcnField data-control-layout={layout} data-control-size={size}>
+    <ShadcnField className={className} data-control-layout={layout} data-control-size={size}>
       {isLabelHidden ? null : (
         <FieldLabel id={labelId} htmlFor={htmlFor}>
           {label}

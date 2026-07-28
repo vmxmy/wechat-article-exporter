@@ -32,6 +32,8 @@ export interface DropdownMenuProps {
   button: DropdownButton
   items: DropdownMenuItem[]
   menuWidth?: string
+  /** Class name for the trigger button; popup styling stays on className. */
+  triggerClassName?: string
   className?: string
 }
 
@@ -50,6 +52,7 @@ export function DropdownMenu({
   button,
   items,
   menuWidth,
+  triggerClassName,
   className
 }: DropdownMenuProps) {
   return (
@@ -65,6 +68,7 @@ export function DropdownMenu({
             }
             variant={button.variant}
             size={button.size}
+            className={triggerClassName}
             isDisabled={button.isDisabled}
           />
         }

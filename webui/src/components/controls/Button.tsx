@@ -37,6 +37,8 @@ const SIZE_MAP: Record<ButtonSize, ShadcnSize> = {
 export interface ButtonProps
   extends Omit<React.ComponentProps<typeof ShadcnButton>, 'variant' | 'size'> {
   label: React.ReactNode
+  /** Keeps an explicit accessible name when a compact visual label is used. */
+  accessibleLabel?: string
   variant?: ButtonVariant
   size?: ButtonSize
   isLoading?: boolean
@@ -45,6 +47,7 @@ export interface ButtonProps
 
 export function Button({
   label,
+  accessibleLabel,
   variant = 'primary',
   size = 'default',
   isLoading = false,
@@ -60,6 +63,7 @@ export function Button({
       size={SIZE_MAP[size]}
       isLoading={isLoading}
       disabled={disabled ?? isDisabled}
+      aria-label={accessibleLabel}
       className={cn(className)}
       {...props}
     >

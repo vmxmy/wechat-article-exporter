@@ -19,6 +19,8 @@ export interface FileInputProps {
   multiple?: boolean
   isRequired?: boolean
   isLabelHidden?: boolean
+  /** Class name for the outer Field wrapper, used for bounded toolbar sizing. */
+  fieldClassName?: string
   className?: string
 }
 
@@ -34,6 +36,7 @@ export function FileInput({
   multiple = false,
   isRequired = false,
   isLabelHidden = false,
+  fieldClassName,
   className,
 }: FileInputProps) {
   const id = useControlId('file-input')
@@ -66,6 +69,7 @@ export function FileInput({
       isRequired={isRequired}
       isLabelHidden={isLabelHidden}
       htmlFor={id}
+      className={fieldClassName}
     >
       <button
         type="button"

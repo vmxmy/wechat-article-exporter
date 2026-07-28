@@ -376,17 +376,14 @@
     border-block-end: 1px solid var(--workspace-ring);
     overflow-x: auto;
   }
-  .account-table-toolbar-actions { min-width: 0; margin-inline-end: 0; }
-  .account-table-toolbar-import { width: auto; }
-  .account-table-toolbar-import [data-slot='field'] { width: auto; }
-  .account-table-toolbar-import [data-slot='button'] { min-width: 0; }
-  .account-table-toolbar-sync-mode { width: 9rem; min-width: 8rem; }
-  .account-table-toolbar-sync-mode [data-slot='field'] { width: 100%; }
+  .account-table-toolbar-actions { width: 100%; min-width: 0; margin-inline-end: 0; }
+  .account-table-toolbar-more { min-width: 0; }
   .presentation-data-table-toolbar > [data-slot='field'] {
     min-width: 0;
     max-width: 100%;
   }
   .presentation-data-table-toolbar [data-slot='button'] { min-width: fit-content; }
+  .presentation-data-table-toolbar .presentation-toolbar [data-slot='button'] { min-width: 0; }
   .presentation-data-table-mobile { display: none; }
   .presentation-data-table-footer { min-width: 0; }
   .presentation-data-table-summary {
@@ -641,6 +638,11 @@
     .overview-fact .presentation-definition-list dd { white-space: normal; }
     .pagination { justify-content: space-between; }
     .import-form { align-items: stretch; flex-direction: column; }
+    /* Below the toolbar's stack breakpoint, let each Accounts action group wrap
+       internally so long labels never overflow the card. Override the nowrap
+       attribute selector with higher specificity. */
+    .presentation-toolbar .account-table-toolbar-primary,
+    .presentation-toolbar .account-table-toolbar-selection { flex-wrap: wrap !important; justify-content: flex-start; }
     .presentation-data-table-desktop { display: none; }
     .presentation-data-table-mobile {
       display: grid;

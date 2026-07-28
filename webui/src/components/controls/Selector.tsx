@@ -35,6 +35,8 @@ export interface SelectorProps {
   isLabelHidden?: boolean
   layout?: 'inline' | 'compact'
   size?: 'sm' | 'lg'
+  /** Class name for the outer Field wrapper, used for bounded toolbar sizing. */
+  fieldClassName?: string
   className?: string
 }
 
@@ -55,6 +57,7 @@ export function Selector({
   isLabelHidden = false,
   layout,
   size,
+  fieldClassName,
   className,
 }: SelectorProps) {
   const id = useControlId('selector')
@@ -78,6 +81,7 @@ export function Selector({
       descriptionId={descriptionId}
       layout={layout}
       size={size}
+      className={fieldClassName}
     >
       <div className={cn('flex items-center gap-2', className)}>
         <Select

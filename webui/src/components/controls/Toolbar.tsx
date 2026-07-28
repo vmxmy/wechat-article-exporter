@@ -30,17 +30,17 @@ export function Toolbar({
       aria-label={label}
       data-stack-at={stackAt}
       className={cn(
-        'flex items-center justify-between gap-2',
+        'presentation-toolbar flex items-center justify-between gap-2',
         size === 'sm' && 'min-h-8 px-2 py-1',
         variant === 'muted' && 'rounded bg-muted/50',
         className,
       )}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <div className="presentation-toolbar-start flex min-w-0 flex-wrap items-center gap-2">
         {startContent}
         {children}
       </div>
-      {endContent}
+      {endContent ? <div className="presentation-toolbar-end">{endContent}</div> : null}
     </div>
   )
 }

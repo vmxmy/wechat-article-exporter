@@ -47,6 +47,34 @@
 .presentation-panel > :where(h2, h3) + p { margin-block-start: var(--spacing-2); }
 .presentation-panel > p + .presentation-action-group { margin-block-start: var(--space-cluster); }
 
+/* Toolbar — named page-level action region with separately responsive groups. */
+.presentation-toolbar { width: 100%; min-width: 0; }
+.presentation-toolbar-start,
+.presentation-toolbar-end { display: flex; min-width: 0; align-items: center; gap: var(--spacing-2); width: auto; }
+.presentation-toolbar-end { margin-inline-start: auto; }
+@media (max-width: 45rem) {
+  .presentation-toolbar[data-stack-at='medium'] {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .presentation-toolbar[data-stack-at='medium'] > .presentation-toolbar-start,
+  .presentation-toolbar[data-stack-at='medium'] > .presentation-toolbar-end {
+    width: 100%;
+    margin-inline-start: 0;
+  }
+}
+@media (max-width: 40rem) {
+  .presentation-toolbar[data-stack-at='compact'] {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .presentation-toolbar[data-stack-at='compact'] > .presentation-toolbar-start,
+  .presentation-toolbar[data-stack-at='compact'] > .presentation-toolbar-end {
+    width: 100%;
+    margin-inline-start: 0;
+  }
+}
+
 /* ActionGroup — a cluster of action controls (.action-button-group successor). */
 .presentation-action-group {
   display: flex;

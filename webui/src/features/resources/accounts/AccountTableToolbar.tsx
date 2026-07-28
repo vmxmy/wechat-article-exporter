@@ -50,7 +50,7 @@ export function AccountTableToolbar({
   return (
     <Toolbar className="account-table-toolbar-actions" label={toolbarLabel} stackAt="medium"
       startContent={
-        <ActionGroup align="start" gap="control">
+        <ActionGroup className="account-table-toolbar-primary" align="start" gap="control" nowrap>
           <Button label={actions.addAccount} variant="primary" onClick={onAdd} />
           <FileInput
             label={actions.importManifest}
@@ -63,14 +63,12 @@ export function AccountTableToolbar({
             isDisabled={isManifestImporting}
             isLoading={isManifestImporting}
             isLabelHidden
-            className="account-table-toolbar-import"
+            fieldClassName="w-auto shrink-0"
           />
         </ActionGroup>
       }
       endContent={
-        <ActionGroup align="end" gap="control" role="group" aria-label={selectionActionsLabel}>
-          <Button label={exportLabel} variant="secondary" isDisabled={!canActOnSelection} onClick={onExport} />
-          <Button label={actions.remove} variant="destructive" isDisabled={!canActOnSelection} isLoading={isDeleting} onClick={onDelete} />
+        <ActionGroup className="account-table-toolbar-selection" align="end" gap="control" role="group" aria-label={selectionActionsLabel} nowrap>
           <Selector
             label={actions.syncMode}
             options={[
@@ -85,11 +83,13 @@ export function AccountTableToolbar({
             isLabelHidden
             layout="inline"
             size="lg"
-            className="account-table-toolbar-sync-mode"
+            fieldClassName="w-36 min-w-32 shrink-0"
           />
           <Button label={actions.sync} variant="secondary" isDisabled={!canActOnSelection || isDeleting} isLoading={isSyncing} onClick={onSync} />
+          <Button label={exportLabel} variant="secondary" isDisabled={!canActOnSelection} onClick={onExport} />
+          <Button label={actions.remove} variant="destructive" isDisabled={!canActOnSelection} isLoading={isDeleting} onClick={onDelete} />
           <DropdownMenu
-            className="account-table-toolbar-more"
+            triggerClassName="account-table-toolbar-more"
             button={{ label: actions.more, variant: 'secondary', size: 'default', isDisabled: !canActOnSelection }}
             items={[{ label: actions.edit, onClick: onEdit, isDisabled: !canEdit }]}
           />
