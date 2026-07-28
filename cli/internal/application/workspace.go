@@ -259,6 +259,7 @@ type WorkspaceArticle struct {
 	State                string           `json:"state,omitempty"`
 	HasContent           bool             `json:"hasContent"`
 	HasComments          bool             `json:"hasComments"`
+	CanonicalURL         string           `json:"canonicalUrl,omitempty"`
 }
 
 // WorkspaceArticleOption is the minimal, human-readable article projection
@@ -640,7 +641,7 @@ func workspaceArticles(ctx context.Context, application Application, page domain
 	for _, article := range page.Items {
 		accountName := strings.TrimSpace(accountNames[article.AccountID])
 		items = append(items, WorkspaceArticle{ID: article.ID, Title: article.Title, AccountName: accountName, AccountNameAvailable: accountName != "",
-			Author: article.Author, PublishedAt: article.PublishedAt, State: article.State, HasContent: article.HasContent, HasComments: article.HasComments})
+			Author: article.Author, PublishedAt: article.PublishedAt, State: article.State, HasContent: article.HasContent, HasComments: article.HasComments, CanonicalURL: article.CanonicalURL})
 	}
 	return WorkspacePage[WorkspaceArticle]{Items: items, Total: page.Total, Offset: page.Offset, Limit: page.Limit}, nil
 }
