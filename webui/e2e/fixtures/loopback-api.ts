@@ -3,6 +3,11 @@ import { expect, type Page, type Route } from '@playwright/test'
 const now = '2026-07-24T09:30:00.000Z'
 const csrfToken = 'sanitized-e2e-csrf-token'
 
+/** Opt-in article keyword that returns a corpus large enough to hit the 250 selection limit. */
+export const bulkArticleKeyword = 'bulk-selection-fixture'
+/** 10 full pages of 25 plus a single row on page 11, so the 251st selection is one click. */
+export const bulkArticleTotal = 251
+
 export interface SelectorRequest {
   readonly path: '/api/v1/selectors/accounts' | '/api/v1/selectors/albums' | '/api/v1/selectors/articles'
   readonly search: string
@@ -199,6 +204,24 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/accounts/manifest/upload') return json(route, { handle: 'account-manifest-upload-fixture', sizeBytes: 24, sha256: 'e'.repeat(64), expiresAt: '2026-07-24T09:45:00.000Z' })
   if (url.pathname === '/api/v1/accounts/manifest/import') { state.accountManifestImports.push(body); return json(route, { report: { added: 1, merged: 2, unchanged: 3 } }) }
   if (url.pathname === '/api/v1/articles') {
+    // Opt-in bulk corpus: only this keyword returns enough rows to reach the 250
+    // article selection limit, so the default fixture (and every assertion pinned
+    // to "Page 2 of 2") stays untouched.
+    if (url.searchParams.get('keyword') === bulkArticleKeyword) {
+      const offset = Number(url.searchParams.get('offset') ?? 0)
+      const limit = Number(url.searchParams.get('limit') ?? 25)
+      const bulk = Array.from({ length: bulkArticleTotal }, (_, index) => ({
+        id: `article-bulk-${index + 1}`,
+        title: `Bulk article ${index + 1}`,
+        canonicalUrl: `https://mp.weixin.qq.com/s/article-bulk-${index + 1}`,
+        accountName: 'Fixture Account',
+        accountNameAvailable: true,
+        author: 'Fixture Author',
+        publishedAt: now,
+        state: 'ready'
+      }))
+      return page(route, bulk.slice(offset, offset + limit), bulkArticleTotal)
+    }
     const articles = url.searchParams.get('offset') === '25'
       ? [{ id: 'article-fixture-3', title: 'Sanitized article three', canonicalUrl: 'https://mp.weixin.qq.com/s/article-fixture-3', accountName: 'Fixture Account', accountNameAvailable: true, author: 'Fixture Author', publishedAt: now, state: 'ready' }]
       : [{ id: 'article-fixture-1', title: 'Sanitized article one', canonicalUrl: 'https://mp.weixin.qq.com/s/article-fixture-1', accountName: 'Fixture Account', accountNameAvailable: true, author: 'Fixture Author', publishedAt: now, state: 'ready' }, { id: 'article-fixture-2', title: 'Sanitized article two', canonicalUrl: 'https://mp.weixin.qq.com/s/article-fixture-2', accountName: 'Fixture Account', accountNameAvailable: true, author: 'Fixture Author', publishedAt: now, state: 'queued' }]
@@ -219,10 +242,30 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/articles/article-fixture-1/comments/comment-fixture-1/replies' && method === 'GET') return json(route, { data: [{ id: 'reply-fixture-1', authorName: 'Fixture author', content: 'Sanitized stored reply', createdAt: now, likeCount: 2 }], total: 1, offset: 0, limit: 10, continuation: 'sensitive-reply-buffer', rawRequest: 'sensitive-request-metadata' })
   if (url.pathname === '/api/v1/articles/resources' && method === 'POST') { state.resourceDownloads.push(body); return json(route, { id: 'job-resources-fixture', kind: 'resources', label: 'Resources', state: 'queued', createdAt: now, updatedAt: now }) }
   if (url.pathname === '/api/v1/albums') {
-    const albums = url.searchParams.get('offset') === '25'
-      ? [{ id: 'album-fixture-2', accountId: 'account-fixture', accountName: 'Fixture Account', accountNameAvailable: true, name: 'Sanitized album two', articleCount: 3, paid: false, description: 'Sanitized album two description' }]
-      : [{ id: 'album-fixture-1', accountId: 'account-fixture', accountName: 'Fixture Account', accountNameAvailable: true, name: 'Sanitized album', articleCount: 2, paid: false, description: 'Sanitized album description' }]
-    return page(route, albums, 26)
+    // Synthesize enough rows to make the 50-album selection limit reachable in e2e.
+    // Keep the two named fixtures at page-1-first and page-2-first positions so the
+    // existing pagination/traversal assertions stay valid.
+    const albumTotal = 52
+    const offset = Number(url.searchParams.get('offset') ?? 0)
+    const limit = Number(url.searchParams.get('limit') ?? 25)
+    const baseAlbumOne = { id: 'album-fixture-1', accountId: 'account-fixture', accountName: 'Fixture Account', accountNameAvailable: true, name: 'Sanitized album', articleCount: 2, paid: false, description: 'Sanitized album description' }
+    const baseAlbumTwo = { id: 'album-fixture-2', accountId: 'account-fixture', accountName: 'Fixture Account', accountNameAvailable: true, name: 'Sanitized album two', articleCount: 3, paid: false, description: 'Sanitized album two description' }
+    const synthetic = (from: number, count: number) => Array.from({ length: count }, (_, index) => ({
+      id: `album-fixture-${from + index}`,
+      accountId: 'account-fixture',
+      accountName: 'Fixture Account',
+      accountNameAvailable: true,
+      name: `Synthetic album ${from + index}`,
+      articleCount: from + index,
+      paid: false,
+      description: `Synthetic album ${from + index} description`
+    }))
+    const all = [baseAlbumOne, ...synthetic(3, 24), baseAlbumTwo, ...synthetic(27, albumTotal - 26)]
+    // Filter server-side like the real workspace does, so tests can observe what
+    // happens to a selection when the committed keyword changes the result set.
+    const keyword = url.searchParams.get('keyword')?.trim().toLocaleLowerCase()
+    const matching = keyword ? all.filter((album) => album.name.toLocaleLowerCase().includes(keyword)) : all
+    return page(route, matching.slice(offset, offset + limit), matching.length)
   }
   if (url.pathname === '/api/v1/selectors/albums') {
     const options = [{ id: 'album-fixture-1', accountId: 'account-fixture', displayName: 'Sanitized album', displayNameAvailable: true, accountName: 'Fixture Account', accountNameAvailable: true }, { id: 'album-beyond-first-page', accountId: 'account-beyond-first-page', displayName: 'Later fixture album', displayNameAvailable: true, accountName: 'Later Fixture Account', accountNameAvailable: true }, { id: 'album-fixture-unknown', displayNameAvailable: false, accountNameAvailable: false }]

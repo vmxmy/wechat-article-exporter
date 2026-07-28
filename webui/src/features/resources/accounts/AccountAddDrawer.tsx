@@ -72,19 +72,24 @@ export function AccountAddDrawer({
     onOpenChange(false)
     navigateTo('/login')
   }
+  const clearCandidate = () => onDraftChange({ ...draft, fakeid: '', name: '', alias: '' })
+  const footerSecondary = <>
+    <Button label={actions.cancel} variant="secondary" onClick={() => onOpenChange(false)} />
+    {mode === 'create' && candidateSelected ? <Button label={actions.clearCandidate} variant="secondary" onClick={clearCandidate} /> : null}
+  </>
 
   return (
     <FormDrawer
       isOpen={isOpen}
       onOpenChange={onOpenChange}
-      title={actions.title}
-      description={actions.description}
+      title={mode === 'edit' ? actions.editTitle : actions.createTitle}
+      description={mode === 'edit' ? actions.editDescription : actions.createDescription}
       closeLabel={closeLabel}
       formId="account-add-form"
       submitLabel={submitLabel}
       isSubmitting={isSubmitting}
       canSubmit={canSubmit}
-      footerSecondary={candidateSelected ? <Button label={actions.discoveryReAuth} variant="secondary" onClick={() => onDraftChange({ ...draft, fakeid: '', name: '', alias: '' })} /> : undefined}
+      footerSecondary={footerSecondary}
     >
       <form id="account-add-form" onSubmit={submit}>
         <FormGrid>
@@ -93,6 +98,7 @@ export function AccountAddDrawer({
         </FormGrid>
       </form>
 
+      {mode === 'create' ? (
       <section aria-labelledby="account-discovery-title">
         <h3 id="account-discovery-title">{actions.discoveryTitle}</h3>
         <FieldHint>{actions.discoveryDescription}</FieldHint>
@@ -165,8 +171,12 @@ export function AccountAddDrawer({
           <FieldHint role="status">{actions.discoveryCheckingSession}</FieldHint>
         )}
       </section>
+      ) : null}
 
-      <Collapsible trigger={actions.technicalDetails} defaultIsOpen={false}>
+      {/* Saving requires a fakeid. In edit mode discovery is gone, so a record that
+          arrived without one (manifest import) would otherwise show a disabled Save
+          with its only remedy collapsed out of sight. */}
+      <Collapsible trigger={actions.technicalDetails} defaultIsOpen={mode === 'edit' && !draft.fakeid.trim()}>
         <FieldHint>{actions.fakeidHint}</FieldHint>
         <TextInput label={actions.fakeid} value={draft.fakeid} onChange={(fakeid) => onDraftChange({ ...draft, fakeid })} isRequired />
       </Collapsible>

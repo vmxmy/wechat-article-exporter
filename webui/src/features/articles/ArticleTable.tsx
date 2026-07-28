@@ -4,7 +4,7 @@ import { SearchableSelector } from '@/components/controls/SearchableSelector'
 import { Timestamp } from '@/components/controls/Timestamp'
 import { Toolbar } from '@/components/controls/Toolbar'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type RowSelectionState, type SortingState, type Updater, type VisibilityState } from '@tanstack/react-table'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { navigateTo, navigationEvent } from '../../app/navigation'
 import { ActionGroup, ActiveFilterSummary, DenseRegion, DetailPanel, EmptyState, MobileResourceRow, PageHeader, PageStack, Panel, ResponsiveDataTable, SectionHeader, SectionStack, SelectionActionBar, Status, TechnicalDetails } from '../../components/presentation'
 import type { Locale, MessageCatalog } from '../../i18n'
@@ -42,6 +42,10 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   const [sorting, setSorting] = useState<SortingState>([sortingStateFor(initialBrowserView.state.sort)])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({})
+  // Mirrors rowSelection so updateRowSelection can resolve the next value outside a
+  // setState updater, which must stay pure and free of setNotice side effects.
+  const rowSelectionRef = useRef(rowSelection)
+  rowSelectionRef.current = rowSelection
   const [articlePresentationByID, setArticlePresentationByID] = useState<ReadonlyMap<string, ArticleRecord>>(new Map())
   const [detailArticleID, setDetailArticleID] = useState<string>()
   const [notice, setNotice] = useState<string>()
@@ -126,10 +130,17 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
     setFilters(nextFilters)
   }
   const updateRowSelection = (updater: Updater<RowSelectionState>) => {
-    setRowSelection((current) => {
-      const next = selectedArticleIDs(typeof updater === 'function' ? updater(current) : updater)
-      return Object.keys(next).length <= maximumSelectedArticleIDs ? next : current
-    })
+    const current = rowSelectionRef.current
+    const next = selectedArticleIDs(typeof updater === 'function' ? updater(current) : updater)
+    if (Object.keys(next).length > maximumSelectedArticleIDs) {
+      setNotice(copy.selectionLimit(maximumSelectedArticleIDs, Object.keys(current).length))
+      return
+    }
+    rowSelectionRef.current = next
+    setRowSelection(next)
+    // A new selection supersedes whatever the previous one reported (limit reached,
+    // action failed), so the stale notice does not outlive its context.
+    setNotice(undefined)
   }
 
   const columns = useMemo<ColumnDef<ArticleRecord>[]>(() => [
@@ -299,7 +310,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
 
       <SelectionActionBar
         selectedCount={selectedCount}
-        countLabel={copy.selectedCount}
+        countLabel={(count) => copy.selectedCountWithLimit(count, maximumSelectedArticleIDs)}
         toolbarLabel={copy.selectionActions}
         actions={<>
           <Button label={messages.articles.actions.download} variant="primary" size="sm" onClick={() => startDownload('article')} />

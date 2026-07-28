@@ -2,6 +2,7 @@ import { Button } from '@/components/controls/Button'
 import { Selector } from '@/components/controls/Selector'
 import { TextInput } from '@/components/controls/TextInput'
 import { AccountRemoteSelector, EmptyState, FieldHint, PageHeader, PageStack, Panel, SectionHeader, SelectionActionBar, Status, TypedConfirmationDialog } from '../../components/presentation'
+import { useDebounce } from '../../hooks/use-debounce'
 import { useMemo, useRef, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
@@ -210,9 +211,10 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
   const [selected, setSelected] = useState<readonly string[]>([])
   const [accountId, setAccountId] = useState<string>()
   const [keyword, setKeyword] = useState('')
+  const debouncedKeyword = useDebounce(keyword, 300)
   const [order, setOrder] = useState<AlbumTraversalOrder>('forward')
   const [notice, setNotice] = useState<string>()
-  const query = useAlbumPage({ page: pageIndex + 1, pageSize, accountId, keyword })
+  const query = useAlbumPage({ page: pageIndex + 1, pageSize, accountId, keyword: debouncedKeyword })
   const mutations = useWorkspaceMutations()
   const columns = useMemo<ColumnDef<AlbumRecordWithAccountName>[]>(() => [
     { accessorKey: 'name', header: messages.resources.albums.columns.name, meta: { role: 'primaryText' }, cell: ({ getValue, row }) => <div><strong>{getValue<string>()}</strong><span> · {messages.resources.accounts.columns.name}: {albumAccountName(row.original, messages.articles.ux.accountNameUnavailable)}</span></div> },
@@ -240,20 +242,22 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
     saveExportHandoff({ selection, label })
     navigateTo('/exports')
   }
-  const selectionScope = `${accountId ?? ''}\u0000${keyword}`
-  const updateFilter = (set: (value: string) => void) => (value: string) => {
-    set(value)
+  // Scope tracks the *committed* filter, not the raw input: selections survive a
+  // typing burst (debouncedKeyword is unchanged until it settles) but are dropped
+  // once the result set actually changes, so no row stays selected while invisible.
+  const selectionScope = `${accountId ?? ''}\u0000${debouncedKeyword}`
+  const changeKeyword = (value: string) => {
+    setKeyword(value)
     setPageIndex(0)
-    setSelected([])
   }
   return <PageStack as="div">
     <PageHeader eyebrow={messages.navigation.library} title={messages.resources.albums.title} titleId="albums-title" description={messages.resources.albums.description} />
     <Panel aria-labelledby="album-filters-title">
       <SectionHeader title={messages.resources.albums.filters.title} titleId="album-filters-title" description={messages.resources.albums.filters.description} />
-      <div className="account-action-form"><AccountRemoteSelector label={messages.resources.accounts.columns.name} value={accountId} onChange={(next) => { setAccountId(next); setPageIndex(0); setSelected([]) }} placeholder={messages.articles.filters.any} copy={messages.selectors} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={updateFilter(setKeyword)} /></div>
+      <div className="account-action-form"><AccountRemoteSelector label={messages.resources.accounts.columns.name} value={accountId} onChange={(next) => { setAccountId(next); setPageIndex(0) }} placeholder={messages.articles.filters.any} copy={messages.selectors} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={changeKeyword} /></div>
     </Panel>
-    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={setSelected} preserveSelectionAcrossPages maximumSelectedIDs={maximumSelectedAlbumIDs} selectionScope={selectionScope} hideHeader />
-    <SelectionActionBar selectedCount={selected.length} countLabel={(count) => `${count} ${messages.resources.albums.selected}`} toolbarLabel={messages.resources.albums.actions.title} actions={<><Selector label={messages.resources.albums.actions.order} options={[{ value: 'forward', label: messages.resources.albums.actions.forward }, { value: 'reverse', label: messages.resources.albums.actions.reverse }]} value={order} onChange={(next) => setOrder(next as AlbumTraversalOrder)} /><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" onClick={handoffExport} /></>} />
+    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={(ids) => { setSelected(ids); setNotice(undefined) }} preserveSelectionAcrossPages maximumSelectedIDs={maximumSelectedAlbumIDs} onSelectionLimited={(limit, current) => setNotice(messages.resources.albums.actions.selectionLimit(limit, current))} selectionScope={selectionScope} hideHeader />
+    <SelectionActionBar selectedCount={selected.length} countLabel={(count) => messages.resources.albums.actions.selectedCountWithLimit(count, maximumSelectedAlbumIDs)} toolbarLabel={messages.resources.albums.actions.title} actions={<><Selector label={messages.resources.albums.actions.order} options={[{ value: 'forward', label: messages.resources.albums.actions.forward }, { value: 'reverse', label: messages.resources.albums.actions.reverse }]} value={order} onChange={(next) => setOrder(next as AlbumTraversalOrder)} /><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" onClick={handoffExport} /></>} />
     <AlbumSelectionDetails album={album} messages={messages} />
     {notice ? <p role="status">{notice}</p> : null}
   </PageStack>

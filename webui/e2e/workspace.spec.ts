@@ -117,10 +117,10 @@ test('sanitized account and article selections remain browser-local', async ({ p
   await expect(page.getByRole('group', { name: 'Selected account actions' })).toBeVisible()
   await page.goto('/articles')
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized article one' }))
-  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 selected')
+  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 / 250 selected')
   await page.getByRole('textbox', { name: 'Search articles' }).fill('Sanitized')
   await expect(page.getByRole('cell', { name: 'Sanitized article one', exact: true })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 selected')
+  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 / 250 selected')
   await expectOnlyLoopbackRequests(page)
 })
 
@@ -131,10 +131,10 @@ test('article selections persist across server pages and hand off all selected s
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized article one' }))
   await page.getByRole('button', { name: 'Next page' }).click()
   await expect(page.getByRole('cell', { name: 'Sanitized article three', exact: true })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 selected')
+  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 / 250 selected')
 
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized article three' }))
-  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('2 selected')
+  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('2 / 250 selected')
   await page.getByRole('button', { name: 'Export selected' }).click()
 
   await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
@@ -590,10 +590,10 @@ test('album selections persist across server pages and queue one multi-album tra
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized album' }))
   await page.getByRole('button', { name: 'Next page' }).click()
   await expect(page.getByRole('table').getByText('Sanitized album two', { exact: true })).toBeVisible()
-  await expect(page.getByText('1 selected', { exact: false })).toBeVisible()
+  await expect(page.getByText('1 / 50 selected', { exact: false })).toBeVisible()
 
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized album two' }))
-  await expect(page.getByText('2 selected', { exact: false })).toBeVisible()
+  await expect(page.getByText('2 / 50 selected', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Traverse selected albums' })).toBeEnabled()
   await page.getByRole('button', { name: 'Traverse and batch download' }).click()
   await expect.poll(() => fixture.albumTraversals).toEqual([{ albumIds: ['album-fixture-1', 'album-fixture-2'], order: 'forward', download: true }])
@@ -607,7 +607,12 @@ test('album filters stay server-paginated and traversal sends the selected order
   await selectRemoteSelectorOption(page, 'Account', 'Fixture Account')
   await page.getByRole('textbox', { name: 'Album keyword' }).fill('Sanitized')
   await expect.poll(() => fixture.requests.filter((request) => request === 'GET /api/v1/albums').length).toBeGreaterThan(1)
-  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized album' }))
+  // Wait for the *debounced* keyword to commit before selecting: the server-side
+  // filter narrows the corpus to the two named albums. Polling the request count
+  // alone is not enough — the account filter already bumped it.
+  await expect(page.getByText('Showing 1–2 of 2')).toBeVisible()
+  // Both named albums now share a page, so the name must be exact.
+  await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized album', exact: true }))
   await selectStaticSelectorOption(page, 'Traversal order', 'Reverse')
   await page.getByRole('button', { name: 'Traverse and batch download' }).click()
   await expect.poll(() => fixture.albumTraversals).toEqual([{ accountId: 'account-fixture', order: 'reverse', download: true }])

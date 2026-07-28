@@ -23,6 +23,7 @@ export interface ResourceTableProps<T> {
   readonly onSelectionChange?: (ids: readonly string[]) => void
   readonly preserveSelectionAcrossPages?: boolean
   readonly maximumSelectedIDs?: number
+  readonly onSelectionLimited?: (limit: number, current: number) => void
   readonly selectionScope?: string
   readonly hideHeader?: boolean
   readonly headerActions?: ReactNode
@@ -34,11 +35,18 @@ export interface ResourceTableProps<T> {
   readonly selectionLabel?: (count: number) => string
 }
 
-export function ResourceTable<T extends { readonly id?: string; readonly name?: string }>({ eyebrow, messages, columns, query, pageIndex, onPageChange, onSelectionChange, preserveSelectionAcrossPages = false, maximumSelectedIDs, selectionScope, hideHeader = false, headerActions, tableToolbar, emptyState, selectionLabel }: ResourceTableProps<T>) {
+export function ResourceTable<T extends { readonly id?: string; readonly name?: string }>({ eyebrow, messages, columns, query, pageIndex, onPageChange, onSelectionChange, preserveSelectionAcrossPages = false, maximumSelectedIDs, onSelectionLimited, selectionScope, hideHeader = false, headerActions, tableToolbar, emptyState, selectionLabel }: ResourceTableProps<T>) {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({})
+  // Mirrors rowSelection so updateSelection can resolve the next value without a
+  // setState updater. Kept in sync on every render and eagerly on each update, so
+  // consecutive toggles within one tick still see the latest value.
+  const rowSelectionRef = useRef(rowSelection)
+  rowSelectionRef.current = rowSelection
   const selectionChangeRef = useRef(onSelectionChange)
   selectionChangeRef.current = onSelectionChange
+  const selectionLimitedRef = useRef(onSelectionLimited)
+  selectionLimitedRef.current = onSelectionLimited
   const previousPageIndexRef = useRef(pageIndex)
   const previousPreserveSelectionRef = useRef(preserveSelectionAcrossPages)
   const previousSelectionScopeRef = useRef(selectionScope)
@@ -64,13 +72,19 @@ export function ResourceTable<T extends { readonly id?: string; readonly name?: 
     setRowSelection({})
     selectionChangeRef.current?.([])
   }, [selectionScope])
+  // Selection is resolved here rather than inside a setState updater: the updater
+  // must stay pure, and both branches notify the parent — a cross-component update
+  // from inside another component's render phase.
   const updateSelection = (updater: Updater<RowSelectionState>) => {
-    setRowSelection((current) => {
-      const next = selectedIDs(typeof updater === 'function' ? updater(current) : updater)
-      if (maximumSelectedIDs !== undefined && Object.keys(next).length > maximumSelectedIDs) return current
-      selectionChangeRef.current?.(Object.keys(next))
-      return next
-    })
+    const current = rowSelectionRef.current
+    const next = selectedIDs(typeof updater === 'function' ? updater(current) : updater)
+    if (maximumSelectedIDs !== undefined && Object.keys(next).length > maximumSelectedIDs) {
+      selectionLimitedRef.current?.(maximumSelectedIDs, Object.keys(current).length)
+      return
+    }
+    rowSelectionRef.current = next
+    setRowSelection(next)
+    selectionChangeRef.current?.(Object.keys(next))
   }
   // TanStack Table deliberately returns a mutable instance; it is rendered
   // directly here rather than being memoized or passed to a memoized child.

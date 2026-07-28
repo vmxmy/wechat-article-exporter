@@ -32,7 +32,7 @@ test('article workspace layers readable common and more filters, summary, select
   await expect(page.getByRole('region', { name: 'Applied filters' })).toHaveCount(0)
 
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized article one' }))
-  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 selected')
+  await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 / 250 selected')
   await expect(page.getByRole('button', { name: 'Download selected article' })).toBeVisible()
   await page.getByRole('button', { name: 'Details' }).click()
   const detail = page.getByRole('dialog', { name: 'Sanitized article one' })
