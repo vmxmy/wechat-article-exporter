@@ -300,7 +300,7 @@ export const zhCN = {
     },
     ux: {
       moreFilters: '更多筛选', appliedFilters: '已应用的筛选条件', clearFilters: '清除全部筛选', removeFilter: (label: string) => `移除${label}筛选`,
-      savedViews: '已保存视图', savedViewsToolbar: '文章库工具', savedViewsPlaceholder: '选择已保存视图…', saveView: '保存当前视图', openDetails: (title: string) => `打开“${title}”的详情`, details: '详情', closeDetails: '关闭文章详情', selectedCount: (count: number) => `已选择 ${count} 项`, selectionActions: '所选文章操作', moreActions: '更多操作',
+      savedViews: '已保存视图', savedViewsToolbar: '文章库工具', savedViewsPlaceholder: '选择已保存视图…', saveView: '保存当前视图', openDetails: (title: string) => `打开“${title}”的详情`, details: '详情', closeDetails: '关闭文章详情', selectedCount: (count: number) => `已选择 ${count} 项`, selectionActions: '所选文章操作', moreActions: '更多操作', openOriginal: '打开原文',
       firstUseTitle: '本地文章资料库还是空的', firstUseDescription: '请选择一个账号并开始同步，将文章记录保存到此设备。', firstUseAction: '选择要同步的账号',
       filteredEmptyTitle: '没有文章符合这些筛选条件', filteredEmptyDescription: '请调整已应用的筛选条件，或清除全部筛选以返回本地资料库。', filteredEmptyAction: '清除全部筛选',
       accountUnavailable: '所选账号', accountNameUnavailable: '账号名称暂不可用', albumUnavailable: '所选专辑', accountDescription: '按名称或别名搜索已保存账号。结果仅保留在此设备上。', albumDescription: '按名称搜索已保存专辑，每项下方显示所属账号。', selectorNoResults: '没有匹配的本地结果。', duplicateSelection: (position: number, total: number) => `同名结果 ${position} / ${total}`, dateFrom: '发布时间范围开始', dateTo: '发布时间范围结束', messageTypePlaceholder: '选择消息类型…',

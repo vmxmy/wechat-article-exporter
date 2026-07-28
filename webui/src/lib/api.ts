@@ -137,6 +137,7 @@ export interface ArticleRecord {
   readonly status?: string
   readonly hasContent?: boolean
   readonly hasComments?: boolean
+  readonly canonicalUrl?: string
 }
 
 /** Safe, bounded projection returned by GET /selectors/articles. */

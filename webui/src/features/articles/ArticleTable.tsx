@@ -141,12 +141,12 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
       accessorKey: 'title',
       header: messages.articles.columns.title,
       meta: { role: 'primaryText', className: 'article-title-cell' },
-      cell: ({ row, getValue }) => <button className="article-title-button" type="button" title={getValue<string>()} onClick={() => setDetailArticleID(row.original.id)}>{getValue<string>()}</button>
+      cell: ({ row, getValue }) => <ArticleTitleLink title={getValue<string>()} url={row.original.canonicalUrl} openLabel={copy.openOriginal} />
     },
     { accessorKey: 'accountName', header: messages.articles.columns.account, enableSorting: false, meta: { role: 'secondaryText', className: 'article-account-cell' }, cell: ({ row }) => accountNamePresentation(row.original, copy.accountNameUnavailable) },
     { accessorKey: 'publishedAt', header: messages.articles.columns.published, meta: { role: 'dateTime', className: 'article-published-cell' }, cell: ({ getValue }) => formatDate(getValue<string | null>(), locale) },
     { accessorKey: 'status', header: messages.articles.columns.status, meta: { role: 'status', className: 'article-status-cell' }, cell: ({ row }) => <Status value={row.original.state ?? row.original.status} locale={locale} /> }
-  ], [copy.accountNameUnavailable, locale, messages])
+  ], [copy.accountNameUnavailable, copy.openOriginal, locale, messages])
 
   // TanStack Table deliberately returns a mutable instance; it is rendered
   // directly in this component rather than handed to a memoized child.
@@ -342,7 +342,7 @@ function ArticleResults({ table, locale, messages, onOpenDetail, onClearFilters,
       : flexRender(header.column.columnDef.header, header.getContext())}
     renderMobileRows={(rows) => rows.map((row) => <MobileResourceRow
       key={row.id}
-      title={<button className="article-title-button" type="button" onClick={() => onOpenDetail(row.original.id)}>{row.original.title}</button>}
+      title={<ArticleTitleLink title={row.original.title} url={row.original.canonicalUrl} openLabel={copy.openOriginal} />}
       fullTitle={row.original.title}
       description={accountNamePresentation(row.original, copy.accountNameUnavailable)}
       isSelected={row.getIsSelected()}
@@ -397,6 +397,14 @@ function SelectionMoreActions({ label, messages, selectedArticle, onPreview, onM
       <Button label={messages.articles.actions.forceResources} variant="ghost" size="sm" onClick={onForceResources} />
     </div>
   </details>
+}
+
+function ArticleTitleLink({ title, url, openLabel }: { readonly title: string; readonly url?: string; readonly openLabel: string }) {
+  const trimmed = url?.trim()
+  if (!trimmed) {
+    return <span className="article-title-button article-title-button-static" title={title}>{title}</span>
+  }
+  return <a className="article-title-button" href={trimmed} target="_blank" rel="noopener noreferrer" title={`${title} — ${openLabel}`}>{title}</a>
 }
 
 function ArticleDetailPanel({ article, locale, messages, isOpen, onOpenChange, onPreview }: { readonly article: ArticleRecord | undefined; readonly locale: Locale; readonly messages: MessageCatalog; readonly isOpen: boolean; readonly onOpenChange: (isOpen: boolean) => void; readonly onPreview: (article: ArticleRecord) => void }) {

@@ -285,8 +285,10 @@ test('article table reserves flexible width for titles and supports truncation',
   await installLoopbackFixture(page)
   await page.goto('/articles')
 
-  const title = page.getByRole('button', { name: 'Sanitized article one', exact: true })
+  const title = page.getByRole('link', { name: /Sanitized article one/, exact: true })
   await expect(title).toBeVisible()
+  await expect(title).toHaveAttribute('href', 'https://mp.weixin.qq.com/s/article-fixture-1')
+  await expect(title).toHaveAttribute('target', '_blank')
   await expect(title).toHaveCSS('text-overflow', 'ellipsis')
   const dimensions = await page.evaluate(() => {
     const titleCell = document.querySelector('.article-title-cell')?.getBoundingClientRect().width ?? 0

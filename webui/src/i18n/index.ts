@@ -110,6 +110,7 @@ export type MessageCatalog = {
       readonly selectedCount: (count: number) => string
       readonly selectionActions: string
       readonly moreActions: string
+      readonly openOriginal: string
       readonly firstUseTitle: string
       readonly firstUseDescription: string
       readonly firstUseAction: string

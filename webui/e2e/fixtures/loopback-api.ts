@@ -200,8 +200,8 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   if (url.pathname === '/api/v1/accounts/manifest/import') { state.accountManifestImports.push(body); return json(route, { report: { added: 1, merged: 2, unchanged: 3 } }) }
   if (url.pathname === '/api/v1/articles') {
     const articles = url.searchParams.get('offset') === '25'
-      ? [{ id: 'article-fixture-3', title: 'Sanitized article three', accountName: 'Fixture Account', accountNameAvailable: true, author: 'Fixture Author', publishedAt: now, state: 'ready' }]
-      : [{ id: 'article-fixture-1', title: 'Sanitized article one', accountName: 'Fixture Account', accountNameAvailable: true, author: 'Fixture Author', publishedAt: now, state: 'ready' }, { id: 'article-fixture-2', title: 'Sanitized article two', accountName: 'Fixture Account', accountNameAvailable: true, author: 'Fixture Author', publishedAt: now, state: 'queued' }]
+      ? [{ id: 'article-fixture-3', title: 'Sanitized article three', canonicalUrl: 'https://mp.weixin.qq.com/s/article-fixture-3', accountName: 'Fixture Account', accountNameAvailable: true, author: 'Fixture Author', publishedAt: now, state: 'ready' }]
+      : [{ id: 'article-fixture-1', title: 'Sanitized article one', canonicalUrl: 'https://mp.weixin.qq.com/s/article-fixture-1', accountName: 'Fixture Account', accountNameAvailable: true, author: 'Fixture Author', publishedAt: now, state: 'ready' }, { id: 'article-fixture-2', title: 'Sanitized article two', canonicalUrl: 'https://mp.weixin.qq.com/s/article-fixture-2', accountName: 'Fixture Account', accountNameAvailable: true, author: 'Fixture Author', publishedAt: now, state: 'queued' }]
     return page(route, articles, 26)
   }
   if (url.pathname === '/api/v1/selectors/articles') {
