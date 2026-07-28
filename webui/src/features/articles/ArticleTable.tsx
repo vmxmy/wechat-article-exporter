@@ -1,12 +1,13 @@
 import { Button } from '@/components/controls/Button'
 import { Collapsible } from '@/components/controls/Collapsible'
+import { DropdownMenu } from '@/components/controls/DropdownMenu'
 import { SearchableSelector } from '@/components/controls/SearchableSelector'
 import { Timestamp } from '@/components/controls/Timestamp'
 import { Toolbar } from '@/components/controls/Toolbar'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type RowSelectionState, type SortingState, type Updater, type VisibilityState } from '@tanstack/react-table'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { navigateTo, navigationEvent } from '../../app/navigation'
-import { ActionGroup, ActiveFilterSummary, DenseRegion, DetailPanel, EmptyState, MobileResourceRow, PageHeader, PageStack, Panel, ResponsiveDataTable, SectionHeader, SectionStack, SelectionActionBar, Status, TechnicalDetails } from '../../components/presentation'
+import { ActionGroup, ActiveFilterSummary, DenseRegion, DetailPanel, EmptyState, InlineNotice, MobileResourceRow, PageHeader, PageStack, Panel, ResponsiveDataTable, SectionHeader, SectionStack, SelectionActionBar, Status, TechnicalDetails } from '../../components/presentation'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { getArticlePreview, parseArticleQuery, saveArticleQueryHandoff, saveExportHandoff, type ArticleQuery, type ArticleRecord, type ArticleSort } from '../../lib/api'
 import { createExportWorkflowID, parseArticleBrowserView, serializeArticleBrowserView, type ArticleBrowserView } from '../../lib/browserViewState'
@@ -308,6 +309,8 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
         </DenseRegion>
       </SectionStack>
 
+      <InlineNotice tone="alert">{notice}</InlineNotice>
+
       <SelectionActionBar
         selectedCount={selectedCount}
         countLabel={(count) => copy.selectedCountWithLimit(count, maximumSelectedArticleIDs)}
@@ -322,7 +325,6 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
 
       <ActionGroup align="start" aria-label={messages.articles.actions.title}>
         <Button label={messages.articles.actions.exportMatching} variant="secondary" onClick={() => handoffExport('matching')} />
-        {notice ? <p role="alert">{notice}</p> : null}
       </ActionGroup>
       {detailArticleID ? <ArticleDetailPanel article={detailArticle} locale={locale} messages={messages} isOpen onOpenChange={(isOpen) => { if (!isOpen) setDetailArticleID(undefined) }} onPreview={preview} /> : null}
     </PageStack>
@@ -398,16 +400,17 @@ function SelectionMoreActions({ label, messages, selectedArticle, onPreview, onM
   readonly onForceResources: () => void
 }) {
   if (!selectedArticle) return null
-  return <details className="article-selection-more">
-    <summary>{label}</summary>
-    <div className="article-selection-more-actions">
-      <Button label={messages.articles.actions.preview} variant="ghost" size="sm" onClick={onPreview} />
-      <Button label={messages.articles.actions.metadata} variant="ghost" size="sm" onClick={onMetadata} />
-      <Button label={messages.articles.actions.comments} variant="ghost" size="sm" onClick={onComments} />
-      <Button label={messages.articles.actions.resources} variant="ghost" size="sm" onClick={onResources} />
-      <Button label={messages.articles.actions.forceResources} variant="ghost" size="sm" onClick={onForceResources} />
-    </div>
-  </details>
+  return <DropdownMenu
+    triggerClassName="article-selection-more"
+    button={{ label, variant: 'secondary', size: 'sm', isDisabled: false }}
+    items={[
+      { label: messages.articles.actions.preview, onClick: onPreview },
+      { label: messages.articles.actions.metadata, onClick: onMetadata },
+      { label: messages.articles.actions.comments, onClick: onComments },
+      { label: messages.articles.actions.resources, onClick: onResources },
+      { label: messages.articles.actions.forceResources, onClick: onForceResources }
+    ]}
+  />
 }
 
 function ArticleTitleLink({ title, url, openLabel }: { readonly title: string; readonly url?: string; readonly openLabel: string }) {

@@ -1,7 +1,7 @@
 import { Button } from '@/components/controls/Button'
 import { Selector } from '@/components/controls/Selector'
 import { TextInput } from '@/components/controls/TextInput'
-import { AccountRemoteSelector, EmptyState, FieldHint, PageHeader, PageStack, Panel, SectionHeader, SelectionActionBar, Status, TypedConfirmationDialog } from '../../components/presentation'
+import { AccountRemoteSelector, ActiveFilterSummary, EmptyState, FieldHint, InlineNotice, PageHeader, PageStack, Panel, SectionHeader, SelectionActionBar, Status, TypedConfirmationDialog } from '../../components/presentation'
 import { useDebounce } from '../../hooks/use-debounce'
 import { useMemo, useRef, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -27,6 +27,8 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   const [pageIndex, setPageIndex] = usePagedBrowserView()
   const [selected, setSelected] = useState<readonly string[]>([])
   const [search, setSearch] = useState('')
+  const [listSearch, setListSearch] = useState('')
+  const debouncedListSearch = useDebounce(listSearch, 300)
   const [draft, setDraft] = useState<AccountDraft>({ fakeid: '', name: '', alias: '' })
   const [entryMode, setEntryMode] = useState<AccountEntryMode>('create')
   const [isEntryOpen, setEntryOpen] = useState(false)
@@ -40,7 +42,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   const [isDeleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false)
   const [deleteConfirmation, setDeleteConfirmation] = useState('')
   const deleteTriggerRef = useRef<HTMLElement | null>(null)
-  const query = useAccountPage({ page: pageIndex + 1, pageSize })
+  const query = useAccountPage({ page: pageIndex + 1, pageSize, search: debouncedListSearch.trim() || undefined })
   const discovery = useAccountSearch({ page: 1, pageSize, search })
   const session = useSessionStatus()
   const mutations = useWorkspaceMutations()
@@ -148,7 +150,20 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
     if (isOpen) return
     setDeleteConfirmation('')
   }
+  const isListFiltered = debouncedListSearch.trim() !== ''
   const isEmpty = !query.isLoading && !query.isError && (query.data?.data.length ?? 0) === 0
+  const changeListSearch = (value: string) => {
+    setListSearch(value)
+    setPageIndex(0)
+  }
+  const clearListSearch = () => {
+    setListSearch('')
+    setPageIndex(0)
+  }
+  const accountFilterParts = isListFiltered ? [{ id: 'keyword', label: `${messages.resources.accounts.filters.keyword}: ${debouncedListSearch.trim()}` }] : []
+  const removeAccountFilter = (id: string) => {
+    if (id === 'keyword') clearListSearch()
+  }
   const syncSelected = () => {
     if (selected.length === 0) return
     if (one) {
@@ -169,6 +184,17 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   }
   return (
     <PageStack as="div">
+      <PageHeader eyebrow={messages.navigation.library} title={messages.resources.accounts.title} titleId="accounts-title" description={messages.resources.accounts.description} />
+      <Panel aria-labelledby="account-filters-title">
+        <SectionHeader title={messages.resources.accounts.filters.title} titleId="account-filters-title" description={messages.resources.accounts.filters.description} />
+        <div className="account-action-form"><TextInput label={messages.resources.accounts.filters.keyword} value={listSearch} onChange={changeListSearch} /></div>
+      </Panel>
+      <ActiveFilterSummary
+        label={messages.resources.accounts.filters.appliedFilters}
+        clearLabel={messages.resources.accounts.filters.clearFilters}
+        onClear={clearListSearch}
+        filters={accountFilterParts.map((part) => ({ id: part.id, label: part.label, removeLabel: messages.resources.accounts.filters.removeFilter(part.label), onRemove: () => removeAccountFilter(part.id) }))}
+      />
       <ResourceTable
         eyebrow={messages.navigation.library}
         messages={messages.resources.accounts}
@@ -181,25 +207,27 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
         tableToolbar={<AccountTableToolbar
           actions={actions}
           toolbarLabel={actions.toolbarLabel}
-          selectionActionsLabel={actions.selectionActions}
-          selectedCount={selected.length}
-          syncMode={syncMode}
-          isSyncing={mutations.syncAccount.isPending || mutations.syncAccounts.isPending}
-          isDeleting={mutations.deleteAccounts.isPending}
           isManifestImporting={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending}
           onAdd={openNewEntry}
           onImport={importManifest}
-          onExport={exportSelectedManifest}
-          exportLabel={actions.downloadManifest}
-          onEdit={openEditEntry}
-          onDelete={openDeleteConfirmation}
-          onSync={syncSelected}
-          onSyncModeChange={setSyncMode}
         />}
-        emptyState={isEmpty ? <EmptyState title={messages.resources.accounts.emptyState.title} description={messages.resources.accounts.emptyState.description} headingLevel={3} actions={<Button label={messages.resources.accounts.emptyState.addAccount} variant="primary" onClick={openNewEntry} />} /> : undefined}
+        emptyState={isEmpty ? (isListFiltered ? <EmptyState title={messages.resources.accounts.emptyState.filteredEmptyTitle} description={messages.resources.accounts.emptyState.filteredEmptyDescription} headingLevel={3} actions={<Button label={messages.resources.accounts.emptyState.filteredEmptyAction} variant="secondary" onClick={clearListSearch} />} /> : <EmptyState title={messages.resources.accounts.emptyState.title} description={messages.resources.accounts.emptyState.description} headingLevel={3} actions={<Button label={messages.resources.accounts.emptyState.addAccount} variant="primary" onClick={openNewEntry} />} />) : undefined}
+        hideHeader
+      />
+      <SelectionActionBar
+        selectedCount={selected.length}
+        countLabel={(count) => `${count} ${messages.resources.accounts.selected}`}
+        toolbarLabel={actions.selectionActions}
+        actions={<>
+          <Selector label={actions.syncMode} options={[{ value: 'incremental', label: actions.incremental }, { value: 'full', label: actions.full }]} value={syncMode} onChange={(mode) => { if (mode) setSyncMode(mode as AccountSyncMode) }} isLabelHidden layout="inline" size="lg" />
+          <Button label={actions.sync} variant="secondary" isLoading={mutations.syncAccount.isPending || mutations.syncAccounts.isPending} onClick={syncSelected} />
+          <Button label={actions.downloadManifest} variant="secondary" onClick={exportSelectedManifest} />
+          <Button label={actions.remove} variant="destructive" isLoading={mutations.deleteAccounts.isPending} onClick={openDeleteConfirmation} />
+          {one ? <Button label={actions.edit} variant="secondary" onClick={openEditEntry} /> : null}
+        </>}
       />
       {selected.length > 0 ? <FieldHint>{syncMode === 'incremental' ? actions.incrementalHint : actions.fullHint}</FieldHint> : null}
-      {notice ? <p role="status">{notice}</p> : null}
+      <InlineNotice tone="status">{notice}</InlineNotice>
       {isEntryOpen ? <AccountAddDrawer isOpen onOpenChange={closeEntry} mode={entryMode} actions={actions} closeLabel={messages.a11y.closeDialog} draft={draft} onDraftChange={setDraft} onSubmit={entryMode === 'edit' ? updateAccount : saveAccount} isSubmitting={entryMode === 'edit' ? mutations.updateAccount.isPending : mutations.saveAccount.isPending} isAuthenticated={isAuthenticated} isSessionResolved={isSessionResolved} search={search} onSearchChange={setSearch} onDiscover={() => { void discoverAccounts() }} isDiscovering={discovery.isFetching} discoveryError={discoveryError} candidates={discovery.data?.data} onCandidateSelect={selectDiscoveryCandidate} articleURL={articleURL} onArticleURLChange={setArticleURL} onResolve={() => { void resolveFromArticle() }} isResolving={isResolving} resolveError={resolveError} resolvedName={resolvedName} /> : null}
       {isDeleteConfirmationOpen ? <TypedConfirmationDialog isOpen onOpenChange={closeDeleteConfirmation} triggerRef={deleteTriggerRef} title={actions.deleteTitle} closeLabel={messages.a11y.closeDialog} description={actions.deleteConfirm} expected={actions.deleteConfirmation(selected)} inputLabel={actions.deleteConfirmationLabel} inputHint={actions.deleteConfirmationHint} actionLabel={actions.confirmDelete} cancelLabel={actions.cancelDelete} confirmation={deleteConfirmation} onConfirmationChange={setDeleteConfirmation} isActionLoading={mutations.deleteAccounts.isPending} onAction={() => mutations.deleteAccounts.mutate({ ids: selected, confirmation: deleteConfirmation }, { onSuccess: () => { setSelected([]); setNotice(undefined); setDeleteConfirmationOpen(false); setDeleteConfirmation('') }, onError: () => setNotice(actions.actionFailed) })} /> : null}
     </PageStack>
@@ -224,7 +252,6 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
   ], [messages])
   const album = selected.length === 1 ? query.data?.data.find((item) => item.id === selected[0]) as AlbumRecordWithAccountName | undefined : undefined
   const traverse = (download: boolean) => {
-    if (selected.length === 0) return setNotice(messages.resources.albums.actions.selectAtLeastOne)
     if (selected.length === 1 && album?.accountId) {
       mutations.traverseAlbum.mutate({ albumId: album.id, accountId: album.accountId, order, download }, { onSuccess: (job) => { setNotice(messages.resources.albums.actions.queued); handoffCreatedJob(job) }, onError: () => setNotice(messages.resources.albums.actions.failed) })
       return
@@ -250,16 +277,43 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
     setKeyword(value)
     setPageIndex(0)
   }
+  const changeAccount = (next: string | undefined) => {
+    setAccountId(next)
+    setPageIndex(0)
+  }
+  const clearAlbumFilters = () => {
+    setAccountId(undefined)
+    setKeyword('')
+    setPageIndex(0)
+  }
+  const isAlbumFiltered = Boolean(accountId) || debouncedKeyword.trim() !== ''
+  const albumAccountLabel = accountId ? (query.data?.data.find((item) => item.accountName?.trim())?.accountName?.trim() ?? messages.resources.accounts.columns.name) : undefined
+  const albumFilterParts = [
+    albumAccountLabel ? { id: 'account', label: `${messages.resources.accounts.columns.name}: ${albumAccountLabel}` } : null,
+    debouncedKeyword.trim() ? { id: 'keyword', label: `${messages.resources.albums.filters.keyword}: ${debouncedKeyword.trim()}` } : null
+  ].filter((part): part is { id: string; label: string } => part !== null)
+  const removeAlbumFilter = (id: string) => {
+    if (id === 'account') setAccountId(undefined)
+    if (id === 'keyword') setKeyword('')
+    setPageIndex(0)
+  }
+  const isAlbumEmpty = !query.isLoading && !query.isError && (query.data?.data.length ?? 0) === 0
   return <PageStack as="div">
     <PageHeader eyebrow={messages.navigation.library} title={messages.resources.albums.title} titleId="albums-title" description={messages.resources.albums.description} />
     <Panel aria-labelledby="album-filters-title">
       <SectionHeader title={messages.resources.albums.filters.title} titleId="album-filters-title" description={messages.resources.albums.filters.description} />
-      <div className="account-action-form"><AccountRemoteSelector label={messages.resources.accounts.columns.name} value={accountId} onChange={(next) => { setAccountId(next); setPageIndex(0) }} placeholder={messages.articles.filters.any} copy={messages.selectors} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={changeKeyword} /></div>
+      <div className="account-action-form"><AccountRemoteSelector label={messages.resources.accounts.columns.name} value={accountId} onChange={changeAccount} placeholder={messages.articles.filters.any} copy={messages.selectors} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={changeKeyword} /></div>
     </Panel>
-    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={(ids) => { setSelected(ids); setNotice(undefined) }} preserveSelectionAcrossPages maximumSelectedIDs={maximumSelectedAlbumIDs} onSelectionLimited={(limit, current) => setNotice(messages.resources.albums.actions.selectionLimit(limit, current))} selectionScope={selectionScope} hideHeader />
+    <ActiveFilterSummary
+      label={messages.resources.albums.filters.appliedFilters}
+      clearLabel={messages.resources.albums.filters.clearFilters}
+      onClear={clearAlbumFilters}
+      filters={albumFilterParts.map((part) => ({ id: part.id, label: part.label, removeLabel: messages.resources.albums.filters.removeFilter(part.label), onRemove: () => removeAlbumFilter(part.id) }))}
+    />
+    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={(ids) => { setSelected(ids); setNotice(undefined) }} preserveSelectionAcrossPages maximumSelectedIDs={maximumSelectedAlbumIDs} onSelectionLimited={(limit, current) => setNotice(messages.resources.albums.actions.selectionLimit(limit, current))} selectionScope={selectionScope} hideHeader emptyState={isAlbumEmpty ? (isAlbumFiltered ? <EmptyState title={messages.resources.albums.emptyState.filteredEmptyTitle} description={messages.resources.albums.emptyState.filteredEmptyDescription} headingLevel={3} actions={<Button label={messages.resources.albums.emptyState.filteredEmptyAction} variant="secondary" onClick={clearAlbumFilters} />} /> : <EmptyState title={messages.resources.albums.emptyState.firstUseTitle} description={messages.resources.albums.emptyState.firstUseDescription} headingLevel={3} actions={<Button label={messages.resources.albums.emptyState.firstUseAction} variant="primary" onClick={() => navigateTo('/accounts')} />} />) : undefined} />
     <SelectionActionBar selectedCount={selected.length} countLabel={(count) => messages.resources.albums.actions.selectedCountWithLimit(count, maximumSelectedAlbumIDs)} toolbarLabel={messages.resources.albums.actions.title} actions={<><Selector label={messages.resources.albums.actions.order} options={[{ value: 'forward', label: messages.resources.albums.actions.forward }, { value: 'reverse', label: messages.resources.albums.actions.reverse }]} value={order} onChange={(next) => setOrder(next as AlbumTraversalOrder)} /><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" onClick={handoffExport} /></>} />
     <AlbumSelectionDetails album={album} messages={messages} />
-    {notice ? <p role="status">{notice}</p> : null}
+    <InlineNotice tone="status">{notice}</InlineNotice>
   </PageStack>
 }
 

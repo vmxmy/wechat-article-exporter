@@ -4,8 +4,7 @@
   .article-table-mobile,
   .article-detail-content,
   .article-detail-section,
-  .article-metrics-list,
-  .article-selection-more-actions {
+  .article-metrics-list {
     display: grid;
     gap: var(--spacing-3);
     min-width: 0;
@@ -30,38 +29,6 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--spacing-2);
-  }
-
-  .article-selection-more {
-    position: relative;
-  }
-
-  .article-selection-more > summary {
-    cursor: pointer;
-  }
-
-  .article-selection-more > summary:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
-  }
-
-  @media (hover: hover) and (pointer: fine) {
-    .article-selection-more > summary:hover {
-      color: var(--color-accent);
-    }
-  }
-
-  .article-selection-more-actions {
-    position: absolute;
-    right: 0;
-    bottom: calc(100% + var(--spacing-2));
-    z-index: 12;
-    min-width: 13rem;
-    padding: var(--spacing-2);
-    border: 0;
-    border-radius: var(--radius-element);
-    background: var(--color-background-surface);
-    box-shadow: var(--workspace-shadow-raised);
   }
 
   .article-title-button {

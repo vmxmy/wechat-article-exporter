@@ -46,25 +46,26 @@ test('jobs toolbar exposes the task filter strip with the shared layout', async 
 })
 
 for (const viewport of [{ width: 720, height: 900 }, { width: 640, height: 900 }, { width: 390, height: 844 }]) {
-  test(`account toolbar keeps selection actions bounded at ${viewport.width}px`, async ({ page }) => {
+  test(`account selection bar keeps actions bounded at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport)
     await installLoopbackFixture(page)
     await page.goto('/accounts')
     await page.getByRole('checkbox', { name: 'Select Fixture Account' }).check()
 
-    const toolbar = page.getByRole('toolbar', { name: 'Account library tools', exact: true })
-    const selectionActions = toolbar.getByRole('group', { name: 'Selected account actions' })
-    const syncButton = selectionActions.getByRole('button', { name: /Sync/ })
-    const deleteButton = selectionActions.getByRole('button', { name: /Delete/ })
+    // Selection-dependent actions now live in the bottom SelectionActionBar (unified with
+    // albums/articles), not in the in-table toolbar. The toolbar keeps only Add/Import.
+    const selectionBar = page.getByRole('region', { name: 'Selected account actions' })
+    const syncButton = selectionBar.getByRole('button', { name: /Sync/ })
+    const deleteButton = selectionBar.getByRole('button', { name: /Delete/ })
 
-    await expect(toolbar).toHaveAttribute('data-stack-at', 'medium')
     await expect(syncButton).toBeEnabled()
     await expect(deleteButton).toBeEnabled()
-    await expectNoHorizontalOverflow(page, toolbar)
+    await expect(selectionBar.getByRole('combobox', { name: 'Synchronization mode' })).toBeVisible()
+    await expectNoHorizontalOverflow(page, selectionBar)
 
-    if (viewport.width > 720) {
-      await expect(toolbar.getByRole('combobox', { name: 'Synchronization mode' })).toBeVisible()
-    }
+    const toolbar = page.getByRole('toolbar', { name: 'Account library tools', exact: true })
+    await expect(toolbar).toHaveAttribute('data-stack-at', 'medium')
+    await expectNoHorizontalOverflow(page, toolbar)
 
     await expectOnlyLoopbackRequests(page)
   })

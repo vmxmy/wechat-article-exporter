@@ -35,22 +35,24 @@ test('login clearly reports unavailable account switching', async ({ page }) => 
   await expect(page.getByRole('status').filter({ hasText: 'Account switching is not available for this local session.' })).toBeVisible()
 })
 
-test('account resources keep batch controls and column options in the table toolbar', async ({ page }) => {
+test('account resources keep selection-independent controls in the table toolbar and batch controls in the selection bar', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.goto('/accounts')
 
+  // P1: the table toolbar keeps only selection-independent entries (Add/Import).
   const surface = page.locator('.presentation-data-table-surface')
   const toolbar = surface.locator('.presentation-data-table-toolbar')
   await expect(toolbar.getByRole('button', { name: 'Add account', exact: true })).toBeVisible()
   await expect(toolbar.getByRole('button', { name: 'Import account manifest', exact: true })).toBeVisible()
-  await expect(toolbar.getByRole('button', { name: 'Download selected account manifest', exact: true })).toBeDisabled()
-  await expect(toolbar.getByRole('button', { name: 'Delete selected account', exact: true })).toBeDisabled()
-  await expect(toolbar.getByRole('button', { name: 'Sync selected account', exact: true })).toBeDisabled()
+
+  // Batch controls are absent until a selection is made (the SelectionActionBar hides at 0 selected).
+  const selectionBar = page.getByRole('region', { name: 'Selected account actions' })
+  await expect(selectionBar).toHaveCount(0)
 
   await page.getByRole('checkbox', { name: 'Select Fixture Account' }).check()
-  await expect(toolbar.getByRole('button', { name: 'Download selected account manifest', exact: true })).toBeEnabled()
-  await expect(toolbar.getByRole('button', { name: 'Delete selected account', exact: true })).toBeEnabled()
-  await expect(toolbar.getByRole('button', { name: 'Sync selected account', exact: true })).toBeEnabled()
+  await expect(selectionBar.getByRole('button', { name: 'Download selected account manifest', exact: true })).toBeEnabled()
+  await expect(selectionBar.getByRole('button', { name: 'Delete selected account', exact: true })).toBeEnabled()
+  await expect(selectionBar.getByRole('button', { name: 'Sync selected account', exact: true })).toBeEnabled()
 
   await expect(page.getByRole('navigation', { name: 'Account pagination', exact: true })).toBeVisible()
   await expectOnlyLoopbackRequests(page)
@@ -114,7 +116,7 @@ test('sanitized account and article selections remain browser-local', async ({ p
   await page.getByRole('checkbox', { name: 'Select Fixture Account' }).check()
   await expect(page.getByRole('checkbox', { name: 'Select account-fixture' })).toHaveCount(0)
   await expect(page.getByRole('table')).not.toContainText('account-fixture')
-  await expect(page.getByRole('group', { name: 'Selected account actions' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Selected account actions' })).toBeVisible()
   await page.goto('/articles')
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Sanitized article one' }))
   await expect(page.getByRole('region', { name: 'Selected article actions' }).first()).toContainText('1 / 250 selected')
@@ -460,10 +462,11 @@ test('article metrics and resource details stay bounded and sanitized while reso
   await expect(page.locator('body')).not.toContainText('sensitive-credential')
   await page.keyboard.press('Escape')
   await expect(page.getByRole('heading', { name: 'Article details' })).toBeHidden()
-  await page.locator('.article-selection-more > summary').click()
-  await page.getByRole('button', { name: 'Complete missing resources' }).click()
+  await page.getByRole('button', { name: 'More actions' }).click()
+  await page.getByRole('menuitem', { name: 'Complete missing resources' }).click()
   await expect.poll(() => fixture.resourceDownloads).toEqual([{ articleIds: ['article-fixture-1'], force: false }])
-  await page.getByRole('button', { name: 'Re-download resources' }).click()
+  await page.getByRole('button', { name: 'More actions' }).click()
+  await page.getByRole('menuitem', { name: 'Re-download resources' }).click()
   await expect.poll(() => fixture.resourceDownloads).toEqual([
     { articleIds: ['article-fixture-1'], force: false },
     { articleIds: ['article-fixture-1'], force: true }
@@ -475,10 +478,12 @@ test('account manifest controls export selected records and import locally witho
   const fixture = await installLoopbackFixture(page)
   await page.goto('/accounts')
   const toolbar = page.locator('.presentation-data-table-toolbar')
+  const selectionBar = page.getByRole('region', { name: 'Selected account actions' })
 
-  const exportButton = toolbar.getByRole('button', { name: 'Download selected account manifest' })
-  await expect(exportButton).toBeDisabled()
+  // Export is a selection action (lives in the bottom bar; absent until a row is selected).
+  await expect(selectionBar).toHaveCount(0)
   await page.getByRole('checkbox', { name: 'Select Fixture Account' }).check()
+  const exportButton = selectionBar.getByRole('button', { name: 'Download selected account manifest' })
   const exportRequest = page.waitForRequest((request) => request.method() === 'GET' && request.url().endsWith('/api/v1/accounts/manifest?accountId=account-fixture'))
   await exportButton.click()
   await exportRequest

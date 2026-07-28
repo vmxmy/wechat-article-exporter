@@ -43,8 +43,8 @@ test('account edit drawer has an edit title, edit description, and hides discove
   await page.goto('/accounts')
   await toggleCheckbox(page.getByRole('checkbox', { name: 'Select Fixture Account' }))
 
-  await page.getByRole('button', { name: 'More account actions' }).click()
-  await page.getByRole('menuitem', { name: 'Update selected account' }).click()
+  // P1 promoted Edit to a first-class action in the bottom SelectionActionBar.
+  await page.getByRole('button', { name: 'Update selected account' }).click()
 
   const editDialog = page.getByRole('dialog', { name: 'Edit account' })
   await expect(editDialog).toBeVisible()

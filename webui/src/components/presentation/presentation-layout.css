@@ -131,6 +131,10 @@
 .presentation-field-hint { margin: 0; color: var(--color-text-secondary); font-size: var(--text-body-small-size); }
 .presentation-field-hint[data-tone='error'] { color: var(--color-text-danger, var(--color-text-secondary)); }
 
+/* InlineNotice — single in-flow operation-result notice shared by resource pages. */
+.presentation-inline-notice { margin: 0; padding: var(--spacing-2) var(--spacing-3); border: 1px solid var(--color-border); border-radius: var(--radius-inner); background: var(--color-background-muted); color: var(--color-text-primary); font-size: var(--text-body-small-size); }
+.presentation-inline-notice[data-tone='error'] { border-color: color-mix(in srgb, var(--color-text-danger, var(--color-accent)) 35%, var(--color-border)); background: var(--workspace-accent-wash); }
+
 /* TypedConfirmationDialog — exact-match confirmation form. */
 .typed-confirmation-dialog { display: grid; gap: var(--spacing-3); }
 
