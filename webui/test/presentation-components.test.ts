@@ -134,20 +134,11 @@ describe('presentation component accessibility', () => {
       data: [],
       columns: [{ accessorKey: 'name', header: 'Name', meta: { role: 'primaryText' } }],
       ariaLabel: 'Example records',
-      visibleColumnsLabel: 'Visible example columns',
-      selectorCopy: {
-        clear: (label: string) => `Clear ${label}`,
-        search: (label: string) => `Search ${label}`,
-        noResults: 'No results',
-        selectAll: 'Select all',
-        selected: (count: number) => `${count} selected`
-      },
       emptyContent: 'No records',
       renderMobileRows: () => null
     }))
     expect(markup).toContain('presentation-data-table-surface')
     expect(markup).toContain('aria-label="Example records"')
-    expect(markup).toContain('Visible example columns')
     expect(markup).toContain('colSpan="1"')
     expect(markup).toContain('No records')
   })
