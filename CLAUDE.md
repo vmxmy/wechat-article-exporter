@@ -31,3 +31,17 @@ SQLite 是元数据权威，正文和资源使用 SHA-256 内容寻址对象存�
 - 修改数据库 schema 时增加 migration、backup/restore 和兼容 baseline 测试；
 - 修改 processor/exporter 时更新 fixture/golden 和结构验证；
 - 不提交本地 profile、数据库、凭据、导出文章或 agent 状态。
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues，钉死在 `vmxmy/wechat-article-exporter`（origin fork，非 upstream）。见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+五个规范角色使用默认标签名，未做重命名。见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+Single-context：根 `CONTEXT.md` + `docs/adr/`（两者当前均不存在，按需惰性创建）。见 `docs/agents/domain.md`。

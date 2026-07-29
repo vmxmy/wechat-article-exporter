@@ -27,6 +27,8 @@ logs
 debug
 design
 docs/*
+!docs/agents/
+!docs/agents/**
 !docs/architecture/
 !docs/architecture/**
 !docs/archive/
