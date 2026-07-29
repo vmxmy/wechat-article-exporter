@@ -215,9 +215,13 @@ export function ExportPage({ locale, messages }: ExportPageProps) {
     { accessorKey: 'createdAt', header: copy.columns.created, meta: { role: 'dateTime' }, cell: ({ getValue }) => formatDateTime(getValue<string>(), locale) },
     { accessorKey: 'provenanceState', header: copy.columns.provenance, meta: { role: 'description' }, cell: ({ row }) => formatProvenance(row.original, locale) }
   ], [copy, locale])
+  // A fresh array identity would make TanStack auto-reset the page index on
+  // every render, and that reset re-renders the page, so the table has to see
+  // one stable copy per fetched page.
+  const tableData = useMemo(() => (records.data ? [...records.data.data] : []), [records.data])
   // TanStack table exposes a mutable table instance. It is rendered directly.
   // eslint-disable-next-line react-hooks/incompatible-library
-  const table = useReactTable({ data: records.data ? [...records.data.data] : [], columns, getCoreRowModel: getCoreRowModel(), state: { rowSelection, columnVisibility }, onRowSelectionChange: setRowSelection, onColumnVisibilityChange: setColumnVisibility, getRowId: (row) => row.id, enableRowSelection: true })
+  const table = useReactTable({ data: tableData, columns, getCoreRowModel: getCoreRowModel(), manualPagination: true, state: { rowSelection, columnVisibility }, onRowSelectionChange: setRowSelection, onColumnVisibilityChange: setColumnVisibility, getRowId: (row) => row.id, enableRowSelection: true })
   const totalPages = records.data ? Math.max(1, Math.ceil(records.data.pagination.total / records.data.pagination.pageSize)) : 1
 
   function chooseScope(next: ScopeChoice | undefined) {
