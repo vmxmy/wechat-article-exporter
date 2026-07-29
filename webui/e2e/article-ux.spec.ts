@@ -47,6 +47,11 @@ async function toggleCheckbox(checkbox: import('@playwright/test').Locator) {
   await checkbox.evaluate((element) => (element as HTMLInputElement).click())
 }
 
+async function openCombobox(combobox: import('@playwright/test').Locator) {
+  await expect(combobox).toBeVisible()
+  await combobox.click()
+}
+
 test('article selectors share trigger geometry', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.goto('/articles')
@@ -162,18 +167,23 @@ test('saved article views filter locally, apply, and clear without exposing quer
   await page.goto('/articles')
 
   const savedViews = page.getByRole('combobox', { name: 'Saved views', exact: true })
-  await savedViews.click()
+  await openCombobox(savedViews)
+  await expect(savedViews).toHaveAttribute('aria-expanded', 'true')
   await page.keyboard.insertText('queued')
-  const queuedView = page.getByRole('option').filter({ hasText: 'Queued fixture' })
+  // Base UI mounts the listbox portal asynchronously; resolve it from the live
+  // aria-controls so the option query follows any recreated portal.
+  const listbox = page.locator(`[id=${JSON.stringify(await savedViews.getAttribute('aria-controls') ?? '')}]`)
+  const queuedView = listbox.getByRole('option').filter({ hasText: 'Queued fixture' })
   await expect(queuedView).toBeVisible()
-  await expect(page.getByRole('option').filter({ hasText: 'Sanitized recent' })).toHaveCount(0)
+  await expect(listbox.getByRole('option').filter({ hasText: 'Sanitized recent' })).toHaveCount(0)
   await queuedView.click()
   await expect(savedViews).toHaveValue('Queued fixture')
   await expect(page).toHaveURL(/state=queued/)
 
   await page.getByRole('button', { name: 'Clear Saved views' }).click()
   await expect(savedViews).toHaveValue('')
-  await savedViews.click()
+  await openCombobox(savedViews)
+  await expect(savedViews).toHaveAttribute('aria-expanded', 'true')
   await page.keyboard.insertText('missing')
   await expect(page.getByText('No matching local results.', { exact: true })).toBeVisible()
   await expect(page.locator('body')).not.toContainText('article-fixture-1')

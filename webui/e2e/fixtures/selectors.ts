@@ -31,11 +31,21 @@ export async function selectRemoteSelectorOption(page: Page, label: string, opti
     element.dispatchEvent(new Event('change', { bubbles: true }))
   }, option)
 
-  const listboxID = await input.getAttribute('aria-controls')
-  if (!listboxID) throw new Error(`Remote selector ${label} did not expose its listbox relationship.`)
+  // Base UI sets aria-controls asynchronously and may recreate the listbox portal when
+  // the filtered result set loads. Re-resolve the option from the live aria-controls on
+  // each poll so a stale/loading listbox never wins, and wait out the loading state.
+  let optionElement: import('@playwright/test').Locator | undefined
+  await expect.poll(async () => {
+    const listboxID = await input.getAttribute('aria-controls')
+    if (!listboxID) return false
+    const listbox = page.locator(`[id=${JSON.stringify(listboxID)}]`)
+    // The option is reachable only once the listbox has settled (not still loading/empty).
+    const match = listbox.getByRole('option').filter({ hasText: option }).first()
+    const visible = await match.isVisible().catch(() => false)
+    optionElement = visible ? match : undefined
+    return visible
+  }, { message: `Remote selector ${label} never exposed a visible "${option}" option.`, timeout: 10_000 }).toBeTruthy()
 
-  const result = page.locator(`[id=${JSON.stringify(listboxID)}]`).getByRole('option').filter({ hasText: option }).first()
-  await expect(result).toBeVisible()
-  await result.evaluate((element) => (element as HTMLElement).click())
+  await optionElement!.evaluate((element) => (element as HTMLElement).click())
   await expect(input).toHaveAttribute('aria-expanded', 'false')
 }
