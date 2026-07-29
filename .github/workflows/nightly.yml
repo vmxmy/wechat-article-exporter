@@ -1,0 +1,153 @@
+name: Nightly full verification
+
+on:
+  schedule:
+    - cron: '17 19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-full-verification
+  cancel-in-progress: true
+
+jobs:
+  native-test:
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Unit and integration tests
+        run: go test -count=1 ./...
+
+      - name: Race tests
+        if: runner.os == 'Linux'
+        env:
+          CGO_ENABLED: '1'
+        run: go test -count=1 -race ./...
+
+      - name: Native keyring integration receipt
+        shell: bash
+        env:
+          WECHAT_ARTICLE_KEYRING_INTEGRATION: '1'
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/keyring-smoke-receipt.txt"
+          go test -tags=integration -count=1 -v -run '^TestPlatformKeyringIntegration$' ./internal/secrets | tee "$receipt"
+          grep -Eq 'KEYRING_SMOKE_(PASS|SKIP)' "$receipt"
+          if grep -q 'KEYRING_SMOKE_SKIP' "$receipt"; then
+            case "${{ runner.os }}" in
+              Linux) grep -Fq 'reason=credential-service-unavailable' "$receipt" ;;
+              *) echo 'Native credential service smoke skipped on a release-supported desktop runner.' >&2; exit 1 ;;
+            esac
+          fi
+
+      - name: Native pseudo-terminal workspace smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          output="$(go test -count=1 -v -run '^TestCLIWorkspaceRealPTYNavigationResizeAndCleanExit$' ./internal/app 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [[ "$output" == *'--- SKIP: TestCLIWorkspaceRealPTYNavigationResizeAndCleanExit'* ]]; then
+            echo 'The native PTY smoke was skipped; this runner does not provide nightly evidence.' >&2
+            exit 1
+          fi
+          exit "$status"
+
+      - name: Install LibreOffice Writer
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-writer
+
+      - name: LibreOffice DOCX open smoke
+        if: runner.os == 'Linux'
+        run: go test -count=1 -run TestGeneratedDOCXOpensInLibreOfficeHeadless ./internal/exporter
+
+  webui-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Enable pinned pnpm
+        run: corepack enable
+
+      - name: Install browser workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify browser workspace
+        run: |
+          set -euo pipefail
+          pnpm run check
+          pnpm run test
+          pnpm run build
+          pnpm run verify:go-assets
+          pnpm run check:release-size
+
+      - name: Install pinned Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Sanitized loopback browser E2E
+        run: pnpm run e2e
+
+      - name: Real Go loopback browser E2E
+        run: pnpm run e2e:real
+
+  cross-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Build every release target without CGO
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64 windows/amd64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            binary="$RUNNER_TEMP/wechat-article-${goos}-${goarch}"
+            if [ "$goos" = windows ]; then binary="${binary}.exe"; fi
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+              go build -trimpath -o "$binary" ./cmd/wechat-article
+          done

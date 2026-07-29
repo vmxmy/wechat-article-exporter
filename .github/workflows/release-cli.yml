@@ -1,26 +1,6 @@
 name: Release Go CLI
 
 on:
-  pull_request:
-    branches: [main, master]
-    paths:
-      - 'cli/**'
-      - 'openspec/**'
-      - 'test/fixtures/**'
-      - 'test/parity/**'
-      - 'RELEASE_NOTES.md'
-      - 'docs/architecture/database-compatibility.md'
-      - 'docs/architecture/sqlite-policy.md'
-      - 'docs/guides/**'
-      - 'docs/archive/**'
-      - 'docs/migration/**'
-      - 'docs/operations/**'
-      - 'docs/release/**'
-      - 'samples/**'
-      - '.github/workflows/release-cli.yml'
-      - '.github/workflows/controlled-live-clean-room.yml'
-      - 'webui/**'
-      - 'actionlint.yaml'
   workflow_dispatch:
   push:
     tags:
@@ -30,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-cli-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: release-cli-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release-metadata:
@@ -95,7 +75,7 @@ jobs:
           GOBIN="$RUNNER_TEMP/validation-tools" go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_COMMIT}"
 
       - name: Workflow syntax
-        run: $RUNNER_TEMP/validation-tools/actionlint -config-file actionlint.yaml .github/workflows/release-cli.yml .github/workflows/controlled-live-clean-room.yml
+        run: $RUNNER_TEMP/validation-tools/actionlint -config-file actionlint.yaml .github/workflows/*.yml
 
       - name: Verify retired production sources remain absent
         shell: bash
@@ -189,8 +169,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: webui/pnpm-lock.yaml
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -351,21 +329,7 @@ jobs:
   build:
     needs: [release-metadata, parity-and-retirement, static, webui, test, fixture-corpus, database-compatibility]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goos: darwin
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: linux
-            goarch: amd64
-          - goos: windows
-            goarch: amd64
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: cli
@@ -383,78 +347,70 @@ jobs:
           mkdir -p "$RUNNER_TEMP/sbom-tools"
           GOBIN="$RUNNER_TEMP/sbom-tools" go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0
 
-      - name: Build archive
+      - name: Build all release archives and SBOMs
         env:
-          CGO_ENABLED: '0'
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
           RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
           SBOM_TOOL: ${{ runner.temp }}/sbom-tools/cyclonedx-gomod
-        run: |
-          set -euo pipefail
-          archive="wechat-article_${RELEASE_VERSION}_${GOOS}_${GOARCH}"
-          mkdir -p "dist/$archive"
-          binary="wechat-article"
-          if [ "$GOOS" = 'windows' ]; then binary='wechat-article.exe'; fi
-          go build -trimpath -ldflags="-s -w -X github.com/wechat-article/wechat-article-exporter/cli/internal/app.Version=$RELEASE_VERSION" -o "dist/$archive/$binary" ./cmd/wechat-article
-          go version -m "dist/$archive/$binary" | tee "dist/$archive/build-info.txt"
-          cp README.md "dist/$archive/README.md"
-          cp ../LICENSE "dist/$archive/LICENSE"
-          "$SBOM_TOOL" app -json -output "dist/${archive}/sbom.raw.cdx.json" -main cmd/wechat-article .
-          module_path='github.com/wechat-article/wechat-article-exporter/cli'
-          purl="pkg:golang/${module_path}@${RELEASE_VERSION}?type=module&goos=${GOOS}&goarch=${GOARCH}#cmd/wechat-article"
-          jq --arg version "$RELEASE_VERSION" --arg purl "$purl" '
-            .metadata.component.version = $version |
-            .metadata.component.purl = $purl |
-            .metadata.component["bom-ref"] = $purl
-          ' "dist/${archive}/sbom.raw.cdx.json" > "dist/${archive}.sbom.cdx.json"
-          test "$(jq -r '.metadata.component.version' "dist/${archive}.sbom.cdx.json")" = "$RELEASE_VERSION"
-          test "$(jq -r '.metadata.component.purl' "dist/${archive}.sbom.cdx.json")" = "$purl"
-          jq -e --arg value "$GOOS" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOOS" and .value == $value)' "dist/${archive}.sbom.cdx.json" >/dev/null
-          jq -e --arg value "$GOARCH" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOARCH" and .value == $value)' "dist/${archive}.sbom.cdx.json" >/dev/null
-          jq -e '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:CGO_ENABLED" and .value == "0")' "dist/${archive}.sbom.cdx.json" >/dev/null
-          if [ "$GOOS" = 'windows' ]; then
-            (cd dist && zip -X -r "$archive.zip" "$archive")
-          else
-            tar -C dist -czf "dist/$archive.tar.gz" "$archive"
-          fi
-          rm -rf "dist/$archive"
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: wechat-article-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: cli/dist/*
-          if-no-files-found: error
-
-  checksum-manifest:
-    needs: [release-metadata, build]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          path: artifacts
-          pattern: wechat-article-*
-          merge-multiple: true
-
-      - name: Create candidate checksum manifest
-        working-directory: artifacts
         shell: bash
         run: |
           set -euo pipefail
+          module_path='github.com/wechat-article/wechat-article-exporter/cli'
+          targets=(darwin/arm64 darwin/amd64 linux/arm64 linux/amd64 windows/amd64)
+          for target in "${targets[@]}"; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            archive="wechat-article_${RELEASE_VERSION}_${goos}_${goarch}"
+            binary='wechat-article'
+            if [ "$goos" = windows ]; then binary='wechat-article.exe'; fi
+            mkdir -p "dist/$archive"
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+              go build -trimpath \
+                -ldflags="-s -w -X github.com/wechat-article/wechat-article-exporter/cli/internal/app.Version=$RELEASE_VERSION" \
+                -o "dist/$archive/$binary" ./cmd/wechat-article
+            go version -m "dist/$archive/$binary" | tee "dist/$archive/build-info.txt"
+            cp README.md "dist/$archive/README.md"
+            cp ../LICENSE "dist/$archive/LICENSE"
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+              "$SBOM_TOOL" app -json -output "dist/${archive}/sbom.raw.cdx.json" -main cmd/wechat-article .
+            purl="pkg:golang/${module_path}@${RELEASE_VERSION}?type=module&goos=${goos}&goarch=${goarch}#cmd/wechat-article"
+            jq --arg version "$RELEASE_VERSION" --arg purl "$purl" '
+              .metadata.component.version = $version |
+              .metadata.component.purl = $purl |
+              .metadata.component["bom-ref"] = $purl
+            ' "dist/${archive}/sbom.raw.cdx.json" > "dist/${archive}.sbom.cdx.json"
+            test "$(jq -r '.metadata.component.version' "dist/${archive}.sbom.cdx.json")" = "$RELEASE_VERSION"
+            test "$(jq -r '.metadata.component.purl' "dist/${archive}.sbom.cdx.json")" = "$purl"
+            jq -e --arg value "$goos" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOOS" and .value == $value)' "dist/${archive}.sbom.cdx.json" >/dev/null
+            jq -e --arg value "$goarch" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOARCH" and .value == $value)' "dist/${archive}.sbom.cdx.json" >/dev/null
+            jq -e '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:CGO_ENABLED" and .value == "0")' "dist/${archive}.sbom.cdx.json" >/dev/null
+            if [ "$goos" = windows ]; then
+              (cd dist && zip -X -r "$archive.zip" "$archive")
+            else
+              tar -C dist -czf "dist/$archive.tar.gz" "$archive"
+            fi
+            rm -rf "dist/$archive"
+          done
+
+      - name: Create candidate checksum manifest
+        env:
+          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
           expected=(
-            wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_arm64.tar.gz
-            wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_arm64.sbom.cdx.json
-            wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_amd64.tar.gz
-            wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_amd64.sbom.cdx.json
-            wechat-article_${{ needs.release-metadata.outputs.version }}_linux_arm64.tar.gz
-            wechat-article_${{ needs.release-metadata.outputs.version }}_linux_arm64.sbom.cdx.json
-            wechat-article_${{ needs.release-metadata.outputs.version }}_linux_amd64.tar.gz
-            wechat-article_${{ needs.release-metadata.outputs.version }}_linux_amd64.sbom.cdx.json
-            wechat-article_${{ needs.release-metadata.outputs.version }}_windows_amd64.zip
-            wechat-article_${{ needs.release-metadata.outputs.version }}_windows_amd64.sbom.cdx.json
+            "wechat-article_${RELEASE_VERSION}_darwin_arm64.tar.gz"
+            "wechat-article_${RELEASE_VERSION}_darwin_arm64.sbom.cdx.json"
+            "wechat-article_${RELEASE_VERSION}_darwin_amd64.tar.gz"
+            "wechat-article_${RELEASE_VERSION}_darwin_amd64.sbom.cdx.json"
+            "wechat-article_${RELEASE_VERSION}_linux_arm64.tar.gz"
+            "wechat-article_${RELEASE_VERSION}_linux_arm64.sbom.cdx.json"
+            "wechat-article_${RELEASE_VERSION}_linux_amd64.tar.gz"
+            "wechat-article_${RELEASE_VERSION}_linux_amd64.sbom.cdx.json"
+            "wechat-article_${RELEASE_VERSION}_windows_amd64.zip"
+            "wechat-article_${RELEASE_VERSION}_windows_amd64.sbom.cdx.json"
           )
-          mapfile -t actual < <(find . -maxdepth 1 -type f ! -name 'checksums.txt' -printf '%f\n' | sort)
+          mapfile -t actual < <(find . -maxdepth 1 -type f ! -name checksums.txt -printf '%f\n' | sort)
           mapfile -t wanted < <(printf '%s\n' "${expected[@]}" | sort)
           test "${#actual[@]}" -eq 10
           test "${actual[*]}" = "${wanted[*]}"
@@ -463,80 +419,98 @@ jobs:
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          name: wechat-article-darwin-arm64
+          path: |
+            cli/dist/wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_arm64.tar.gz
+            cli/dist/wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_arm64.sbom.cdx.json
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wechat-article-darwin-amd64
+          path: |
+            cli/dist/wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_amd64.tar.gz
+            cli/dist/wechat-article_${{ needs.release-metadata.outputs.version }}_darwin_amd64.sbom.cdx.json
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wechat-article-linux-arm64
+          path: |
+            cli/dist/wechat-article_${{ needs.release-metadata.outputs.version }}_linux_arm64.tar.gz
+            cli/dist/wechat-article_${{ needs.release-metadata.outputs.version }}_linux_arm64.sbom.cdx.json
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wechat-article-linux-amd64
+          path: |
+            cli/dist/wechat-article_${{ needs.release-metadata.outputs.version }}_linux_amd64.tar.gz
+            cli/dist/wechat-article_${{ needs.release-metadata.outputs.version }}_linux_amd64.sbom.cdx.json
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wechat-article-windows-amd64
+          path: |
+            cli/dist/wechat-article_${{ needs.release-metadata.outputs.version }}_windows_amd64.zip
+            cli/dist/wechat-article_${{ needs.release-metadata.outputs.version }}_windows_amd64.sbom.cdx.json
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
           name: wechat-article-checksums
-          path: artifacts/checksums.txt
+          path: cli/dist/checksums.txt
           if-no-files-found: error
 
   archive-metadata:
     needs: [release-metadata, build]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goos: darwin
-            goarch: arm64
-            archive_ext: tar.gz
-            binary: wechat-article
-          - goos: darwin
-            goarch: amd64
-            archive_ext: tar.gz
-            binary: wechat-article
-          - goos: linux
-            goarch: arm64
-            archive_ext: tar.gz
-            binary: wechat-article
-          - goos: linux
-            goarch: amd64
-            archive_ext: tar.gz
-            binary: wechat-article
-          - goos: windows
-            goarch: amd64
-            archive_ext: zip
-            binary: wechat-article.exe
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: cli/go.mod
-          cache: false
-
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: wechat-article-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: artifact
+          path: artifacts
+          pattern: wechat-article-*
+          merge-multiple: true
 
-      - name: Verify archive layout, target metadata, and SBOM
+      - name: Verify every archive layout, target metadata, and SBOM
         shell: bash
         env:
-          ARCHIVE_EXT: ${{ matrix.archive_ext }}
-          BINARY_NAME: ${{ matrix.binary }}
-          EXPECTED_GOOS: ${{ matrix.goos }}
-          EXPECTED_GOARCH: ${{ matrix.goarch }}
           RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
         run: |
           set -euo pipefail
-          archive="$(find artifact -maxdepth 1 -type f -name "*.${ARCHIVE_EXT}" -print -quit)"
-          sbom="$(find artifact -maxdepth 1 -type f -name '*.sbom.cdx.json' -print -quit)"
-          test -n "$archive"
-          test -n "$sbom"
-          mkdir extracted
-          if [ "$ARCHIVE_EXT" = 'zip' ]; then unzip -q "$archive" -d extracted; else tar -xzf "$archive" -C extracted; fi
-          binary="$(find extracted -type f -name "$BINARY_NAME" -print -quit)"
-          test -n "$binary"
-          test -f "$(dirname "$binary")/README.md"
-          test -f "$(dirname "$binary")/LICENSE"
-          test -f "$(dirname "$binary")/build-info.txt"
-          build_info="$(dirname "$binary")/build-info.txt"
-          grep -Fq "GOOS=$EXPECTED_GOOS" "$build_info"
-          grep -Fq "GOARCH=$EXPECTED_GOARCH" "$build_info"
-          grep -Fq 'CGO_ENABLED=0' "$build_info"
-          echo 'archive build metadata verified'
-          jq -e --arg version "$RELEASE_VERSION" '.metadata.component.version == $version' "$sbom" >/dev/null
-          jq -e --arg value "$EXPECTED_GOOS" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOOS" and .value == $value)' "$sbom" >/dev/null
-          jq -e --arg value "$EXPECTED_GOARCH" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOARCH" and .value == $value)' "$sbom" >/dev/null
+          while read -r goos goarch archive_ext binary_name; do
+            archive="artifacts/wechat-article_${RELEASE_VERSION}_${goos}_${goarch}.${archive_ext}"
+            sbom="artifacts/wechat-article_${RELEASE_VERSION}_${goos}_${goarch}.sbom.cdx.json"
+            test -f "$archive"
+            test -f "$sbom"
+            extract_root="extracted/${goos}-${goarch}"
+            mkdir -p "$extract_root"
+            if [ "$archive_ext" = zip ]; then
+              unzip -q "$archive" -d "$extract_root"
+            else
+              tar -xzf "$archive" -C "$extract_root"
+            fi
+            binary="$(find "$extract_root" -type f -name "$binary_name" -print -quit)"
+            test -n "$binary"
+            test -f "$(dirname "$binary")/README.md"
+            test -f "$(dirname "$binary")/LICENSE"
+            build_info="$(dirname "$binary")/build-info.txt"
+            test -f "$build_info"
+            grep -Fq "GOOS=$goos" "$build_info"
+            grep -Fq "GOARCH=$goarch" "$build_info"
+            grep -Fq 'CGO_ENABLED=0' "$build_info"
+            jq -e --arg version "$RELEASE_VERSION" '.metadata.component.version == $version' "$sbom" >/dev/null
+            jq -e --arg value "$goos" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOOS" and .value == $value)' "$sbom" >/dev/null
+            jq -e --arg value "$goarch" '.metadata.component.properties[] | select(.name == "cdx:gomod:build:env:GOARCH" and .value == $value)' "$sbom" >/dev/null
+          done <<'TARGETS'
+          darwin arm64 tar.gz wechat-article
+          darwin amd64 tar.gz wechat-article
+          linux arm64 tar.gz wechat-article
+          linux amd64 tar.gz wechat-article
+          windows amd64 zip wechat-article.exe
+          TARGETS
 
   smoke:
     needs: build
@@ -644,7 +618,7 @@ jobs:
           echo 'archive CGO policy verified'
 
   clean-room-fixture:
-    needs: [release-metadata, build, checksum-manifest, database-compatibility]
+    needs: [release-metadata, build, database-compatibility]
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -751,7 +725,7 @@ jobs:
 
   controlled-live-receipts:
     if: startsWith(github.ref, 'refs/tags/wechat-article-v')
-    needs: [release-metadata, build, checksum-manifest, clean-room-fixture]
+    needs: [release-metadata, build, clean-room-fixture]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

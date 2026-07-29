@@ -1,0 +1,283 @@
+name: PR CI
+
+on:
+  pull_request:
+    branches: [main, master]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.classify.outputs.go }}
+      webui: ${{ steps.classify.outputs.webui }}
+      openspec: ${{ steps.classify.outputs.openspec }}
+      workflow: ${{ steps.classify.outputs.workflow }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - id: classify
+        name: Classify changed paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          go=false
+          webui=false
+          openspec=false
+          workflow=false
+          while IFS= read -r path; do
+            case "$path" in
+              cli/*|samples/*|test/fixtures/*) go=true ;;
+            esac
+            case "$path" in
+              webui/*|cli/internal/web/*) webui=true ;;
+            esac
+            case "$path" in
+              openspec/*) openspec=true ;;
+            esac
+            case "$path" in
+              .github/workflows/*|actionlint.yaml) workflow=true ;;
+            esac
+          done < <(git diff --name-only --diff-filter=ACMRT "$BASE_SHA" "$HEAD_SHA")
+          {
+            echo "go=$go"
+            echo "webui=$webui"
+            echo "openspec=$openspec"
+            echo "workflow=$workflow"
+          } >> "$GITHUB_OUTPUT"
+
+  preflight:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Verify Go formatting
+        if: needs.changes.outputs.go == 'true'
+        working-directory: cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t unformatted < <(find . -name '*.go' -type f -exec gofmt -l {} +)
+          if (( ${#unformatted[@]} > 0 )); then
+            printf '%s\n' "${unformatted[@]}"
+            exit 1
+          fi
+
+      - name: Parity validator tests
+        run: GO111MODULE=off go test -count=1 ./test/parity
+
+      - name: Mandatory parity gate
+        run: go run ./test/parity/validate.go --gate
+
+      - name: Verify retired production sources remain absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          retired_paths=(
+            package.json yarn.lock nuxt.config.ts wrangler.toml Dockerfile
+            pages components composables server store mcp-server/src
+          )
+          for retired_path in "${retired_paths[@]}"; do
+            if test -n "$(git ls-files "$retired_path" "$retired_path/**")"; then
+              echo "retired production source remains tracked: $retired_path" >&2
+              exit 1
+            fi
+          done
+          test -s docs/archive/final-web-capable-release.md
+          test -s docs/operations/cloud-retirement-report.md
+          test "$(git rev-parse 'wechat-article-v2.0.0^{}')" = c43efc90f6cbfbeb15c0b2a4a6f9c2495f652474
+          test "$(git rev-parse 'wechat-article-web-final-2026-07-22^{}')" = bda9f3bc3605c8c47e5b4f4cad20bf35c35844e4
+          grep -Fq 'Worker lookup returned not found' docs/operations/cloud-retirement-report.md
+          grep -Fq 'Pages project lookup returned not found' docs/operations/cloud-retirement-report.md
+          grep -Fq 'no user article or Credential bytes were found' docs/operations/cloud-retirement-report.md
+
+      - name: Install pinned actionlint
+        if: needs.changes.outputs.workflow == 'true'
+        env:
+          ACTIONLINT_VERSION: v1.7.12
+          ACTIONLINT_COMMIT: '914e7df21a07ef503a81201c76d2b11c789d3fca'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote https://github.com/rhysd/actionlint.git "refs/tags/${ACTIONLINT_VERSION}" | cut -f1)" = "$ACTIONLINT_COMMIT"
+          GOBIN="$RUNNER_TEMP/validation-tools" go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_COMMIT}"
+
+      - name: Validate workflow syntax
+        if: needs.changes.outputs.workflow == 'true'
+        run: $RUNNER_TEMP/validation-tools/actionlint -config-file actionlint.yaml .github/workflows/*.yml
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: needs.changes.outputs.openspec == 'true'
+        with:
+          node-version: '22'
+
+      - name: Install integrity-pinned OpenSpec validator
+        if: needs.changes.outputs.openspec == 'true'
+        env:
+          OPENSPEC_VERSION: 1.3.1
+          OPENSPEC_INTEGRITY: sha512-QnbJfq/lUNCRY+TTXo87fuIpGCCaOYt280tmbuI112B/1vF0feIneK0/qhoTZNslRDhwwg1YcYDX0suxq2h6tw==
+        shell: bash
+        run: |
+          set -euo pipefail
+          package='@fission-ai/openspec'
+          tarball="$(npm pack "${package}@${OPENSPEC_VERSION}" --pack-destination "$RUNNER_TEMP" | tail -n 1)"
+          test -n "$tarball"
+          actual_integrity="$(openssl dgst -sha512 -binary "$RUNNER_TEMP/$tarball" | openssl base64 -A)"
+          test "sha512-${actual_integrity}" = "$OPENSPEC_INTEGRITY"
+          npm install --global --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/$tarball"
+
+      - name: Strict OpenSpec validation
+        if: needs.changes.outputs.openspec == 'true'
+        env:
+          OPENSPEC_TELEMETRY: '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          openspec validate replace-web-with-local-go-cli --strict
+          openspec validate local-browser-workspace --strict
+          openspec validate improve-local-browser-workspace-ux --strict
+
+  go:
+    needs: [changes, preflight]
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 -checks='SA*,S1*,QF*' ./...
+
+      - name: Unit and integration tests
+        run: go test -count=1 ./...
+
+      - name: Race tests
+        env:
+          CGO_ENABLED: '1'
+        run: go test -count=1 -race ./...
+
+      - name: Verify portable release build
+        env:
+          CGO_ENABLED: '0'
+        run: go build -trimpath ./cmd/wechat-article
+
+  webui:
+    needs: [changes, preflight]
+    if: needs.changes.outputs.webui == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Enable pinned pnpm
+        run: corepack enable
+
+      - name: Install browser workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify browser workspace and checked-in Go assets
+        run: |
+          set -euo pipefail
+          pnpm run check
+          pnpm run test
+          pnpm run build
+          pnpm run verify:go-assets
+          pnpm run check:release-size
+
+  browser-e2e:
+    needs: [changes, webui]
+    if: needs.changes.outputs.webui == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Enable pinned pnpm
+        run: corepack enable
+
+      - name: Install browser workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Sanitized loopback browser E2E
+        run: pnpm run e2e
+
+  ci-gate:
+    if: always()
+    needs: [changes, preflight, go, webui, browser-e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every applicable PR check
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          GO_RESULT: ${{ needs.go.result }}
+          WEBUI_RESULT: ${{ needs.webui.result }}
+          BROWSER_E2E_RESULT: ${{ needs.browser-e2e.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CHANGES_RESULT" = success
+          test "$PREFLIGHT_RESULT" = success
+          for result in "$GO_RESULT" "$WEBUI_RESULT" "$BROWSER_E2E_RESULT"; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "required PR job concluded: $result" >&2; exit 1 ;;
+            esac
+          done
