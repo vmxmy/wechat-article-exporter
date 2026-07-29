@@ -1,7 +1,7 @@
 import { Button } from '@/components/controls/Button'
 import { Selector } from '@/components/controls/Selector'
 import { TextInput } from '@/components/controls/TextInput'
-import { AccountRemoteSelector, ActiveFilterSummary, EmptyState, FieldHint, InlineNotice, PageHeader, PageStack, Panel, SectionHeader, SelectionActionBar, Status, TypedConfirmationDialog } from '../../components/presentation'
+import { AccountRemoteSelector, ActiveFilterSummary, EmptyState, FieldHint, FormGrid, InlineNotice, PageHeader, PageStack, Panel, SectionHeader, SelectionActionBar, Status, TypedConfirmationDialog } from '../../components/presentation'
 import { useDebounce } from '../../hooks/use-debounce'
 import { useMemo, useRef, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -56,8 +56,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
     { accessorKey: 'lastSyncAt', header: messages.resources.accounts.columns.synced, meta: { role: 'dateTime' }, cell: ({ getValue }) => formatDate(getValue<string | undefined>(), locale) },
     { accessorKey: 'messageCount', header: messages.resources.accounts.columns.messages, meta: { role: 'numeric' }, cell: ({ getValue }) => getValue<number | undefined>() ?? 0 },
     { accessorKey: 'articleCount', header: messages.resources.accounts.columns.articles, meta: { role: 'numeric' }, cell: ({ getValue }) => getValue<number | undefined>() ?? 0 },
-    { id: 'syncProgress', header: messages.resources.accounts.columns.progress, meta: { role: 'numeric' }, cell: ({ row }) => formatSyncProgress(row.original) },
-    { accessorKey: 'syncCompleted', header: messages.resources.accounts.columns.state, meta: { role: 'status' }, cell: ({ getValue }) => <Status value={getValue<boolean | undefined>() ? 'ready' : 'queued'} locale={locale} /> }
+    { id: 'syncStatus', header: messages.resources.accounts.columns.syncStatus, meta: { role: 'status' }, cell: ({ row }) => <AccountSyncStatus account={row.original} locale={locale} /> }
   ], [locale, messages])
   const actions = messages.resources.accounts.actions
   const one = selected.length === 1 ? selected[0] : undefined
@@ -187,7 +186,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
       <PageHeader eyebrow={messages.navigation.library} title={messages.resources.accounts.title} titleId="accounts-title" description={messages.resources.accounts.description} />
       <Panel aria-labelledby="account-filters-title">
         <SectionHeader title={messages.resources.accounts.filters.title} titleId="account-filters-title" description={messages.resources.accounts.filters.description} />
-        <div className="account-action-form"><TextInput label={messages.resources.accounts.filters.keyword} value={listSearch} onChange={changeListSearch} /></div>
+        <FormGrid direction="horizontal" minChildWidth={12}><TextInput label={messages.resources.accounts.filters.keyword} value={listSearch} onChange={changeListSearch} /></FormGrid>
       </Panel>
       <ActiveFilterSummary
         label={messages.resources.accounts.filters.appliedFilters}
@@ -234,7 +233,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   )
 }
 
-export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) {
+export function AlbumsPage({ messages, locale }: { readonly messages: MessageCatalog; readonly locale: Locale }) {
   const [pageIndex, setPageIndex] = useState(0)
   const [selected, setSelected] = useState<readonly string[]>([])
   const [accountId, setAccountId] = useState<string>()
@@ -245,11 +244,12 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
   const query = useAlbumPage({ page: pageIndex + 1, pageSize, accountId, keyword: debouncedKeyword })
   const mutations = useWorkspaceMutations()
   const columns = useMemo<ColumnDef<AlbumRecordWithAccountName>[]>(() => [
-    { accessorKey: 'name', header: messages.resources.albums.columns.name, meta: { role: 'primaryText' }, cell: ({ getValue, row }) => <div><strong>{getValue<string>()}</strong><span> · {messages.resources.accounts.columns.name}: {albumAccountName(row.original, messages.articles.ux.accountNameUnavailable)}</span></div> },
+    { accessorKey: 'name', header: messages.resources.albums.columns.name, meta: { role: 'primaryText', className: 'album-name-cell' }, cell: ({ getValue }) => <span className="resource-column-truncate" title={getValue<string>()}>{getValue<string>()}</span> },
+    { id: 'accountName', header: messages.resources.albums.columns.accountName, meta: { role: 'secondaryText', className: 'album-account-cell' }, cell: ({ row }) => albumAccountName(row.original, messages.articles.ux.accountNameUnavailable) },
     { accessorKey: 'articleCount', header: messages.resources.albums.columns.articles, meta: { role: 'numeric' } },
-    { accessorKey: 'paid', header: messages.resources.albums.columns.paid, meta: { role: 'status' }, cell: ({ getValue }) => getValue<boolean | undefined>() ? '✓' : '—' },
+    { accessorKey: 'paid', header: messages.resources.albums.columns.paid, meta: { role: 'status' }, cell: ({ getValue }) => <Status value={getValue<boolean | undefined>() ? 'ready' : 'neutral'} locale={locale} label={getValue<boolean | undefined>() ? messages.resources.albums.columns.paidValue : messages.resources.albums.columns.freeValue} tone={getValue<boolean | undefined>() ? 'accent' : 'neutral'} /> },
     { accessorKey: 'description', header: messages.resources.albums.columns.description, meta: { role: 'description' }, cell: ({ getValue }) => getValue<string | undefined>() ?? '—' }
-  ], [messages])
+  ], [locale, messages])
   const album = selected.length === 1 ? query.data?.data.find((item) => item.id === selected[0]) as AlbumRecordWithAccountName | undefined : undefined
   const traverse = (download: boolean) => {
     if (selected.length === 1 && album?.accountId) {
@@ -302,7 +302,7 @@ export function AlbumsPage({ messages }: { readonly messages: MessageCatalog }) 
     <PageHeader eyebrow={messages.navigation.library} title={messages.resources.albums.title} titleId="albums-title" description={messages.resources.albums.description} />
     <Panel aria-labelledby="album-filters-title">
       <SectionHeader title={messages.resources.albums.filters.title} titleId="album-filters-title" description={messages.resources.albums.filters.description} />
-      <div className="account-action-form"><AccountRemoteSelector label={messages.resources.accounts.columns.name} value={accountId} onChange={changeAccount} placeholder={messages.articles.filters.any} copy={messages.selectors} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={changeKeyword} /></div>
+      <FormGrid direction="horizontal" minChildWidth={12}><AccountRemoteSelector label={messages.resources.accounts.columns.name} value={accountId} onChange={changeAccount} placeholder={messages.articles.filters.any} copy={messages.selectors} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={changeKeyword} /></FormGrid>
     </Panel>
     <ActiveFilterSummary
       label={messages.resources.albums.filters.appliedFilters}
@@ -323,11 +323,15 @@ function formatDate(value: string | undefined, locale: Locale) {
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
 
-function formatSyncProgress(account: AccountRecord) {
+function AccountSyncStatus({ account, locale }: { readonly account: AccountRecord; readonly locale: Locale }) {
+  // One expression for progress + state so they cannot disagree: the Status dot conveys
+  // ready/queued, and the percentage annotates how far a partial sync has progressed.
+  const completed = account.syncCompleted
   const total = account.upstreamTotal ?? 0
   const synchronized = account.messageCount ?? account.syncCursor ?? 0
-  if (total <= 0) return '—'
-  return `${Math.min(100, Math.round((synchronized / total) * 100))}%`
+  const percent = total > 0 ? Math.min(100, Math.round((synchronized / total) * 100)) : undefined
+  const label = percent === undefined ? undefined : `${percent}%`
+  return <Status value={completed ? 'ready' : 'queued'} locale={locale} label={completed ? undefined : label} />
 }
 
 function albumAccountName(album: AlbumRecordWithAccountName, unavailable: string) {

@@ -111,13 +111,13 @@ export function AccountAddDrawer({
             </ActionGroup>
           </form>
           {resolvedName ? (
-            <Panel as="div" tone="accent" padding="none" style={{ marginTop: 'var(--spacing-3)' }}>
+            <Panel as="div" tone="accent" padding="none" className="account-discovery-block">
               <p>{actions.articleLinkResolved(resolvedName)}</p>
               {!isAuthenticated ? <Button label={actions.discoverySignIn} variant="primary" size="sm" onClick={goToLogin} /> : null}
             </Panel>
           ) : null}
           {resolveError ? (
-            <Panel as="div" tone="muted" padding="none" style={{ marginTop: 'var(--spacing-3)' }}>
+            <Panel as="div" tone="muted" padding="none" className="account-discovery-block">
               <strong>{actions.discoveryFailedTitle}</strong>
               <FieldHint tone="error">{resolveError}</FieldHint>
               {!isAuthenticated ? (
@@ -137,7 +137,7 @@ export function AccountAddDrawer({
               </ActionGroup>
             </form>
             {discoveryError ? (
-              <Panel as="div" tone="muted" padding="none" style={{ marginTop: 'var(--spacing-3)' }}>
+              <Panel as="div" tone="muted" padding="none" className="account-discovery-block">
                 <strong>{actions.discoveryFailedTitle}</strong>
                 <FieldHint tone="error">{discoveryError}</FieldHint>
                 <ActionGroup align="start" gap="control">

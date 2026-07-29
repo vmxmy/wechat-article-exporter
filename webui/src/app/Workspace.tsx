@@ -294,7 +294,7 @@ function renderPage(path: string, locale: Locale, messages: MessageCatalog) {
     case 'import': return <ImportPage messages={messages} />
     case 'accounts': return <AccountsPage locale={locale} messages={messages} />
     case 'articles': return <ArticleTable locale={locale} messages={messages} />
-    case 'albums': return <AlbumsPage messages={messages} />
+    case 'albums': return <AlbumsPage locale={locale} messages={messages} />
     case 'saved-queries': return <SavedQueriesPage locale={locale} messages={messages} />
     case 'jobs': return <JobsPage locale={locale} messages={messages} />
     case 'exports': return <ExportPage locale={locale} messages={messages} />

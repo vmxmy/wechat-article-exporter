@@ -1,18 +1,5 @@
 @import './globals.css';
 
-@layer utilities {
-  .presentation-data-table-toolbar > [data-slot='field'] {
-    width: fit-content;
-  }
-
-  .resource-column-selection > [data-slot='field'],
-  .presentation-mobile-row-header > [data-slot='field'] {
-    width: auto;
-    min-width: 0;
-    gap: 0;
-  }
-}
-
 @layer components {
   /*
    * Breakpoint vocabulary (use the rem value in @media queries — CSS custom
@@ -458,8 +445,17 @@
   .data-table tbody tr[data-selected] { background: var(--workspace-selected); box-shadow: inset 0 0 0 1px var(--workspace-selected-strong); }
   .article-title-cell { width: 100%; min-width: 16rem; max-width: 0; }
   .article-title-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .album-name-cell { width: 100%; min-width: 14rem; max-width: 0; }
+  .album-name-cell > .resource-column-truncate { display: block; }
+  .album-account-cell { width: 1%; min-width: 8rem; max-width: 16rem; white-space: nowrap; }
+  .album-account-cell > .resource-column-truncate { display: block; overflow: hidden; text-overflow: ellipsis; }
   .article-account-cell, .article-published-cell, .article-status-cell { width: 1%; white-space: nowrap; }
   .article-status-cell { text-align: end; }
+  .presentation-mobile-row-header > [data-slot='field'] {
+    width: auto;
+    min-width: 0;
+    gap: 0;
+  }
   .resource-column-selection {
     width: var(--data-table-selection-column-width);
     min-width: var(--data-table-selection-column-width);
@@ -543,12 +539,8 @@
   .stored-reply { padding-block-start: var(--spacing-3); border-block-start: 1px solid var(--color-border); }
   .comment-metadata { color: var(--color-text-secondary); font-size: var(--text-body-small-size); }
   .import-form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--spacing-3); }
-  .account-action-form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--spacing-3); }
-  /* TextInput is wrapped by Astryx Field and an internal column layout.
-     Apply flex sizing to the Field, not the inner control: otherwise its
-     flex-basis becomes a height inside that column and creates a square input. */
-  .account-action-form [data-slot='field'] { min-width: 12rem; flex: 1 1 12rem; }
   .account-sync-mode { display: grid; flex: 1 1 14rem; gap: var(--spacing-1); font-weight: 600; }
+  .account-discovery-block { margin-block-start: var(--space-cluster); }
   .account-sync-mode select { min-width: 0; padding: var(--spacing-2); border: 1px solid var(--color-border-emphasized); border-radius: var(--radius-control); color: var(--color-text-primary); background: var(--color-background-surface); }
   .import-form { width: min(100%, 42rem); }
   .import-form [data-slot='field'] { flex: 1 1 20rem; }

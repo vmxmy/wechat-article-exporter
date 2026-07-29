@@ -116,18 +116,18 @@ export function ArticleFilterEditor({ locale, messages, value, onChange, onAccou
             <BooleanFilter label={messages.articles.filters.deleted} value={value.deleted} onChange={(next) => update('deleted', next)} messages={messages} />
             <BooleanFilter label={messages.articles.filters.original} value={value.original} onChange={(next) => update('original', next)} messages={messages} />
             <BooleanFilter label={messages.articles.filters.paid} value={value.paid} onChange={(next) => update('paid', next)} messages={messages} />
-            {numberFilters.map(({ field, label }) => (
-              <NumberInput
-                key={field}
-                label={messages.articles.filters[label]}
-                value={value[field]}
-                onChange={(next) => update(field, next ?? undefined)}
-                htmlName={`article-${field}`}
-                autoComplete="off"
-                min={0}
-                step={1}
-                isIntegerOnly
-                hasClear
+            {rangePairs.map((pair) => (
+              <RangeFilter
+                key={pair.min}
+                label={messages.articles.filters[pair.rangeLabel]}
+                rangeFromLabel={messages.articles.filters.rangeFrom}
+                rangeToLabel={messages.articles.filters.rangeTo}
+                minValue={value[pair.min]}
+                maxValue={value[pair.max]}
+                onMinChange={(next) => update(pair.min, next)}
+                onMaxChange={(next) => update(pair.max, next)}
+                minField={pair.min}
+                maxField={pair.max}
               />
             ))}
           </FormGrid>
@@ -141,17 +141,42 @@ function BooleanFilter({ label, value, onChange, messages }: { readonly label: s
   return <Selector label={label} options={[{ value: 'true', label: messages.articles.filters.yes }, { value: 'false', label: messages.articles.filters.no }]} value={value === undefined ? null : String(value)} onChange={(next) => onChange(next === null ? undefined : next === 'true')} placeholder={messages.articles.filters.any} hasClear clearLabel={messages.selectors.clear(label)} />
 }
 
+function RangeFilter({ label, rangeFromLabel, rangeToLabel, minValue, maxValue, onMinChange, onMaxChange, minField, maxField }: {
+  readonly label: string
+  readonly rangeFromLabel: string
+  readonly rangeToLabel: string
+  readonly minValue: number | undefined
+  readonly maxValue: number | undefined
+  readonly onMinChange: (next: number | undefined) => void
+  readonly onMaxChange: (next: number | undefined) => void
+  readonly minField: Extract<keyof ArticleQuery, string>
+  readonly maxField: Extract<keyof ArticleQuery, string>
+}) {
+  return (
+    <fieldset className="article-filter-range">
+      <legend>{label}</legend>
+      <div className="article-filter-range-controls">
+        <NumberInput label={rangeFromLabel} value={minValue} onChange={(next) => onMinChange(next ?? undefined)} htmlName={`article-${minField}`} autoComplete="off" min={0} step={1} isIntegerOnly hasClear />
+        <NumberInput label={rangeToLabel} value={maxValue} onChange={(next) => onMaxChange(next ?? undefined)} htmlName={`article-${maxField}`} autoComplete="off" min={0} step={1} isIntegerOnly hasClear />
+      </div>
+    </fieldset>
+  )
+}
+
 function countAdvancedFilters(query: ArticleQuery): number {
-  const fields: ReadonlyArray<keyof ArticleQuery> = ['albumId', 'author', 'messageTypes', 'hasContent', 'hasComments', 'deleted', 'original', 'paid', ...numberFilters.map((filter) => filter.field)]
+  const fields: ReadonlyArray<keyof ArticleQuery> = ['albumId', 'author', 'messageTypes', 'hasContent', 'hasComments', 'deleted', 'original', 'paid', ...rangePairs.flatMap((pair) => [pair.min, pair.max])]
   return fields.filter((field) => {
     const value = query[field]
     return Array.isArray(value) ? value.length > 0 : value !== undefined && value !== ''
   }).length
 }
 
-const numberFilters = [
-  { field: 'readMin', label: 'readMin' }, { field: 'readMax', label: 'readMax' }, { field: 'oldLikeMin', label: 'oldLikeMin' }, { field: 'oldLikeMax', label: 'oldLikeMax' },
-  { field: 'shareMin', label: 'shareMin' }, { field: 'shareMax', label: 'shareMax' }, { field: 'likeMin', label: 'likeMin' }, { field: 'likeMax', label: 'likeMax' },
-  { field: 'commentMin', label: 'commentMin' }, { field: 'commentMax', label: 'commentMax' }, { field: 'weCoinMin', label: 'weCoinMin' }, { field: 'weCoinMax', label: 'weCoinMax' },
-  { field: 'mediaSecondsMin', label: 'mediaSecondsMin' }, { field: 'mediaSecondsMax', label: 'mediaSecondsMax' }
-] as const satisfies ReadonlyArray<{ readonly field: Extract<keyof ArticleQuery, string>; readonly label: keyof MessageCatalog['articles']['filters'] }>
+const rangePairs = [
+  { min: 'readMin', max: 'readMax', rangeLabel: 'rangeReads' },
+  { min: 'oldLikeMin', max: 'oldLikeMax', rangeLabel: 'rangeOldLikes' },
+  { min: 'likeMin', max: 'likeMax', rangeLabel: 'rangeLikes' },
+  { min: 'shareMin', max: 'shareMax', rangeLabel: 'rangeShares' },
+  { min: 'commentMin', max: 'commentMax', rangeLabel: 'rangeComments' },
+  { min: 'weCoinMin', max: 'weCoinMax', rangeLabel: 'rangeWeCoin' },
+  { min: 'mediaSecondsMin', max: 'mediaSecondsMax', rangeLabel: 'rangeMediaSeconds' }
+] as const satisfies ReadonlyArray<{ readonly min: Extract<keyof ArticleQuery, string>; readonly max: Extract<keyof ArticleQuery, string>; readonly rangeLabel: keyof MessageCatalog['articles']['filters'] }>

@@ -20,7 +20,7 @@ test('article workspace layers readable common and more filters, summary, select
   const album = page.getByRole('combobox', { name: 'Album' })
   await expect(album).toBeVisible()
   await expect(page.getByRole('combobox', { name: 'Message types' })).toBeVisible()
-  await expect(page.getByRole('spinbutton', { name: 'Minimum reads' })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Reads' })).toBeVisible()
 
   await album.fill('Sanitized album')
   await page.getByRole('option', { name: 'Sanitized album Fixture Account', exact: true }).click()

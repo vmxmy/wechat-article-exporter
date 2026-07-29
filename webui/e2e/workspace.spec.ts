@@ -507,7 +507,7 @@ test('advanced article query and export handoff preserve typed local selections'
   await page.goto('/articles')
   await selectRemoteSelectorOption(page, 'Account', 'Fixture Account')
   await page.getByRole('button', { name: 'More filters' }).click()
-  await page.getByRole('spinbutton', { name: 'Minimum reads' }).fill('10')
+  await page.getByRole('group', { name: 'Reads' }).getByRole('spinbutton', { name: 'From' }).fill('10')
   await page.getByRole('button', { name: 'Apply filters' }).click()
   await expect.poll(() => fixture.requests.some((request) => request === 'GET /api/v1/articles')).toBe(true)
   await page.getByRole('button', { name: 'Export current matches' }).click()
