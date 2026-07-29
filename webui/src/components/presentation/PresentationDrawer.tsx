@@ -44,7 +44,6 @@ export interface PresentationDrawerProps {
   readonly closeLabel: string
   readonly children: ReactNode
   readonly footer?: ReactNode
-  readonly width?: number | string
   readonly initialFocusRef?: RefObject<HTMLElement | null>
   readonly restoreFocusRef?: RefObject<HTMLElement | null>
   readonly restoreFocus?: boolean
@@ -62,7 +61,6 @@ export function PresentationDrawer({
   closeLabel,
   children,
   footer,
-  width = 'min(36rem, 100vw)',
   initialFocusRef,
   restoreFocusRef,
   restoreFocus = true,
@@ -166,7 +164,6 @@ export function PresentationDrawer({
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         className={cn('presentation-drawer-panel', className)}
-        style={{ maxWidth: typeof width === 'number' ? `${width}px` : width }}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="presentation-dialog-header">

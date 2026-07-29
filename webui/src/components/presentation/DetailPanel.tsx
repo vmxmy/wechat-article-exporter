@@ -11,7 +11,6 @@ export interface DetailPanelProps {
   readonly ariaLabel?: string
   readonly children: ReactNode
   readonly footer?: ReactNode
-  readonly width?: number | string
   readonly closeLabel: string
 }
 
@@ -23,7 +22,6 @@ export function DetailPanel({
   ariaLabel,
   children,
   footer,
-  width = 'min(36rem, 100vw)',
   closeLabel
 }: DetailPanelProps) {
   return (
@@ -34,7 +32,6 @@ export function DetailPanel({
       description={description}
       ariaLabel={ariaLabel}
       closeLabel={closeLabel}
-      width={width}
       bodyClassName="presentation-detail-body"
       footer={footer ? <ActionGroup align="start">{footer}</ActionGroup> : undefined}
     >
