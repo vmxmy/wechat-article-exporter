@@ -75,8 +75,8 @@ test('form grids cap tracks while horizontal export fields remain the documented
   await page.setViewportSize({ width: 1280, height: 900 })
   await installLoopbackFixture(page)
   await page.goto('/settings')
-  await page.getByRole('link', { name: 'Network/Proxy' }).click()
-  await expect(page.locator('#settings-network')).toBeInViewport()
+  await page.getByRole('tab', { name: 'Network/Proxy' }).click()
+  await expect(page.locator('#settings-network')).toBeVisible()
 
   const proxyGrid = page.locator('.settings-proxy-form')
   await expect(proxyGrid).toHaveAttribute('data-columns', '2')

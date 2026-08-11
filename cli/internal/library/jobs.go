@@ -286,7 +286,7 @@ func (store *JobStore) GetByIdempotency(ctx context.Context, profile domain.Prof
 	var job domain.Job
 	err := store.database.WithTx(ctx, func(transaction *sql.Tx) error {
 		var err error
-		job, err = scanJobRow(transaction.QueryRowContext(ctx, `SELECT id, kind, state, profile_id, created_at, updated_at
+		job, err = scanJobRow(transaction.QueryRowContext(ctx, `SELECT `+jobColumns+`
 FROM jobs WHERE profile_id=? AND kind=? AND idempotency_key=?`, profile, kind, key))
 		return err
 	})
@@ -376,7 +376,7 @@ func (store *JobStore) createWithItemsTx(
 		err := transaction.QueryRowContext(ctx, `SELECT id FROM jobs WHERE profile_id=? AND kind=? AND idempotency_key=?`,
 			profile, spec.Kind, spec.IdempotencyKey).Scan(&existing)
 		if err == nil {
-			job, err = scanJobRow(transaction.QueryRowContext(ctx, `SELECT id, kind, state, profile_id, created_at, updated_at FROM jobs WHERE id=?`, existing))
+			job, err = scanJobRow(transaction.QueryRowContext(ctx, `SELECT `+jobColumns+` FROM jobs WHERE id=?`, existing))
 			if err != nil {
 				return domain.Job{}, err
 			}
@@ -767,7 +767,7 @@ updated_at=?, completed_at=NULL WHERE id=? AND state=?`, domain.JobQueued, now, 
 }
 
 func (store *JobStore) Get(ctx context.Context, id domain.JobID) (domain.Job, error) {
-	job, err := store.scanJob(store.database.db.QueryRowContext(ctx, `SELECT id, kind, state, profile_id, created_at, updated_at
+	job, err := scanJobRow(store.database.db.QueryRowContext(ctx, `SELECT `+jobColumns+`
 FROM jobs WHERE id=? AND profile_id=?`, id, store.database.profileID))
 	if err != nil {
 		return domain.Job{}, err
@@ -797,7 +797,7 @@ func (store *JobStore) Query(ctx context.Context, query domain.JobQuery) (domain
 	if err := store.database.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM jobs WHERE "+predicate, arguments...).Scan(&total); err != nil {
 		return domain.Page[domain.Job]{}, err
 	}
-	rows, err := store.database.db.QueryContext(ctx, `SELECT id, kind, state, profile_id, created_at, updated_at
+	rows, err := store.database.db.QueryContext(ctx, `SELECT `+jobColumns+`
 FROM jobs WHERE `+predicate+` ORDER BY created_at DESC, id LIMIT ? OFFSET ?`, append(arguments, limit, offset)...)
 	if err != nil {
 		return domain.Page[domain.Job]{}, err
@@ -851,6 +851,58 @@ WHERE job_id IN (`+strings.Join(placeholders, ",")+`) GROUP BY job_id, state`, a
 		}
 		result[jobID][state] = count
 		result[jobID]["total"] += count
+	}
+	return result, rows.Err()
+}
+
+// JobErrorSummary carries the most recent unresolved item failure for one job.
+// It deliberately has no JSON tags: ErrorMessage is stored with only
+// safety.Redact applied, which strips credentials but not filesystem paths, so
+// it must not reach a wire boundary without an application-layer redaction
+// pass. Resume, Retry, and ClaimItem all clear job_items.error_class, so a
+// summary disappears once the failure is being retried.
+type JobErrorSummary struct {
+	ErrorClass   jobs.FailureClass
+	ErrorMessage string
+	ItemCount    int
+	OccurredAt   time.Time
+}
+
+// ErrorSummaries reads one summary per requested job in a single query. Jobs
+// with no failed items are absent from the result rather than present with a
+// zero value.
+func (store *JobStore) ErrorSummaries(ctx context.Context, ids []domain.JobID) (map[domain.JobID]JobErrorSummary, error) {
+	result := make(map[domain.JobID]JobErrorSummary, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+	placeholders := make([]string, len(ids))
+	arguments := make([]any, len(ids))
+	for index, id := range ids {
+		placeholders[index] = "?"
+		arguments[index] = id
+	}
+	// ROW_NUMBER with an id tiebreak rather than a bare-column MAX(): ties on
+	// updated_at would otherwise resolve arbitrarily and make tests flaky.
+	rows, err := store.database.db.QueryContext(ctx, `SELECT job_id, error_class, error_message, occurred_at, item_count FROM (
+  SELECT job_id, error_class, error_message, updated_at AS occurred_at,
+         COUNT(*)     OVER (PARTITION BY job_id)                                  AS item_count,
+         ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY updated_at DESC, id DESC) AS rn
+  FROM job_items WHERE job_id IN (`+strings.Join(placeholders, ",")+`) AND error_class <> ''
+) WHERE rn = 1`, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var jobID domain.JobID
+		var summary JobErrorSummary
+		var occurred int64
+		if err := rows.Scan(&jobID, &summary.ErrorClass, &summary.ErrorMessage, &occurred, &summary.ItemCount); err != nil {
+			return nil, err
+		}
+		summary.OccurredAt = time.UnixMilli(occurred)
+		result[jobID] = summary
 	}
 	return result, rows.Err()
 }
@@ -1026,8 +1078,10 @@ updated_at=?, completed_at=NULL WHERE job_id=? AND state IN (?, ?, ?)`, domain.J
 			domain.JobFailed, domain.JobPartial, domain.JobCancelled); err != nil {
 			return err
 		}
+		// A retry is a new run, so started_at is cleared for startJob to restamp.
+		// Resume deliberately keeps it: resuming continues the same run.
 		result, err := transaction.ExecContext(ctx, `UPDATE jobs SET state=?, lease_owner='', lease_expires_at=NULL,
-updated_at=?, completed_at=NULL WHERE id=? AND profile_id=? AND state=?`,
+updated_at=?, started_at=NULL, completed_at=NULL WHERE id=? AND profile_id=? AND state=?`,
 			domain.JobQueued, now, id, store.database.profileID, current)
 		if err != nil {
 			return err
@@ -1128,8 +1182,10 @@ func (store *JobStore) startJob(ctx context.Context, id domain.JobID, owner stri
 	currentTime := store.now()
 	now := currentTime.UnixMilli()
 	expires := currentTime.Add(duration).UnixMilli()
+	// Each queued -> running transition is one job-level attempt. Retry clears
+	// started_at, so COALESCE stamps the start of the current run.
 	result, err := store.database.db.ExecContext(ctx, `UPDATE jobs SET state=?, lease_owner=?, lease_expires_at=?,
-started_at=COALESCE(started_at, ?), updated_at=?, completed_at=NULL
+started_at=COALESCE(started_at, ?), updated_at=?, completed_at=NULL, attempt_count=attempt_count+1
 WHERE id=? AND profile_id=? AND state=? AND (lease_expires_at IS NULL OR lease_expires_at < ? OR lease_owner=?)`,
 		domain.JobRunning, owner, expires, now, now, id, store.database.profileID, domain.JobQueued, now, owner)
 	if err != nil {
@@ -1346,27 +1402,29 @@ func isTerminalItemState(state domain.JobState) bool {
 	return state == domain.JobCompleted || state == domain.JobPartial || state == domain.JobFailed || state == domain.JobCancelled
 }
 
-func (store *JobStore) scanJob(row *sql.Row) (domain.Job, error) {
-	var job domain.Job
-	var created, updated int64
-	if err := row.Scan(&job.ID, &job.Kind, &job.State, &job.Profile, &created, &updated); err != nil {
-		return domain.Job{}, err
-	}
-	job.CreatedAt = time.UnixMilli(created)
-	job.UpdatedAt = time.UnixMilli(updated)
-	return job, nil
-}
-
 type rowScanner interface{ Scan(...any) error }
+
+// jobColumns is the single column list every scanJobRow caller must select, in
+// order. Keeping it here stops a widened scan from silently outrunning a query.
+const jobColumns = `id, kind, state, profile_id, created_at, started_at, updated_at, completed_at, attempt_count`
 
 func scanJobRow(row rowScanner) (domain.Job, error) {
 	var job domain.Job
 	var created, updated int64
-	if err := row.Scan(&job.ID, &job.Kind, &job.State, &job.Profile, &created, &updated); err != nil {
+	var started, completed sql.NullInt64
+	if err := row.Scan(&job.ID, &job.Kind, &job.State, &job.Profile, &created, &started, &updated, &completed, &job.AttemptCount); err != nil {
 		return domain.Job{}, err
 	}
 	job.CreatedAt = time.UnixMilli(created)
 	job.UpdatedAt = time.UnixMilli(updated)
+	if started.Valid {
+		startedAt := time.UnixMilli(started.Int64)
+		job.StartedAt = &startedAt
+	}
+	if completed.Valid {
+		completedAt := time.UnixMilli(completed.Int64)
+		job.CompletedAt = &completedAt
+	}
 	return job, nil
 }
 

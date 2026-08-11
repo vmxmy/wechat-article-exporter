@@ -29,9 +29,17 @@ type WorkspaceJobPermissionProvider interface {
 }
 
 func (workspace *Workspace) workspaceJob(job domain.Job) WorkspaceJob {
+	return newWorkspaceJob(job, workspace.permittedJobActions(job.State), nil)
+}
+
+// newWorkspaceJob is the single place the browser-facing job projection is
+// assembled. Both the workspace adapter and Service.JobDetails go through it so
+// a widened DTO cannot reach one endpoint and skip the other.
+func newWorkspaceJob(job domain.Job, actions []WorkspaceJobAction, summary *WorkspaceJobErrorSummary) WorkspaceJob {
 	return WorkspaceJob{
-		ID: job.ID, Kind: job.Kind, Label: workspaceJobLabel(job.Kind), State: job.State, Profile: job.Profile, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
-		Counts: job.Counts, PermittedActions: workspace.permittedJobActions(job.State),
+		ID: job.ID, Kind: job.Kind, Label: workspaceJobLabel(job.Kind), State: job.State, Profile: job.Profile,
+		CreatedAt: job.CreatedAt, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, UpdatedAt: job.UpdatedAt,
+		AttemptCount: job.AttemptCount, Counts: job.Counts, ErrorSummary: summary, PermittedActions: actions,
 	}
 }
 

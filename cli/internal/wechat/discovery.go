@@ -27,11 +27,24 @@ const (
 	maximumDiscoveryPage   = 50
 )
 
+// Upstream `base_resp.ret` values shared by the discovery and content surfaces.
+const (
+	retInvalidSession       = 200003
+	retFrequencyControl     = 200013
+	retSecurityVerification = -6
+)
+
 var (
 	ErrDiscoveryAuthentication = errors.New("WeChat discovery session expired; run login again")
-	ErrDiscoveryProtocol       = errors.New("unsupported WeChat discovery response")
-	articleAccountNamePattern  = regexp.MustCompile(`(?is)<[^>]*class=["'][^"']*wx_follow_nickname[^"']*["'][^>]*>(.*?)</[^>]+>`)
-	htmlTagPattern             = regexp.MustCompile(`(?s)<[^>]*>`)
+	// ErrDiscoveryThrottled is WeChat rejecting the request rate, not the session.
+	// It must stay distinct from ErrDiscoveryAuthentication: an authentication
+	// failure blocks a job until the user signs in again, while throttling is
+	// transient and retryable, and reporting one as the other sends the user to
+	// re-login for a problem that re-login cannot fix.
+	ErrDiscoveryThrottled     = errors.New("WeChat discovery rate limited this request; retry later")
+	ErrDiscoveryProtocol      = errors.New("unsupported WeChat discovery response")
+	articleAccountNamePattern = regexp.MustCompile(`(?is)<[^>]*class=["'][^"']*wx_follow_nickname[^"']*["'][^>]*>(.*?)</[^>]+>`)
+	htmlTagPattern            = regexp.MustCompile(`(?s)<[^>]*>`)
 )
 
 type AccountSearchRequest struct {
@@ -637,8 +650,13 @@ func discoveryBaseError(response baseResponse) error {
 	if response.Ret == 0 {
 		return nil
 	}
-	if response.Ret == 200003 || response.Ret == 200013 || response.Ret == -6 {
-		return ErrDiscoveryAuthentication
+	// The upstream code is kept in the message so a blocked job records which
+	// rejection it hit; the code itself carries no account or request identity.
+	switch response.Ret {
+	case retInvalidSession, retSecurityVerification:
+		return fmt.Errorf("%w (%d)", ErrDiscoveryAuthentication, response.Ret)
+	case retFrequencyControl:
+		return fmt.Errorf("%w (%d)", ErrDiscoveryThrottled, response.Ret)
 	}
 	message := strings.TrimSpace(response.ErrMsg)
 	if message == "" {

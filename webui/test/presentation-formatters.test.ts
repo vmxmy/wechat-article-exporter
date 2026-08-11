@@ -11,8 +11,10 @@ import {
   formatHash,
   formatJobKind,
   formatPath,
+  formatRelativeTime,
   formatShortIdentifier,
-  formatStatus
+  formatStatus,
+  listJobKinds
 } from '../src/lib/presentation/formatters'
 
 describe('presentation formatters', () => {
@@ -74,6 +76,33 @@ describe('presentation formatters', () => {
     expect(formatStatus('blocked_auth', 'zh-CN').label).toBe('需要重新登录')
     expect(formatJobKind('article_download', 'en').label).toBe('Article download')
     expect(formatJobKind('album_sync', 'zh-CN').label).toBe('专辑同步')
+  })
+
+  it('formats relative time in both directions against an injected clock', () => {
+    const now = Date.parse('2026-07-25T12:00:00.000Z')
+    expect(formatRelativeTime('2026-07-25T11:59:15.000Z', 'en', now)).toBe('45 seconds ago')
+    expect(formatRelativeTime('2026-07-25T11:55:00.000Z', 'en', now)).toBe('5 minutes ago')
+    expect(formatRelativeTime('2026-07-25T09:00:00.000Z', 'en', now)).toBe('3 hours ago')
+    expect(formatRelativeTime('2026-07-23T12:00:00.000Z', 'en', now)).toBe('2 days ago')
+    expect(formatRelativeTime('2026-07-04T12:00:00.000Z', 'en', now)).toBe('3 weeks ago')
+    expect(formatRelativeTime('2026-07-25T12:05:00.000Z', 'en', now)).toBe('in 5 minutes')
+    expect(formatRelativeTime('2026-07-25T11:55:00.000Z', 'zh-CN', now)).toBe('5分钟前')
+  })
+
+  it('treats missing or unparseable timestamps as empty rather than as now', () => {
+    const now = Date.parse('2026-07-25T12:00:00.000Z')
+    expect(formatRelativeTime(undefined, 'en', now)).toBe(EMPTY_VALUE)
+    expect(formatRelativeTime(null, 'en', now)).toBe(EMPTY_VALUE)
+    expect(formatRelativeTime('not-a-date', 'en', now)).toBe(EMPTY_VALUE)
+  })
+
+  it('lists every filterable job kind ordered by its localized label', () => {
+    const english = listJobKinds('en')
+    expect(english).toHaveLength(12)
+    expect(english.map((kind) => kind.label)).toEqual([...english.map((kind) => kind.label)].sort(new Intl.Collator('en').compare))
+    expect(english.map((kind) => kind.value)).toContain('account_sync')
+    for (const kind of english) expect(kind.label).not.toBe(EMPTY_VALUE)
+    expect(listJobKinds('zh-CN').map((kind) => kind.value).sort()).toEqual(english.map((kind) => kind.value).sort())
   })
 
   it('hides unknown backend enum labels from normal presentation', () => {

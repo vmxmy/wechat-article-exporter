@@ -102,6 +102,7 @@ interface RemoteSelectorBaseProps {
   readonly value?: string
   readonly selectedLabel?: string
   readonly isDisabled?: boolean
+  readonly isLabelHidden?: boolean
   readonly testID?: string
 }
 
@@ -125,7 +126,7 @@ function RemoteSelector<T extends AccountOption | AlbumOption>(props: RemoteSele
   return <ScopedRemoteSelector key={props.scope} {...props} />
 }
 
-function ScopedRemoteSelector<T extends AccountOption | AlbumOption>({ label, description, placeholder, value, selectedLabel, onChange, copy, isDisabled, testID, loadPage, toItem, scope }: RemoteSelectorProps<T>) {
+function ScopedRemoteSelector<T extends AccountOption | AlbumOption>({ label, description, placeholder, value, selectedLabel, onChange, copy, isDisabled, isLabelHidden, testID, loadPage, toItem, scope }: RemoteSelectorProps<T>) {
   const search = useRemoteSearch<T>({ loadPage, toItem, copy, scope })
   const labelId = useId()
   const descriptionId = description ? `${labelId}-description` : undefined
@@ -134,7 +135,7 @@ function ScopedRemoteSelector<T extends AccountOption | AlbumOption>({ label, de
   const [isOpen, setIsOpen] = useState(false)
   const inputValue = isOpen ? typedQuery : value ? selectedLabel ?? copy.unavailable : ''
 
-  return <ControlField label={label} description={description} labelId={labelId} descriptionId={descriptionId}><div className="flex items-center gap-2">
+  return <ControlField label={label} description={description} labelId={labelId} descriptionId={descriptionId} isLabelHidden={isLabelHidden}><div className="flex items-center gap-2">
     <Combobox.Root value={value ?? null} onValueChange={(next) => { if (next === null) onChange(undefined); else { const option = search.trackedByID.current.get(next); if (option) { onChange(next, option); setIsOpen(false) } } }} inputValue={inputValue} onInputValueChange={(next) => { search.clear(); setTypedQuery(next); search.setSearch(next) }} open={isOpen} onOpenChange={(open) => { setIsOpen(open); if (open) { setTypedQuery(''); search.reset() } }} disabled={isDisabled}>
       <div className="relative w-full"><Combobox.Input ref={inputRef} aria-labelledby={labelId} aria-describedby={descriptionId} data-testid={testID} placeholder={placeholder} className={`${selectorTriggerClassName} w-full pr-9 placeholder:text-muted-foreground`} />{search.isLoading ? <Icons.spinner className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin text-muted-foreground" aria-hidden="true" /> : <Icons.chevronsUpDown className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 opacity-50" aria-hidden="true" />}</div>
       <Combobox.Portal><Combobox.Positioner align="start" className="z-50"><Combobox.Popup aria-busy={search.isLoading || undefined} className={`${selectorPopupClassName} w-(--anchor-width) min-w-72 p-1 outline-none data-[side=bottom]:translate-y-1`}><SearchStatus search={search} copy={copy} /><Combobox.List>{search.items.map((item) => <Combobox.Item key={item.value} value={item.value} disabled={search.isLoading} className={selectorOptionClassName}><span className="absolute right-2 flex size-3.5 items-center justify-center"><Combobox.ItemIndicator><Icons.check className="size-4" /></Combobox.ItemIndicator></span><SelectorOptionContent option={item} /></Combobox.Item>)}</Combobox.List></Combobox.Popup></Combobox.Positioner></Combobox.Portal>

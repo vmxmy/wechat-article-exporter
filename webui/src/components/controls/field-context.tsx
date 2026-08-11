@@ -38,13 +38,13 @@ export function ControlField({
 }: ControlFieldProps) {
   return (
     <ShadcnField className={className} data-control-layout={layout} data-control-size={size}>
-      {isLabelHidden ? null : (
-        <FieldLabel id={labelId} htmlFor={htmlFor}>
-          {label}
-          {isRequired ? <span className="text-destructive">*</span> : null}
-          {isOptional ? <span className="text-muted-foreground"> (optional)</span> : null}
-        </FieldLabel>
-      )}
+      {/* A hidden label stays in the accessibility tree so controls that only show a
+          placeholder (compact toolbars) keep the same accessible name as stacked ones. */}
+      <FieldLabel id={labelId} htmlFor={htmlFor} className={isLabelHidden ? 'sr-only' : undefined}>
+        {label}
+        {isRequired ? <span className="text-destructive">*</span> : null}
+        {isOptional ? <span className="text-muted-foreground"> (optional)</span> : null}
+      </FieldLabel>
       {description ? <FieldDescription id={descriptionId}>{description}</FieldDescription> : null}
       {children}
     </ShadcnField>

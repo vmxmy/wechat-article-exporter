@@ -51,9 +51,9 @@ The browser UI is a local-first professional workspace: quiet, exact, and operat
 - Group-internal relationships stay tight while transitions between business sections stay loose: label-to-control 4–8 px, copy-to-action 16–20 px, and section-to-section 32–56 px.
 - Reading copy is capped at 60 characters; descriptive page copy is capped at 44 rem and form columns at 36 rem.
 - The header is a compact command rail integrated with the page canvas.
-- The home page has one primary task panel followed by a compact workspace facts strip.
+- The home page has one primary task panel, then a two-column region pairing quick-entry tiles with the recent-task list, then a compact workspace facts strip; the two columns collapse below the medium breakpoint.
 - Data pages prioritize the title column and compress metadata, numeric, date, and status columns to content width.
-- Settings use persistent local navigation on desktop and horizontal overflow navigation on narrow screens.
+- Settings use a horizontal tab strip that overflows horizontally on narrow screens, mounts only the active panel, and records the active section in `?section=`.
 - Dense tables keep 44–48 px rows; breathing room belongs around the table toolbar, table frame, and pagination rather than inside every row.
 
 ### Layout primitive contract

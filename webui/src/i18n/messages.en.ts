@@ -78,9 +78,8 @@ export const en = {
     sessionState: 'State',
     runtimeProfile: 'Profile',
     runtimeVersion: 'Version',
-    storageCounts: (accounts: number, articles: number, albums: number, jobs: number) => `${accounts} accounts · ${articles} articles · ${albums} albums · ${jobs} jobs`,
+    storageStats: { accounts: 'Accounts', articles: 'Articles', albums: 'Albums', jobs: 'Jobs' },
     primaryActionTitle: 'Recommended next step',
-    secondaryActionsTitle: 'Continue working',
     quickEntries: { browseArticles: 'Open the article library', startExport: 'Start an export', manageAccounts: 'Manage accounts', reviewTasks: 'Review tasks' },
     recentJobsTitle: 'Recent tasks',
     recentJobsEmpty: 'No recent tasks yet. Syncs, imports, and exports appear here.',
@@ -97,10 +96,7 @@ export const en = {
       browseTitle: 'Continue with your articles',
       browseDescription: 'Browse the local library or start an export from the content already on this device.',
       browse: 'Browse articles',
-      export: 'Export articles',
-      failedJobsTitle: (count: number) => `${count} failed ${count === 1 ? 'job needs' : 'jobs need'} attention`,
-      failedJobsDescription: 'Review the failure before continuing other background work.',
-      failedJobs: 'Review failed jobs'
+      export: 'Export articles'
     }
   },
   unavailableActions: {
@@ -111,7 +107,7 @@ export const en = {
   login: {
     title: 'WeChat login',
     description: 'Check the current local session or start a QR-code login flow.',
-    legacyDescription: 'This legacy deep link remains available. Session status, account switching, and sign-out are also available from the global session control.',
+    legacyDescription: 'This legacy deep link remains available.',
     manageGlobally: 'Open the session control in the workspace header to switch accounts or sign out from any page.',
     sessionTitle: 'Current session',
     sessionMenu: 'Session',
@@ -125,6 +121,7 @@ export const en = {
     unavailable: 'The local session status could not be loaded.',
     qrTitle: 'QR-code login',
     qrDescription: 'Start login to show a QR code and its polling status here.',
+    qrSignedIn: 'This workspace is already signed in. Start QR login again to switch to a different WeChat account.',
     start: 'Start QR login',
     poll: 'Poll login status',
     complete: 'Complete login',
@@ -142,6 +139,25 @@ export const en = {
     switchUnavailable: 'Account switching is not available for this local session.',
     switching: 'Switching account…',
     switchComplete: (name: string) => `Switched to ${name}.`,
+    workspaceExpiredTitle: 'Local workspace session expired',
+    workspaceExpiredDescription: 'This is the browser workspace\u2019s own local session, not your WeChat login; signing in to WeChat again will not restore it. Run wechat-article web again in your terminal, then open the new workspace link.',
+    workspaceExpiredBadge: 'Workspace session expired',
+    progressTitle: 'Login progress',
+    stepGenerate: 'Generate QR code',
+    stepScan: 'Scan with WeChat',
+    stepConfirm: 'Confirm on phone',
+    stepFinish: 'Finish sign-in',
+    statusIdle: 'Not started yet. Use “Start QR login” to generate a code.',
+    statusStarting: 'Generating the QR code…',
+    statusWaiting: 'Waiting for you to scan the QR code with the WeChat app.',
+    statusScanned: 'Code scanned. Confirm the login on your phone.',
+    statusConfirmed: 'Login confirmed. Finishing the local sign-in…',
+    statusCompleted: 'Login succeeded. This workspace is now signed in.',
+    statusExpired: 'The QR code expired before it was confirmed. Start QR login again to get a fresh code.',
+    statusFailed: 'The login could not be completed. Review the error below, then retry with “Complete login”.',
+    autoRefresh: 'Status refreshes automatically every 3 seconds.',
+    lastChecked: (time: string) => `Last checked at ${time}.`,
+    logTitle: 'Status timeline',
     states: { authenticated: 'Authenticated', unauthenticated: 'Not signed in', waiting: 'Waiting for scan', scanned: 'Scanned', confirmed: 'Confirmed', expired: 'Expired', completed: 'Completed' }
   },
   import: {
@@ -258,7 +274,7 @@ export const en = {
     title: 'Settings and maintenance',
     description: 'Manage browser-safe local settings and run explicit maintenance checks. Secret values and local paths are never displayed here.',
     loading: 'Loading local settings…', unavailable: 'A local maintenance capability is unavailable.', retry: 'Retry', actionFailed: 'The local maintenance action could not be completed.',
-    navigation: { label: 'Settings sections', general: 'General/Preferences', downloadExport: 'Download/Export Defaults', credentials: 'Credentials', network: 'Network/Proxy', storage: 'Storage Maintenance', diagnostics: 'Diagnostics', danger: 'Danger zone' },
+    navigation: { label: 'Settings sections', general: 'General/Preferences', downloadExport: 'Download/Export Defaults', credentials: 'Credentials', network: 'Network/Proxy', storage: 'Storage Maintenance', diagnostics: 'Diagnostics' },
     unsaved: { title: 'Unsaved preference changes', description: 'You have unsaved preference changes. Stay on this page to save them, or discard them and continue.', stay: 'Stay on settings', discard: 'Discard changes' },
     credentials: { title: 'Credentials', description: 'Only metadata is listed. Any entered credential fields are write-only and are cleared after import.', importTitle: 'Import a credential', listTitle: 'Stored credential metadata', accountUnavailable: 'Saved account', technicalDetails: 'Credential technical details', accountId: 'Account ID', copyAccountId: 'Copy account ID', empty: 'No credential metadata is available.', import: 'Import credential', validate: 'Validate credential', validating: 'Validating credential…', validationPassed: 'Credential validation passed. You can import these entered values.', validationFailed: 'Credential validation failed. Review or refresh the entered values before importing.', validationHint: 'Validation checks these entered write-only values without importing or retaining them.', remove: 'Remove', removed: 'Credential removed.', removeConfirmation: (id: string) => `remove-credential:${id}`, removeConfirmationLabel: 'Exact confirmation to remove this credential', removeConfirmationHint: 'Enter this value exactly. It removes only the selected credential metadata and its secret bytes.', confirmRemove: 'Remove credential', cancelRemove: 'Cancel removal', nickname: 'Nickname', biz: 'Business ID (write-only)', uin: 'UIN (write-only)', key: 'Key (write-only)', passTicket: 'Pass ticket (write-only)', wapSid2: 'WAP SID2 (write-only)', appMsgToken: 'App message token (write-only)', cookie: 'Cookie (write-only)', optional: 'Optional', imported: 'Credential imported. Secret values were not retained in the browser.', file: 'Credential JSON file', fileHint: 'The selected file is streamed locally, then cleared from this form. Its name and contents are not retained.', fileImported: 'Credential file imported. Secret values and file details were not retained in the browser.', visibleColumns: 'Visible credential columns', columns: { account: 'Account', kind: 'Kind', status: 'Status', updated: 'Updated' } },
     proxies: { title: 'Proxies', description: 'Proxy authorization is write-only. Credential-trusted routes require disclosure and an exact confirmation before creation.', addTitle: 'Add a proxy route', listTitle: 'Configured proxy routes', endpointPlaceholder: 'https://proxy.example/…', empty: 'No proxy routes are configured.', add: 'Add proxy', added: 'Proxy route added.', remove: 'Remove', removed: 'Proxy route removed.', removeConfirmation: (id: string) => `remove-proxy:${id}`, removeConfirmationLabel: 'Exact confirmation to remove this proxy route', removeConfirmationHint: 'Enter this value exactly. It removes only the selected proxy route; no authorization or path is shown.', confirmRemove: 'Remove proxy', cancelRemove: 'Cancel removal', enable: 'Enable', enabledNotice: 'Proxy route enabled.', disable: 'Disable', disabledNotice: 'Proxy route disabled.', test: 'Test', tested: 'Proxy check completed.', name: 'Name', endpoint: 'Endpoint', authorization: 'Authorization (write-only)', trust: 'Trust level', publicOnly: 'Public only', credentialTrusted: 'Credential-trusted', publicOnlyExplanation: 'Public-only routes never receive credential-bearing requests.', credentialTrustedExplanation: 'Credential-trusted routes may receive authenticated request credentials only after the disclosure and exact confirmation shown below.', priority: 'Priority', classes: 'Request classes', disclosure: 'Credential disclosure', disclosureRequired: 'This route may receive: ', confirmation: 'Exact confirmation', confirmationHint: 'Copy this value exactly; it applies only to this proposed credential-trusted route.', health: 'Health', probe: 'Probe result', enabled: 'Enabled', disabled: 'Disabled', visibleColumns: 'Visible proxy columns', columns: { name: 'Name', endpoint: 'Endpoint', trust: 'Trust', priority: 'Priority', health: 'Health', state: 'State', actions: 'Actions' } },
@@ -295,7 +311,7 @@ export const en = {
     },
     filters: {
       title: 'Advanced filters', advanced: 'Advanced filters', advancedHint: 'Filter against the same local article query fields used by the API. Apply changes before paging or exporting matching results.', invalid: 'Check the query values: dates must be RFC3339 and minimum values cannot exceed maximum values.',
-      apply: 'Apply filters', reset: 'Reset filters', accountId: 'Account ID', albumId: 'Album ID', author: 'Author', state: 'State', messageTypes: 'Message types (comma-separated)', hasContent: 'Has content', hasComments: 'Has comments', deleted: 'Deleted', original: 'Original article', paid: 'Paid article', any: 'Any', yes: 'Yes', no: 'No',
+      reset: 'Reset filters', accountId: 'Account ID', albumId: 'Album ID', author: 'Author', state: 'State', messageTypes: 'Message types (comma-separated)', hasContent: 'Has content', hasComments: 'Has comments', deleted: 'Deleted', original: 'Original article', paid: 'Paid article', any: 'Any', yes: 'Yes', no: 'No',
       publishedFrom: 'Published from (RFC3339)', publishedTo: 'Published to (RFC3339)', readMin: 'Minimum reads', readMax: 'Maximum reads', oldLikeMin: 'Minimum old likes', oldLikeMax: 'Maximum old likes', shareMin: 'Minimum shares', shareMax: 'Maximum shares', likeMin: 'Minimum likes', likeMax: 'Maximum likes', commentMin: 'Minimum comments', commentMax: 'Maximum comments', weCoinMin: 'Minimum WeCoin', weCoinMax: 'Maximum WeCoin', mediaSecondsMin: 'Minimum media seconds', mediaSecondsMax: 'Maximum media seconds', rangeFrom: 'From', rangeTo: 'To', rangeReads: 'Reads', rangeOldLikes: 'Old likes', rangeLikes: 'Likes', rangeShares: 'Shares', rangeComments: 'Comments', rangeWeCoin: 'WeCoin', rangeMediaSeconds: 'Media seconds'
     },
     ux: {
@@ -381,12 +397,17 @@ export const en = {
     jobs: {
       title: 'Jobs',
       description: 'Inspect shared persistent jobs, refresh their SQLite-backed snapshots, and use the permitted controls with scoped confirmation.',
-      filterTabs: { all: 'All', active: 'Active', done: 'Completed', attention: 'Needs attention', count: (count: number) => `${count}` },
+      filterTabs: { all: 'All', active: 'Active', done: 'Finished', attention: 'Needs attention', count: (count: number) => `${count}` },
       filterToolbarLabel: 'Task filters and display',
       loading: 'Loading local job snapshot…', unavailable: 'The local jobs snapshot API is not available yet.', empty: 'No persistent jobs are recorded.', retry: 'Retry', previous: 'Previous page', next: 'Next page', page: (current: number, total: number) => `Page ${current} of ${total}`, pagination: 'Job pagination', rangeSummary: (start: number, end: number, total: number | undefined) => total === undefined ? `Showing ${start}–${end}` : `Showing ${start}–${end} of ${total}`, updating: 'Updating…', selected: 'selected', selectAll: 'Select all rows on this page', selectRow: (row: string) => `Select ${row}`, visibleColumns: 'Visible job columns',
-      columns: { kind: 'Kind', state: 'State', created: 'Created', updated: 'Updated', counts: 'Progress' },
+      columns: { task: 'Task', kind: 'Kind', state: 'State', created: 'Created', started: 'Started', updated: 'Updated', duration: 'Duration', counts: 'Progress' },
+      filters: { kind: 'Task kind', allKinds: 'All kinds', clearKind: 'Clear task kind filter', appliedFilters: 'Applied filters', clearFilters: 'Clear filters', removeFilter: (label: string) => `Remove ${label}` },
+      progress: { label: (task: string) => `Progress for ${task}`, ratio: (done: number, total: number) => `${done} / ${total}`, ratioText: (done: number, total: number) => `${done} of ${total} items completed`, unknownTotal: (done: number) => `${done} completed`, noItems: 'No items', state: (count: number, label: string) => `${count} ${label.toLocaleLowerCase('en')}` },
+      timing: { notStarted: 'Not started', stillRunning: 'Still running', elapsed: (duration: string) => `${duration} elapsed`, waiting: (duration: string) => `Waiting ${duration}`, queueWait: 'Queue wait', runTime: 'Run time', completedAt: 'Completed' },
+      attention: { blockedTitle: (count: number) => count === 1 ? 'A task needs a WeChat sign-in' : `${count} tasks need a WeChat sign-in`, blockedSignIn: 'Sign in to WeChat', blockedHint: 'Sign in again to continue this task.', failedItems: (count: number) => count === 1 ? '1 item failed' : `${count} items failed`, occurredAt: 'Last seen', errorMessage: 'Reported message' },
+      emptyState: { firstUseTitle: 'No tasks yet', firstUseDescription: 'Tasks appear here once a sync, download, or export is queued.', filteredEmptyTitle: 'Nothing in this view', filteredEmptyDescription: 'No tasks match this filter. Switch to All to see every recorded task.', filteredEmptyAction: 'Show all tasks' },
       actions: { title: 'Task controls', description: 'Pause, resume, retry, or cancel one selected persistent task.', start: 'Start task', pause: 'Pause selected task', resume: 'Resume selected task', retry: 'Retry selected task', cancel: 'Cancel selected task', selectOne: 'Select exactly one task first.', pauseTitle: 'Pause selected task', retryTitle: 'Retry selected task', cancelTitle: 'Cancel selected task', confirmPause: 'Pause this task? Enter the exact proof before this selected task is paused.', confirmRetry: 'Retry this task? Enter the exact proof before this selected task is retried.', confirmCancel: 'Cancel this task? This may interrupt local work; enter the exact proof before it is cancelled.', pauseConfirmation: (id: string) => `pause-job:${id}`, retryConfirmation: (id: string) => `retry-job:${id}`, cancelConfirmationProof: (id: string) => `cancel-job:${id}`, confirmationLabel: 'Exact confirmation for this task action', confirmationHint: 'Enter this value exactly. It authorizes only this selected task action.', cancelConfirmation: 'Keep task running', actionFailed: 'The task action could not be completed.' },
-      detail: { title: 'Task detail', description: 'Bounded local status is re-read after reconnect or refresh. Log fields, payloads, executor identities, and paths are not shown.', refresh: 'Refresh detail', refreshing: 'Refreshing detail…', loading: 'Loading task detail…', unavailable: 'Task detail is unavailable. You can retry safely.', items: 'Items', itemsLimited: (shown: number, total: number) => `Showing ${shown} of ${total} items.`, noItems: 'This task has no recorded items.', logs: 'Recent logs', noLogs: 'No bounded log entries are recorded.', lease: 'Execution lease', leaseActive: 'Active', leaseInactive: 'Inactive', expires: 'Expires', attempts: 'Attempts', errorClass: 'Error class', refreshed: 'Last refreshed', attention: 'Items needing attention', reason: 'Reason', impact: 'Impact', nextAction: 'Next step', retryAction: 'Retry this task to continue the affected work.', refreshAction: 'Refresh this task for the latest local status.', networkReason: 'The local workspace could not reach a required service.', unknownReason: 'This item could not be completed.', itemNotCompleted: 'The affected item was not completed.', technicalDetails: 'Technical details', jobID: 'Job ID', profile: 'Profile', copyID: 'Copy ID', copyValue: 'Copy value' }
+      detail: { title: 'Task detail', description: 'Bounded local status is re-read after reconnect or refresh. Log fields, payloads, executor identities, and paths are not shown.', refresh: 'Refresh detail', refreshing: 'Refreshing detail…', loading: 'Loading task detail…', unavailable: 'Task detail is unavailable. You can retry safely.', items: 'Items', itemsLimited: (shown: number, total: number) => `Showing ${shown} of ${total} items.`, noItems: 'This task has no recorded items.', logs: 'Recent logs', noLogs: 'No bounded log entries are recorded.', lease: 'Execution lease', leaseActive: 'Active', leaseInactive: 'Inactive', expires: 'Expires', attempts: 'Attempts', errorClass: 'Error class', refreshed: 'Last refreshed', attention: 'Items needing attention', reason: 'Reason', impact: 'Impact', nextAction: 'Next step', retryAction: 'Retry this task to continue the affected work.', refreshAction: 'Refresh this task for the latest local status.', signInAction: 'Sign in to WeChat again, then resume this task.', rateLimitAction: 'WeChat temporarily rate-limited this work. Resume or retry the task after about 30 minutes; syncing fewer accounts per batch or using incremental sync lowers the risk.', timeline: 'Timeline', progress: 'Progress', networkReason: 'The local workspace could not reach a required service.', authReason: 'The WeChat session expired or was rejected.', rateLimitReason: 'The remote service throttled this work.', storageReason: 'Local storage could not complete this write.', timeoutReason: 'The work was interrupted before it finished.', deletedReason: 'The upstream content is no longer available.', parsingReason: 'The downloaded content could not be understood.', unknownReason: 'This item could not be completed.', itemNotCompleted: 'The affected item was not completed.', technicalDetails: 'Technical details', jobID: 'Job ID', profile: 'Profile', copyID: 'Copy ID', copyValue: 'Copy value' }
     },
     savedQueries: {
       title: 'Saved queries',

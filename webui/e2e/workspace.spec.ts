@@ -360,7 +360,7 @@ test('account discovery surfaces an explicit error when the session expires mid-
   await page.getByRole('button', { name: 'Complete login' }).click()
   await expect(page.getByText('Authenticated', { exact: true })).toBeVisible()
   // Simulate the session expiring after the drawer opened authenticated.
-  await page.route(/\/api\/v1\/accounts\/search(\?.*)?$/, (route) => route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'authentication_required', message: 'workspace session must be authenticated' } }) }))
+  await page.route(/\/api\/v1\/accounts\/search(\?.*)?$/, (route) => route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'wechat_session_required', message: 'WeChat session must be authenticated' } }) }))
   await page.goto('/accounts')
 
   await page.getByRole('button', { name: 'Add account', exact: true }).click()
@@ -508,7 +508,7 @@ test('advanced article query and export handoff preserve typed local selections'
   await selectRemoteSelectorOption(page, 'Account', 'Fixture Account')
   await page.getByRole('button', { name: 'More filters' }).click()
   await page.getByRole('group', { name: 'Reads' }).getByRole('spinbutton', { name: 'From' }).fill('10')
-  await page.getByRole('button', { name: 'Apply filters' }).click()
+  await expect(page).toHaveURL(/readMin=10/)
   await expect.poll(() => fixture.requests.some((request) => request === 'GET /api/v1/articles')).toBe(true)
   await page.getByRole('button', { name: 'Export current matches' }).click()
   await expect(page.getByRole('heading', { name: 'Export articles' })).toBeVisible()
@@ -532,7 +532,7 @@ test('remote account and album selectors search server pages and keep opaque IDs
   await selectRemoteSelectorOption(page, 'Account', 'Later Fixture Account')
   await page.getByRole('button', { name: 'More filters' }).click()
   await selectRemoteSelectorOption(page, 'Album', 'Later fixture album')
-  await page.getByRole('button', { name: 'Apply filters' }).click()
+  await expect(page).toHaveURL(/albumId=album-beyond-first-page/)
 
   await page.getByRole('button', { name: 'Export current matches' }).click()
   await expect(page.getByRole('status').filter({ hasText: '26 selected articles' })).toBeVisible()
@@ -913,12 +913,13 @@ async function clickButton(page: import('@playwright/test').Page, name: string) 
 
 test('sanitized settings and storage maintenance flows do not reveal secrets', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
-  await page.goto('/settings')
+  await page.goto('/settings?section=download-export')
   await expect(page.getByRole('heading', { name: 'Settings and maintenance' })).toBeVisible()
   await page.getByRole('spinbutton', { name: 'Download concurrency' }).fill('3')
   await page.getByRole('button', { name: 'Save preferences' }).click()
   await expect(page.getByText('Preferences saved.')).toBeVisible()
   expect(fixture.preferencePatches).toHaveLength(1)
+  await page.getByRole('tab', { name: 'Storage Maintenance' }).click()
   await page.getByRole('button', { name: 'Create backup' }).click()
   await expect(page.getByRole('textbox', { name: 'Backup ID' })).toHaveValue('backup-fixture')
   await page.getByRole('button', { name: 'Verify backup' }).click()
@@ -933,7 +934,7 @@ test('sanitized settings and storage maintenance flows do not reveal secrets', a
 
 test('export defaults persist locally without changing sync settings or starting an export', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
-  await page.goto('/settings')
+  await page.goto('/settings?section=download-export')
 
   await selectStaticSelectorOption(page, 'Collision policy', 'Append suffix', 'Replace existing output')
   await page.getByRole('checkbox', { name: 'Excel: include article content' }).uncheck()
@@ -962,7 +963,7 @@ test('export defaults persist locally without changing sync settings or starting
 
 test('credential validation checks write-only values before allowing import', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
-  await page.goto('/settings')
+  await page.goto('/settings?section=credentials')
   await page.getByRole('textbox', { name: 'Business ID (write-only)' }).fill('biz-secret')
   await page.getByRole('textbox', { name: 'UIN (write-only)' }).fill('uin-secret')
   await page.getByRole('textbox', { name: 'Key (write-only)' }).fill('key-secret')
@@ -1009,7 +1010,7 @@ test('profile display language takes precedence when the workspace first loads',
 
 test('settings removal requires localized exact confirmation for credentials and proxies', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
-  await page.goto('/settings')
+  await page.goto('/settings?section=credentials')
 
   await page.getByRole('button', { name: 'Remove' }).first().click()
   const credentialConfirmation = page.getByRole('textbox', { name: 'Exact confirmation to remove this credential' })
@@ -1024,7 +1025,8 @@ test('settings removal requires localized exact confirmation for credentials and
   expect((await credentialRequest).postDataJSON()).toEqual({ id: 'credential-fixture', confirm: 'remove-credential:credential-fixture' })
   await expect.poll(() => fixture.credentialRemovals).toEqual([{ id: 'credential-fixture', confirm: 'remove-credential:credential-fixture' }])
 
-  await page.getByRole('button', { name: 'Remove' }).last().click()
+  await page.getByRole('tab', { name: 'Network/Proxy' }).click()
+  await page.getByRole('button', { name: 'Remove' }).first().click()
   const proxyConfirmation = page.getByRole('textbox', { name: 'Exact confirmation to remove this proxy route' })
   const removeProxy = page.getByRole('button', { name: 'Remove proxy' })
   await expect(removeProxy).toBeDisabled()
@@ -1041,7 +1043,7 @@ test('settings removal requires localized exact confirmation for credentials and
 
 test('sanitized diagnostic bundle creation posts no paths and downloads through an opaque handle', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
-  await page.goto('/settings')
+  await page.goto('/settings?section=diagnostics')
 
   const createRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/maintenance/diagnostic-bundles'))
   await page.getByRole('button', { name: 'Create diagnostic bundle' }).click()
@@ -1059,7 +1061,7 @@ test('sanitized diagnostic bundle creation posts no paths and downloads through 
 
 test('sanitized restore stages one archive, prepares explicit confirmation, and closes the workspace', async ({ page }) => {
   await installLoopbackFixture(page)
-  await page.goto('/settings')
+  await page.goto('/settings?section=storage')
   await expect(page.getByRole('region', { name: 'Restore' }).getByRole('alert')).toContainText('Destructive action')
   await page.getByRole('button', { name: 'Backup archive' }).locator('input[type="file"]').setInputFiles({ name: 'sanitized-backup.wab', mimeType: 'application/octet-stream', buffer: Buffer.from('sanitized restore archive') })
   const uploadRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/v1/maintenance/restore/upload'))
@@ -1117,7 +1119,73 @@ test('an online reconnect invalidates a failed local snapshot and renders evolve
   await expect(page.getByRole('alert')).toContainText('Live local details are unavailable. Check that the local workspace is still running.')
   await page.evaluate(() => window.dispatchEvent(new Event('online')))
   await expect(page.getByText('Recovered Fixture Account')).toBeVisible()
-  await expect(page.getByText('1 accounts · 7 articles · 0 albums · 1 jobs')).toBeVisible()
+  const storageStats = page.locator('.overview-stats > div')
+  await expect(storageStats.filter({ hasText: 'Articles' }).locator('dd')).toHaveText('7')
+  await expect(storageStats.filter({ hasText: 'Jobs' }).locator('dd')).toHaveText('1')
   expect(snapshotRequests).toBeGreaterThanOrEqual(3)
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('task filters query the server and reach cancelled and blocked-auth tasks', async ({ page }) => {
+  await installLoopbackFixture(page)
+  const listRequests: string[] = []
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (url.pathname === '/api/v1/jobs') listRequests.push(url.search)
+  })
+  await page.goto('/jobs')
+  await expect(page.getByRole('table').getByText('Running', { exact: true })).toBeVisible()
+
+  // Needs attention covers blocked_auth as well as failed, so a task waiting on
+  // a sign-in is reachable rather than visible only under All.
+  await page.getByRole('tab', { name: /Needs attention/ }).click()
+  await expect(page.getByRole('table').getByText('Failed', { exact: true })).toBeVisible()
+  await expect(page.getByRole('table').getByText('Authentication required', { exact: true })).toBeVisible()
+  await expect(page.getByRole('table').getByText('Running', { exact: true })).toHaveCount(0)
+  await expect.poll(() => listRequests.some((search) => search.includes('state=failed') && search.includes('state=blocked_auth'))).toBe(true)
+
+  // The range summary reports the server's total for the filter rather than a
+  // count of whichever rows this page happened to receive.
+  await expect(page.getByText('Showing 1–2 of 2')).toBeVisible()
+
+  await page.getByRole('tab', { name: /Finished/ }).click()
+  await expect(page.getByRole('table').getByText('Cancelled', { exact: true })).toBeVisible()
+  await expect.poll(() => listRequests.some((search) => search.includes('state=cancelled'))).toBe(true)
+
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('a blocked-auth task surfaces a sign-in banner and a progress bar reports its ratio', async ({ page }) => {
+  await installLoopbackFixture(page)
+  await page.goto('/jobs')
+
+  const banner = page.getByRole('alert').filter({ hasText: 'needs a WeChat sign-in' })
+  await expect(banner).toBeVisible()
+  await expect(banner.getByRole('link', { name: 'Sign in to WeChat' })).toHaveAttribute('href', '/login')
+
+  const progress = page.getByRole('progressbar', { name: 'Progress for Export' })
+  await expect(progress).toHaveAttribute('aria-valuenow', '50')
+  await expect(progress).toHaveAttribute('aria-valuetext', '1 of 2 items completed')
+  await expect(page.getByRole('table').getByText('1 / 2', { exact: true })).toBeVisible()
+
+  await expectOnlyLoopbackRequests(page)
+})
+
+test('task kind filter narrows the list server-side and echoes as a removable chip', async ({ page }) => {
+  await installLoopbackFixture(page)
+  const listRequests: string[] = []
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (url.pathname === '/api/v1/jobs') listRequests.push(url.search)
+  })
+  await page.goto('/jobs')
+  await expect(page.getByRole('table').getByText('Running', { exact: true })).toBeVisible()
+
+  await selectStaticSelectorOption(page, 'Task kind', 'Account sync')
+  await expect.poll(() => listRequests.some((search) => search.includes('kind=account_sync'))).toBe(true)
+  await expect(page.getByRole('table').getByText('Authentication required', { exact: true })).toBeVisible()
+  await expect(page.getByRole('table').getByText('Running', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Applied filters' })).toContainText('Account sync')
+
   await expectOnlyLoopbackRequests(page)
 })

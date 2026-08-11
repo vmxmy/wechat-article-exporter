@@ -69,7 +69,7 @@ test('article and album export handoffs use SPA navigation and focus the export 
 
 test('keyboard-only exact confirmation gates destructive garbage collection', async ({ page }) => {
   const fixture = await installLoopbackFixture(page)
-  await page.goto('/settings')
+  await page.goto('/settings?section=storage')
 
   await focusWithKeyboard(page, page.getByRole('button', { name: 'Generate GC plan' }))
   await page.keyboard.press('Enter')
@@ -140,15 +140,25 @@ test('390px export and settings tables retain safe mobile identity, status, and 
   await expect(page.getByText('/private/export/root/sanitized-article.md', { exact: true })).toHaveCount(0)
   await expectNoDocumentOverflow(page)
 
-  await page.goto('/settings')
   const mobileTables = page.locator('.presentation-data-table-mobile')
-  await expect(mobileTables).toHaveCount(3)
-  await expect(mobileTables.nth(0)).toContainText('Fixture Account')
-  await expect(mobileTables.nth(1)).toContainText('Sanitized proxy')
-  await expect(mobileTables.nth(2)).toContainText('Local connection')
-  await expect(mobileTables.nth(0).getByRole('button', { name: 'Remove' })).toBeVisible()
-  await expect(mobileTables.nth(1).getByRole('button', { name: 'Disable' })).toBeVisible()
-  await expect(mobileTables.nth(1).getByRole('button', { name: 'Test' })).toBeVisible()
+
+  await page.goto('/settings?section=credentials')
+  await expect(mobileTables).toHaveCount(1)
+  await expect(mobileTables.first()).toContainText('Fixture Account')
+  await expect(mobileTables.first().getByRole('button', { name: 'Remove' })).toBeVisible()
+  await expectNoDocumentOverflow(page)
+  await expectClippedTabStrip(page.getByRole('tablist', { name: 'Settings sections' }))
+
+  await page.goto('/settings?section=network')
+  await expect(mobileTables).toHaveCount(1)
+  await expect(mobileTables.first()).toContainText('Sanitized proxy')
+  await expect(mobileTables.first().getByRole('button', { name: 'Disable' })).toBeVisible()
+  await expect(mobileTables.first().getByRole('button', { name: 'Test' })).toBeVisible()
+  await expectNoDocumentOverflow(page)
+
+  await page.goto('/settings?section=diagnostics')
+  await expect(mobileTables).toHaveCount(1)
+  await expect(mobileTables.first()).toContainText('Local connection')
   await expectNoDocumentOverflow(page)
   await expectOnlyLoopbackRequests(page)
 })
@@ -190,4 +200,9 @@ async function focusWithKeyboard(page: Page, target: Locator) {
 
 async function expectNoDocumentOverflow(page: Page) {
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+}
+
+/** The settings tab strip must absorb its own overflow by scrolling rather than widening the page. */
+async function expectClippedTabStrip(tabList: Locator) {
+  await expect.poll(() => tabList.evaluate((element) => element.clientWidth <= window.innerWidth)).toBe(true)
 }

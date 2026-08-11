@@ -104,14 +104,22 @@ const (
 	JobPaused      JobState = "paused"
 )
 
+// Job is the internal persistent job record. StartedAt and CompletedAt are
+// pointers rather than zero-valued time.Time because encoding/json ignores
+// omitempty on time.Time and would emit "0001-01-01T00:00:00Z" for a job that
+// has not started. StartedAt tracks the current run: Retry clears it, Resume
+// does not.
 type Job struct {
-	ID        JobID          `json:"id"`
-	Kind      string         `json:"kind"`
-	State     JobState       `json:"state"`
-	Profile   ProfileID      `json:"profile"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
-	Counts    map[string]int `json:"counts,omitempty"`
+	ID           JobID          `json:"id"`
+	Kind         string         `json:"kind"`
+	State        JobState       `json:"state"`
+	Profile      ProfileID      `json:"profile"`
+	CreatedAt    time.Time      `json:"createdAt"`
+	StartedAt    *time.Time     `json:"startedAt,omitempty"`
+	CompletedAt  *time.Time     `json:"completedAt,omitempty"`
+	UpdatedAt    time.Time      `json:"updatedAt"`
+	AttemptCount int            `json:"attemptCount"`
+	Counts       map[string]int `json:"counts,omitempty"`
 }
 
 type StorageStatus struct {

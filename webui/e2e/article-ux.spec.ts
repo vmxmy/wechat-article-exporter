@@ -5,18 +5,21 @@ test('article workspace layers readable common and more filters, summary, select
   await installLoopbackFixture(page)
   await page.goto('/articles')
 
+  // The common row keeps only keyword/account/state; the publication range moved
+  // into More filters so the toolbar stays a single line.
   await expect(page.getByRole('textbox', { name: 'Search articles' })).toBeVisible()
   const account = page.getByRole('combobox', { name: 'Account' })
   await expect(account).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'Start of publication range' })).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'End of publication range' })).toBeVisible()
   await expect(page.getByRole('combobox', { name: 'State' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Start of publication range' })).toHaveCount(0)
   await expect(page.getByText('Account ID', { exact: true })).toHaveCount(0)
 
   await account.fill('Fixture Account')
   await page.getByRole('option', { name: 'Fixture Account fixture', exact: true }).click()
 
   await page.getByRole('button', { name: 'More filters' }).click()
+  await expect(page.getByRole('textbox', { name: 'Start of publication range' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'End of publication range' })).toBeVisible()
   const album = page.getByRole('combobox', { name: 'Album' })
   await expect(album).toBeVisible()
   await expect(page.getByRole('combobox', { name: 'Message types' })).toBeVisible()
@@ -25,8 +28,8 @@ test('article workspace layers readable common and more filters, summary, select
   await album.fill('Sanitized album')
   await page.getByRole('option', { name: 'Sanitized album Fixture Account', exact: true }).click()
 
+  // Filters commit themselves once an edit settles; there is no apply button.
   await page.getByRole('textbox', { name: 'Search articles' }).fill('Sanitized')
-  await page.getByRole('button', { name: 'Apply filters' }).click()
   await expect(page.getByRole('region', { name: 'Applied filters' })).toContainText('Search articles: Sanitized')
   await page.getByRole('button', { name: 'Clear all filters' }).click()
   await expect(page.getByRole('region', { name: 'Applied filters' })).toHaveCount(0)
@@ -230,7 +233,6 @@ test('article applied view is canonical, reloadable, shareable, and history-rest
   await expect(page.getByText('Page 2 of 2', { exact: true })).toBeVisible()
 
   await page.getByRole('textbox', { name: 'Search articles' }).fill('Fixture')
-  await page.getByRole('button', { name: 'Apply filters' }).click()
   await expect(page).toHaveURL(/keyword=Fixture/)
   await expect(page).not.toHaveURL(/page=2/)
   await page.goBack()

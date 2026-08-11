@@ -91,6 +91,51 @@ export function formatDate(
   return formatDateTime(value, locale, options)
 }
 
+const relativeThresholds = [
+  { unit: 'second', milliseconds: 1000, limit: 60 },
+  { unit: 'minute', milliseconds: 60_000, limit: 60 },
+  { unit: 'hour', milliseconds: 3_600_000, limit: 24 },
+  { unit: 'day', milliseconds: 86_400_000, limit: 7 },
+  { unit: 'week', milliseconds: 604_800_000, limit: 4.35 },
+  { unit: 'month', milliseconds: 2_629_800_000, limit: 12 },
+  { unit: 'year', milliseconds: 31_557_600_000, limit: Infinity }
+] as const satisfies readonly { unit: Intl.RelativeTimeFormatUnit; milliseconds: number; limit: number }[]
+
+/** `now` is injectable so callers can render against a shared clock tick and
+    tests stay deterministic. */
+export function formatRelativeTime(
+  value: Date | string | number | null | undefined,
+  locale: PresentationLocale,
+  now: number = Date.now()
+): string {
+  const date = toValidDate(value)
+  if (!date) return EMPTY_VALUE
+  const elapsed = date.getTime() - now
+  const magnitude = Math.abs(elapsed)
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
+  for (const threshold of relativeThresholds) {
+    const scaled = magnitude / threshold.milliseconds
+    if (scaled < threshold.limit) {
+      const rounded = Math.round(elapsed / threshold.milliseconds)
+      return formatter.format(rounded, threshold.unit)
+    }
+  }
+  return formatter.format(Math.round(elapsed / 31_557_600_000), 'year')
+}
+
+export interface JobKindOption {
+  readonly value: string
+  readonly label: string
+}
+
+/** The filterable job kinds, ordered by their localized label. */
+export function listJobKinds(locale: PresentationLocale): readonly JobKindOption[] {
+  const collator = new Intl.Collator(locale)
+  return Object.keys(jobKindDefinitions)
+    .map((value) => ({ value, label: formatJobKind(value, locale).label }))
+    .sort((first, second) => collator.compare(first.label, second.label))
+}
+
 export function formatDuration(milliseconds: number | null | undefined, locale: PresentationLocale): string {
   if (milliseconds === null || milliseconds === undefined || !Number.isFinite(milliseconds) || milliseconds < 0) return EMPTY_VALUE
   if (milliseconds === 0) return formatUnit(0, 'millisecond', locale)

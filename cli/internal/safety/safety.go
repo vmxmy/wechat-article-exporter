@@ -49,6 +49,12 @@ func redactValue(value reflect.Value, key string, seen map[visit]bool) any {
 		}
 		return redactValue(value.Elem(), key, seen)
 	}
+	// A nil pointer must be resolved before the json.Marshaler branch below:
+	// a nil *T still satisfies json.Marshaler when T has a value receiver, and
+	// calling MarshalJSON on it dereferences nil.
+	if value.Kind() == reflect.Pointer && value.IsNil() {
+		return nil
+	}
 	if value.CanInterface() {
 		switch typed := value.Interface().(type) {
 		case error:

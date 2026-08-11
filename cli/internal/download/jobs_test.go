@@ -87,12 +87,15 @@ func TestPersistentArticleJobClassifiesDeletedRiskAndProxyFailures(t *testing.T)
 		clientErr error
 		class     jobs.FailureClass
 		attempts  int
+		state     domain.JobState
 	}{
-		{name: "deleted", body: `<html><body>该内容已被作者删除</body></html>`, class: jobs.FailureDeleted, attempts: 1},
-		{name: "risk", body: `<html><body>当前环境异常，请完成验证后继续访问</body></html>`, class: jobs.FailureThrottling, attempts: 2},
+		{name: "deleted", body: `<html><body>该内容已被作者删除</body></html>`, class: jobs.FailureDeleted, attempts: 1, state: domain.JobFailed},
+		// Throttling pauses the whole job on the first hit instead of burning
+		// retries against the same rate-limit window.
+		{name: "risk", body: `<html><body>当前环境异常，请完成验证后继续访问</body></html>`, class: jobs.FailureThrottling, attempts: 1, state: domain.JobPaused},
 		{name: "parse", body: `<html><body><div id="js_article"></div><script>window.cgiDataNew={invalid:</script></body></html>`,
-			class: jobs.FailureParsing, attempts: 1},
-		{name: "proxy", clientErr: errors.New("proxy timeout"), class: jobs.FailureNetwork, attempts: 2},
+			class: jobs.FailureParsing, attempts: 1, state: domain.JobFailed},
+		{name: "proxy", clientErr: errors.New("proxy timeout"), class: jobs.FailureNetwork, attempts: 2, state: domain.JobFailed},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -110,7 +113,7 @@ func TestPersistentArticleJobClassifiesDeletedRiskAndProxyFailures(t *testing.T)
 				t.Fatal(err)
 			}
 			final, err := service.Run(context.Background(), job.ID)
-			if err != nil || final.State != domain.JobFailed {
+			if err != nil || final.State != test.state {
 				t.Fatalf("final=%#v err=%v", final, err)
 			}
 			items, err := store.ListItems(context.Background(), job.ID)

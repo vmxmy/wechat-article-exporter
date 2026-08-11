@@ -1,7 +1,9 @@
 import { Link } from '@/components/controls/Link'
-import { ActionGroup, DefinitionList, PageHeader, PageStack, Panel } from '../../components/presentation'
+import { buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import { ActionGroup, DefinitionList, PageHeader, PageStack, Panel, Status } from '../../components/presentation'
 import type { Locale, MessageCatalog } from '../../i18n'
-import { formatDateTime, formatJobKind } from '../../lib/presentation'
+import { formatCount, formatDateTime, formatJobKind } from '../../lib/presentation'
 import { useWorkspaceSnapshot } from '../../lib/queries'
 
 interface HomeAction {
@@ -16,9 +18,14 @@ export function HomePage({ messages, locale }: { readonly messages: MessageCatal
   const runtime = snapshot.data?.runtime
   const session = snapshot.data?.session
   const storage = snapshot.data?.storage ?? runtime?.storage
-  const failedJobs = countFailedJobs(snapshot.data?.jobs)
-  const action = getHomeAction(messages, session?.state, storage?.accounts, storage?.articles, failedJobs)
+  const action = getHomeAction(messages, session?.state, storage?.accounts, storage?.articles)
   const recentJobs = snapshot.data?.jobs ? takeRecentJobs(snapshot.data.jobs, 4) : []
+  const storageStats = [
+    { label: messages.overview.storageStats.accounts, value: storage?.accounts },
+    { label: messages.overview.storageStats.articles, value: storage?.articles },
+    { label: messages.overview.storageStats.albums, value: storage?.albums },
+    { label: messages.overview.storageStats.jobs, value: storage?.jobs }
+  ]
 
   return (
     <PageStack className="overview" aria-labelledby="overview-title">
@@ -26,30 +33,6 @@ export function HomePage({ messages, locale }: { readonly messages: MessageCatal
 
       {snapshot.isLoading ? <p role="status">{messages.connection.checking}</p> : null}
       {snapshot.isError ? <p role="alert">{messages.overview.unavailable}</p> : null}
-
-      {!snapshot.isLoading && !snapshot.isError && action ? (
-        <Panel className={`overview-primary-action${failedJobs > 0 ? ' overview-primary-action-warning' : ''}`} aria-labelledby="next-action-title">
-          <p className="overview-action-label">{messages.overview.primaryActionTitle}</p>
-          <h2 id="next-action-title">{action.title}</h2>
-          <p>{action.description}</p>
-          <ActionGroup className="overview-action-cluster" align="start" gap="cluster" stackAt="compact">
-            <Link href={action.primary.href} isStandalone hasUnderline>{action.primary.label}</Link>
-            {action.secondary ? <Link href={action.secondary.href} isStandalone>{action.secondary.label}</Link> : null}
-          </ActionGroup>
-        </Panel>
-      ) : null}
-
-      {!snapshot.isLoading && !snapshot.isError ? (
-        <Panel className="overview-quick-entries" tone="muted" aria-labelledby="quick-entries-title">
-          <h2 id="quick-entries-title">{messages.overview.secondaryActionsTitle}</h2>
-          <ActionGroup className="overview-quick-cluster" align="start" gap="cluster" stackAt="compact">
-            <Link href="/articles" isStandalone>{messages.overview.quickEntries.browseArticles}</Link>
-            <Link href="/exports" isStandalone>{messages.overview.quickEntries.startExport}</Link>
-            <Link href="/accounts" isStandalone>{messages.overview.quickEntries.manageAccounts}</Link>
-            <Link href="/jobs" isStandalone>{messages.overview.quickEntries.reviewTasks}</Link>
-          </ActionGroup>
-        </Panel>
-      ) : null}
 
       <div className="overview-grid">
         <section className="overview-fact" aria-labelledby="session-title">
@@ -64,7 +47,14 @@ export function HomePage({ messages, locale }: { readonly messages: MessageCatal
         </section>
         <section className="overview-fact overview-fact-storage" aria-labelledby="storage-title">
           <h2 id="storage-title">{messages.overview.storageTitle}</h2>
-          <p>{storage ? messages.overview.storageCounts(storage.accounts, storage.articles, storage.albums, storage.jobs) : '—'}</p>
+          <dl className="overview-stats">
+            {storageStats.map((stat) => (
+              <div key={stat.label}>
+                <dt>{stat.label}</dt>
+                <dd>{stat.value === undefined ? '—' : formatCount(stat.value, locale)}</dd>
+              </div>
+            ))}
+          </dl>
         </section>
         <section className="overview-fact overview-fact-technical" aria-labelledby="runtime-title">
           <h2 id="runtime-title">{messages.overview.runtimeTitle}</h2>
@@ -78,6 +68,18 @@ export function HomePage({ messages, locale }: { readonly messages: MessageCatal
         </section>
       </div>
 
+      {!snapshot.isLoading && !snapshot.isError && action ? (
+        <Panel className="overview-primary-action" aria-labelledby="next-action-title">
+          <p className="overview-action-label">{messages.overview.primaryActionTitle}</p>
+          <h2 id="next-action-title">{action.title}</h2>
+          <p className="overview-action-description">{action.description}</p>
+          <ActionGroup className="overview-action-cluster" align="start" gap="cluster" stackAt="compact">
+            <Link href={action.primary.href} className={cn(buttonVariants({ variant: 'default' }), 'overview-action-link')}>{action.primary.label}</Link>
+            {action.secondary ? <Link href={action.secondary.href} className={cn(buttonVariants({ variant: 'secondary' }), 'overview-action-link')}>{action.secondary.label}</Link> : null}
+          </ActionGroup>
+        </Panel>
+      ) : null}
+
       {!snapshot.isLoading && !snapshot.isError ? (
         <Panel className="overview-recent-jobs" tone="muted" aria-labelledby="recent-jobs-title">
           <h2 id="recent-jobs-title">{messages.overview.recentJobsTitle}</h2>
@@ -86,7 +88,7 @@ export function HomePage({ messages, locale }: { readonly messages: MessageCatal
               {recentJobs.map((job) => (
                 <li key={job.id}>
                   <span className="overview-recent-job-label">{formatJobKind(job.kind, locale).label}</span>
-                  <span className="overview-recent-job-state">{job.state}</span>
+                  <Status value={job.state} locale={locale} isPulsing={job.state === 'running'} />
                   <span className="overview-recent-job-time">{formatDateTime(job.updatedAt ?? job.createdAt, locale)}</span>
                 </li>
               ))}
@@ -97,11 +99,6 @@ export function HomePage({ messages, locale }: { readonly messages: MessageCatal
       ) : null}
     </PageStack>
   )
-}
-
-function countFailedJobs(jobs: { readonly data?: readonly { readonly state: string }[]; readonly items?: readonly { readonly state: string }[] } | undefined): number {
-  const entries = jobs?.data ?? jobs?.items ?? []
-  return entries.filter((job) => job.state === 'failed').length
 }
 
 interface RecentJob {
@@ -128,13 +125,10 @@ function compareISOTime(left: string | undefined, right: string | undefined): nu
   return leftTime - rightTime
 }
 
-function getHomeAction(messages: MessageCatalog, sessionState?: string, accounts = 0, articles = 0, failedJobs = 0): HomeAction | undefined {
+function getHomeAction(messages: MessageCatalog, sessionState?: string, accounts = 0, articles = 0): HomeAction | undefined {
   const copy = messages.overview.actions
   if (sessionState !== 'authenticated') {
     return { title: copy.signInTitle, description: copy.signInDescription, primary: { href: '/login', label: copy.signIn } }
-  }
-  if (failedJobs > 0) {
-    return { title: copy.failedJobsTitle(failedJobs), description: copy.failedJobsDescription, primary: { href: '/jobs', label: copy.failedJobs } }
   }
   if (accounts === 0) {
     return { title: copy.addAccountTitle, description: copy.addAccountDescription, primary: { href: '/accounts', label: copy.addAccount } }

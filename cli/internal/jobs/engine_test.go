@@ -212,6 +212,45 @@ func TestEngineCancelsSiblingWhenOwnershipChanges(t *testing.T) {
 	}
 }
 
+func TestEngineThrottlingPausesJobInsteadOfRetrying(t *testing.T) {
+	store := newEngineEventStore()
+	store.job.State = domain.JobRunning
+	store.activeOwner = "worker/run"
+	engine, err := NewEngine(store, EngineOptions{
+		Owner: "worker", MaxAttempts: 3, PollInterval: time.Hour, LogTimeout: 20 * time.Millisecond,
+		Backoff:   Backoff{Base: time.Millisecond, Max: 2 * time.Millisecond},
+		Scheduler: NewScheduler(Limits{Global: 1}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := 0
+	cancelled := false
+	runErr := engine.runItem(context.Background(), store.job.ID, store.item, store.activeOwner,
+		func(context.Context, Item, CheckpointFunc) error {
+			attempts++
+			return &ClassifiedError{Class: FailureThrottling, Retryable: true, Err: errors.New("rate limited")}
+		},
+		func() { cancelled = true })
+	var classified *ClassifiedError
+	if !errors.As(runErr, &classified) || classified.Class != FailureThrottling {
+		t.Fatalf("runItem() error = %v, want throttling classification", runErr)
+	}
+	if attempts != 1 {
+		t.Fatalf("execute ran %d times, want 1: throttling must not burn retries", attempts)
+	}
+	if store.pauseCalls.Load() != 1 {
+		t.Fatalf("PauseOwned called %d times, want 1", store.pauseCalls.Load())
+	}
+	if !cancelled {
+		t.Fatal("remaining work was not cancelled after rate limiting")
+	}
+	if got := store.items[0].State; got != domain.JobPaused {
+		t.Fatalf("item state = %s, want %s", got, domain.JobPaused)
+	}
+	assertEventBefore(t, store.eventsSnapshot(), "transition:"+string(domain.JobPaused), "log:job paused after upstream rate limiting")
+}
+
 func newTestEngine(t *testing.T, store *engineEventStore) *Engine {
 	t.Helper()
 	engine, err := NewEngine(store, EngineOptions{

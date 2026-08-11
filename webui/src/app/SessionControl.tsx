@@ -2,17 +2,23 @@ import { DropdownMenu, type DropdownMenuItem } from '@/components/controls/Dropd
 import { useState } from 'react'
 import type { MessageCatalog } from '../i18n'
 import { useSessionStatus, useSwitchableAccounts, useWorkspaceMutations } from '../lib/queries'
+import { useWorkspaceSessionExpired } from '../lib/workspaceSession'
 import { navigateTo } from './navigation'
 
 export function SessionControl({ messages }: { readonly messages: MessageCatalog }) {
   const session = useSessionStatus()
-  const switchableAccounts = useSwitchableAccounts(session.data?.state === 'authenticated')
+  const workspaceExpired = useWorkspaceSessionExpired()
+  const switchableAccounts = useSwitchableAccounts(session.data?.state === 'authenticated' && !workspaceExpired)
   const mutations = useWorkspaceMutations()
   const [notice, setNotice] = useState<string>()
   const [error, setError] = useState<string>()
-  const authenticated = session.data?.state === 'authenticated'
-  const accountLabel = session.data?.accountName?.trim()
-    || (session.data?.accountId ? messages.login.accountUnavailable : messages.login.signedOut)
+  // React Query keeps the last successful payload when a refetch fails, so
+  // without this the badge would keep advertising a WeChat account while the
+  // workspace session behind every request is gone.
+  const authenticated = !workspaceExpired && session.data?.state === 'authenticated'
+  const accountLabel = workspaceExpired
+    ? messages.login.workspaceExpiredBadge
+    : session.data?.accountName?.trim() || (session.data?.accountId ? messages.login.accountUnavailable : messages.login.signedOut)
 
   const switchAccount = (id: string, name: string) => {
     mutations.switchAccount.mutate(id, {

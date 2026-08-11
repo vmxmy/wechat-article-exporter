@@ -275,6 +275,7 @@ func (server *Server) handler() http.Handler {
 			server.error(writer, http.StatusMisdirectedRequest)
 			return
 		}
+		server.renewSession(writer, request)
 		if strings.HasPrefix(request.URL.Path, "/api/") && request.URL.Path != "/api/v1/status" {
 			if request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodPatch || request.Method == http.MethodDelete {
 				if request.URL.Path != "/api/v1/maintenance/restore/upload" && request.URL.Path != "/api/v1/accounts/manifest/upload" && request.URL.Path != "/api/v1/settings/credentials/upload" && !server.validMutationShape(request) {
@@ -453,6 +454,29 @@ func (server *Server) newSession() (string, string, error) {
 
 func (server *Server) authorize(request *http.Request) (session, bool) {
 	return server.authorizeCookie(request)
+}
+
+// renewSession slides the idle timeout of a live browser session. Without it a
+// workspace that is open and in use still dies at sessionTTL, and because the
+// bootstrap credential is one-time the tab cannot recover — every later request
+// fails as if the WeChat login had expired. Renewal is deliberately lazy: it
+// only rewrites the cookies once less than half the lifetime remains.
+func (server *Server) renewSession(writer http.ResponseWriter, request *http.Request) {
+	cookie, err := request.Cookie(sessionCookieName)
+	if err != nil || cookie.Value == "" {
+		return
+	}
+	now := server.now()
+	server.mu.Lock()
+	value, ok := server.sessions[cookie.Value]
+	if !ok || server.closed || !now.Before(value.expiresAt) || now.Add(server.sessionTTL/2).Before(value.expiresAt) {
+		server.mu.Unlock()
+		return
+	}
+	value.expiresAt = now.Add(server.sessionTTL)
+	server.sessions[cookie.Value] = value
+	server.mu.Unlock()
+	server.setSessionCookies(writer, cookie.Value, value.csrf)
 }
 
 func (server *Server) authorizeCookie(request *http.Request) (session, bool) {

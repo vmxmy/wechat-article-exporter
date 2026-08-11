@@ -1225,3 +1225,209 @@ func itemsByKey(items []JobItem) map[string]JobItem {
 	}
 	return byKey
 }
+
+func TestJobStoreRecordsRunTimestampsAndAttemptCount(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	created := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return created }
+	ctx := context.Background()
+	job, err := store.CreateWithItems(ctx, jobs.Spec{Kind: "download", IdempotencyKey: "timestamps"}, []string{"only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.StartedAt != nil || job.CompletedAt != nil || job.AttemptCount != 0 {
+		t.Fatalf("queued job = %#v", job)
+	}
+
+	startedTime := created.Add(time.Minute)
+	store.now = func() time.Time { return startedTime }
+	started, err := store.StartJob(ctx, job.ID, "worker-a", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.StartedAt == nil || !started.StartedAt.Equal(startedTime) || started.CompletedAt != nil || started.AttemptCount != 1 {
+		t.Fatalf("started job = %#v", started)
+	}
+
+	failedTime := startedTime.Add(time.Minute)
+	store.now = func() time.Time { return failedTime }
+	items, err := store.ListItems(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimItem(ctx, job.ID, items[0].ID, "worker-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.TransitionItem(ctx, job.ID, claimed.ID, "worker-a", domain.JobRunning, domain.JobFailed,
+		nil, jobs.FailureNetwork, "upstream refused the connection"); err != nil {
+		t.Fatal(err)
+	}
+	finalized, err := store.FinalizeJob(ctx, job.ID, "worker-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalized.State != domain.JobFailed || finalized.CompletedAt == nil || !finalized.CompletedAt.Equal(failedTime) {
+		t.Fatalf("finalized job = %#v", finalized)
+	}
+
+	// A retry is a new run: started_at is cleared so the next StartJob restamps
+	// it, and the attempt counter keeps climbing.
+	retriedTime := failedTime.Add(time.Minute)
+	store.now = func() time.Time { return retriedTime }
+	retried, err := store.Retry(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.StartedAt != nil || retried.CompletedAt != nil || retried.AttemptCount != 1 {
+		t.Fatalf("retried job = %#v", retried)
+	}
+	restartedTime := retriedTime.Add(time.Minute)
+	store.now = func() time.Time { return restartedTime }
+	restarted, err := store.StartJob(ctx, job.ID, "worker-a", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restarted.StartedAt == nil || !restarted.StartedAt.Equal(restartedTime) || restarted.AttemptCount != 2 {
+		t.Fatalf("restarted job = %#v", restarted)
+	}
+
+	page, err := store.Query(ctx, domain.JobQuery{})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("Query() = %#v, %v", page, err)
+	}
+	if listed := page.Items[0]; listed.StartedAt == nil || !listed.StartedAt.Equal(restartedTime) || listed.AttemptCount != 2 {
+		t.Fatalf("queried job = %#v", listed)
+	}
+}
+
+func TestJobStoreResumeKeepsStartedAtForTheSameRun(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	now := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	ctx := context.Background()
+	job, err := store.CreateWithItems(ctx, jobs.Spec{Kind: "download", IdempotencyKey: "resume"}, []string{"only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedTime := now.Add(time.Minute)
+	store.now = func() time.Time { return startedTime }
+	if _, err := store.StartJob(ctx, job.ID, "worker-a", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	store.now = func() time.Time { return startedTime.Add(time.Minute) }
+	if _, err := store.Pause(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := store.Resume(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.StartedAt == nil || !resumed.StartedAt.Equal(startedTime) {
+		t.Fatalf("resume must preserve the current run start: %#v", resumed)
+	}
+}
+
+func TestJobStoreErrorSummariesReportTheMostRecentUnresolvedFailure(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	ctx := context.Background()
+	job, err := store.CreateWithItems(ctx, jobs.Spec{Kind: "download", IdempotencyKey: "summaries"}, []string{"a", "b", "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthy, err := store.CreateWithItems(ctx, jobs.Spec{Kind: "download", IdempotencyKey: "healthy"}, []string{"a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StartJob(ctx, job.ID, "worker-a", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.ListItems(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byKey := make(map[string]jobs.Item, len(created))
+	for _, item := range created {
+		byKey[item.Key] = item
+	}
+	fail := func(key string, class jobs.FailureClass, message string, at time.Time) {
+		t.Helper()
+		store.now = func() time.Time { return at }
+		claimed, claimErr := store.ClaimItem(ctx, job.ID, byKey[key].ID, "worker-a")
+		if claimErr != nil {
+			t.Fatal(claimErr)
+		}
+		if _, err := store.TransitionItem(ctx, job.ID, claimed.ID, "worker-a", domain.JobRunning, domain.JobFailed,
+			nil, class, message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fail("a", jobs.FailureNetwork, "first failure", now.Add(time.Minute))
+	fail("b", jobs.FailureStorage, "second failure", now.Add(2*time.Minute))
+	claimed, err := store.ClaimItem(ctx, job.ID, byKey["c"].ID, "worker-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.TransitionItem(ctx, job.ID, claimed.ID, "worker-a", domain.JobRunning, domain.JobCompleted, nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.FinalizeJob(ctx, job.ID, "worker-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	summaries, err := store.ErrorSummaries(ctx, []domain.JobID{job.ID, healthy.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := summaries[healthy.ID]; ok {
+		t.Fatalf("a job without failures must be absent: %#v", summaries)
+	}
+	summary, ok := summaries[job.ID]
+	if !ok {
+		t.Fatalf("missing summary: %#v", summaries)
+	}
+	if summary.ErrorClass != jobs.FailureStorage || summary.ErrorMessage != "second failure" {
+		t.Fatalf("summary must report the most recent failure: %#v", summary)
+	}
+	if summary.ItemCount != 2 || !summary.OccurredAt.Equal(now.Add(2*time.Minute)) {
+		t.Fatalf("summary = %#v", summary)
+	}
+
+	// Retry requeues failed items and clears their failure, so the summary
+	// disappears rather than lingering as a stale banner.
+	store.now = func() time.Time { return now.Add(3 * time.Minute) }
+	if _, err := store.Retry(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	summaries, err = store.ErrorSummaries(ctx, []domain.JobID{job.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 0 {
+		t.Fatalf("retry must clear the summary: %#v", summaries)
+	}
+}
+
+func TestJobStoreErrorSummariesAreProfileScopedAndAcceptNoIDs(t *testing.T) {
+	database := openTestDatabase(t, "profile-a")
+	store := NewJobStore(database)
+	ctx := context.Background()
+	summaries, err := store.ErrorSummaries(ctx, nil)
+	if err != nil || summaries == nil || len(summaries) != 0 {
+		t.Fatalf("ErrorSummaries(nil) = %#v, %v", summaries, err)
+	}
+	other := NewJobStore(openTestDatabase(t, "profile-b"))
+	job, err := other.CreateWithItems(ctx, jobs.Spec{Kind: "download", IdempotencyKey: "other"}, []string{"a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summaries, err = store.ErrorSummaries(ctx, []domain.JobID{job.ID})
+	if err != nil || len(summaries) != 0 {
+		t.Fatalf("ErrorSummaries(other profile) = %#v, %v", summaries, err)
+	}
+}

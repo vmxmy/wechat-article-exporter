@@ -59,5 +59,7 @@ mcp-server/.ralph-prd.json
 # Local agent and generated media workspaces
 .baoyu-skills/
 .codex/
+.codex-worktrees/
+.pi-subagents/
 cover-image/
 output/

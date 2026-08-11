@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/jobs"
@@ -21,12 +22,19 @@ const (
 	workspaceJobDetailMaximumLogs  = 50
 	workspaceJobDetailLogBytes     = 16 << 10
 	workspaceJobDetailEntryBytes   = 2 << 10
+	// workspaceJobErrorSummaryBytes bounds one summary message so a large
+	// upstream error cannot bloat every row of a 100-job snapshot poll.
+	workspaceJobErrorSummaryBytes = 512
 )
 
 // WorkspaceJobDetail is the browser-safe inspection model for one persistent
 // job. It deliberately excludes opaque payloads, item keys/checkpoints,
 // executor owner strings, raw failures, and log fields: each can contain a
 // filesystem path or a credential-bearing upstream value.
+//
+// The one deliberate exception is WorkspaceJob.ErrorSummary, which carries a
+// closed failure class plus a message that has passed through
+// workspaceSafeLogMessage and workspaceJobErrorSummaryBytes truncation.
 type WorkspaceJobDetail struct {
 	Job          WorkspaceJob             `json:"job"`
 	Items        []WorkspaceJobItemDetail `json:"items"`
@@ -71,6 +79,26 @@ type workspaceJobDetailStore interface {
 	ListItems(context.Context, domain.JobID) ([]jobs.Item, error)
 	ListLogsBounded(context.Context, domain.JobID, library.JobLogBudget) ([]library.JobLog, error)
 	Lease(context.Context, domain.JobID) (library.JobLease, error)
+}
+
+// WorkspaceJobErrorSummaryProvider is an optional application capability, kept
+// separate from WorkspaceJobDetailProvider so narrow test doubles and non-local
+// adapters that do not implement it still serve job details. An absent
+// capability yields jobs without an error summary rather than an error.
+type WorkspaceJobErrorSummaryProvider interface {
+	JobErrorSummaries(context.Context, []domain.JobID) (map[domain.JobID]library.JobErrorSummary, error)
+}
+
+type workspaceJobErrorSummaryStore interface {
+	ErrorSummaries(context.Context, []domain.JobID) (map[domain.JobID]library.JobErrorSummary, error)
+}
+
+func (service *Service) JobErrorSummaries(ctx context.Context, ids []domain.JobID) (map[domain.JobID]library.JobErrorSummary, error) {
+	store, ok := service.jobs.(workspaceJobErrorSummaryStore)
+	if !ok || len(ids) == 0 {
+		return nil, nil
+	}
+	return store.ErrorSummaries(ctx, ids)
 }
 
 func (workspace *Workspace) JobDetails(ctx context.Context, id domain.JobID) (WorkspaceJobDetail, error) {
@@ -122,7 +150,15 @@ func (service *Service) JobDetails(ctx context.Context, id domain.JobID) (Worksp
 	if limited {
 		items = items[:WorkspaceJobDetailMaximumItems]
 	}
-	result := WorkspaceJobDetail{Job: WorkspaceJob{ID: job.ID, Kind: job.Kind, Label: workspaceJobLabel(job.Kind), State: job.State, Profile: job.Profile, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Counts: job.Counts, PermittedActions: service.PermittedJobActions(job.State)}, Items: make([]WorkspaceJobItemDetail, 0, len(items)), ItemsTotal: itemsTotal, ItemsLimited: limited,
+	summaries, err := service.JobErrorSummaries(ctx, []domain.JobID{id})
+	if err != nil {
+		return WorkspaceJobDetail{}, fmt.Errorf("read job error summary: %w", err)
+	}
+	var summary *WorkspaceJobErrorSummary
+	if stored, ok := summaries[id]; ok {
+		summary = workspaceJobErrorSummary(stored)
+	}
+	result := WorkspaceJobDetail{Job: newWorkspaceJob(job, service.PermittedJobActions(job.State), summary), Items: make([]WorkspaceJobItemDetail, 0, len(items)), ItemsTotal: itemsTotal, ItemsLimited: limited,
 		Logs: make([]WorkspaceJobLogDetail, 0, len(logs)), Lease: WorkspaceJobLeaseDetail{Active: lease.Active, ExpiresAt: lease.ExpiresAt}, RefreshedAt: service.runtime.Clock.Now()}
 	for _, item := range items {
 		result.Items = append(result.Items, WorkspaceJobItemDetail{ID: item.ID, State: item.State, AttemptCount: item.AttemptCount,
@@ -133,6 +169,32 @@ func (service *Service) JobDetails(ctx context.Context, id domain.JobID) (Worksp
 			Message: workspaceSafeLogMessage(entry.Message), CreatedAt: entry.CreatedAt})
 	}
 	return result, nil
+}
+
+// workspaceJobErrorSummary is the only path a stored failure message may take
+// to a browser. Truncation happens after redaction so it cannot split a
+// redaction match and leak half a credential.
+func workspaceJobErrorSummary(summary library.JobErrorSummary) *WorkspaceJobErrorSummary {
+	if strings.TrimSpace(string(summary.ErrorClass)) == "" {
+		return nil
+	}
+	return &WorkspaceJobErrorSummary{
+		ErrorClass: string(summary.ErrorClass),
+		Message:    truncateRunes(workspaceSafeLogMessage(summary.ErrorMessage), workspaceJobErrorSummaryBytes),
+		ItemCount:  summary.ItemCount,
+		OccurredAt: summary.OccurredAt,
+	}
+}
+
+func truncateRunes(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	truncated := value[:limit]
+	for len(truncated) > 0 && !utf8.ValidString(truncated) {
+		truncated = truncated[:len(truncated)-1]
+	}
+	return strings.TrimSpace(truncated) + "…"
 }
 
 var (

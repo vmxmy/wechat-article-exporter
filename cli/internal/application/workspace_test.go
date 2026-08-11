@@ -162,12 +162,13 @@ func (*workspaceLibrary) DeleteSavedArticleQuery(context.Context, string) (bool,
 }
 
 type workspaceJobManager struct {
-	page  domain.Page[domain.Job]
-	query domain.JobQuery
-	job   domain.Job
-	items []jobs.Item
-	logs  []library.JobLog
-	lease library.JobLease
+	page      domain.Page[domain.Job]
+	query     domain.JobQuery
+	job       domain.Job
+	items     []jobs.Item
+	logs      []library.JobLog
+	lease     library.JobLease
+	summaries map[domain.JobID]library.JobErrorSummary
 }
 
 func (*workspaceJobManager) Create(context.Context, jobs.Spec) (domain.Job, error) {
@@ -191,6 +192,15 @@ func (manager *workspaceJobManager) ListLogsBounded(context.Context, domain.JobI
 }
 func (manager *workspaceJobManager) Lease(context.Context, domain.JobID) (library.JobLease, error) {
 	return manager.lease, nil
+}
+func (manager *workspaceJobManager) ErrorSummaries(_ context.Context, ids []domain.JobID) (map[domain.JobID]library.JobErrorSummary, error) {
+	result := make(map[domain.JobID]library.JobErrorSummary, len(ids))
+	for _, id := range ids {
+		if summary, ok := manager.summaries[id]; ok {
+			result[id] = summary
+		}
+	}
+	return result, nil
 }
 
 func TestWorkspaceReadFacadeUsesApplicationAndReturnsSafeDTOs(t *testing.T) {
@@ -652,6 +662,8 @@ func TestWorkspaceJobDetailsAreBoundedAndDoNotExposeSensitiveInternals(t *testin
 		job: domain.Job{ID: "job-1", Kind: "download", State: domain.JobRunning}, items: items,
 		logs:  []library.JobLog{{ID: 1, ItemID: "item-a", Level: "error", Message: "failed at /private/profile with token=secret", Fields: map[string]any{"path": "/private/profile", "token": "secret"}, CreatedAt: now}},
 		lease: library.JobLease{Owner: "executor-secret", Active: true, ExpiresAt: now.Add(time.Minute)},
+		summaries: map[domain.JobID]library.JobErrorSummary{"job-1": {ErrorClass: jobs.FailureNetwork,
+			ErrorMessage: "download failed at /private/profile/out.html with token=secret", ItemCount: 2, OccurredAt: now}},
 	}
 	workspace := NewWorkspace(New(Options{Jobs: manager, Runtime: runtimeenv.Dependencies{Clock: fixedClock{value: now}}}))
 
@@ -664,6 +676,13 @@ func TestWorkspaceJobDetailsAreBoundedAndDoNotExposeSensitiveInternals(t *testin
 	}
 	if detail.Items[0].ID == "" || detail.Items[0].ErrorClass != string(jobs.FailureNetwork) {
 		t.Fatalf("item detail = %#v", detail.Items[0])
+	}
+	summary := detail.Job.ErrorSummary
+	if summary == nil || summary.ErrorClass != string(jobs.FailureNetwork) || summary.ItemCount != 2 || summary.OccurredAt != now {
+		t.Fatalf("job error summary = %#v", summary)
+	}
+	if !strings.Contains(summary.Message, "[PATH REDACTED]") || !strings.Contains(summary.Message, "token=[REDACTED]") {
+		t.Fatalf("job error summary message was not redacted: %q", summary.Message)
 	}
 	encoded := string(mustJSON(t, detail))
 	for _, forbidden := range []string{"/private", "secret", "executor-secret", "checkpoint", "item_key", "fields"} {

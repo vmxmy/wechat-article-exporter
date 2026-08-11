@@ -2,8 +2,8 @@ import { Banner } from '@/components/controls/Banner'
 import { Button } from '@/components/controls/Button'
 import { CheckboxInput } from '@/components/controls/CheckboxInput'
 import { FileInput } from '@/components/controls/FileInput'
-import { Link } from '@/components/controls/Link'
 import { NumberInput } from '@/components/controls/NumberInput'
+import { TabNavigation, TabPanel } from '@/components/controls/TabNavigation'
 import { Selector } from '@/components/controls/Selector'
 import { Section } from '@/components/controls/Section'
 import { TextInput } from '@/components/controls/TextInput'
@@ -13,15 +13,33 @@ import { ActionGroup, FieldHint, FormGrid, FormGridFullSpan, MobileResourceRow, 
 import { isLocale, messages as localeMessages, persistLocale, type Locale, type MessageCatalog } from '../../i18n'
 import { formatBytes, formatCount, formatDateTime, formatHash, formatStatus } from '../../lib/presentation'
 import { getBackupArtifactDownloadURL, getDiagnosticBundleDownloadURL, getProxyDisclosure, type BackupReceipt, type CredentialImportInput, type CredentialValidation, type DiagnosticBundleReceipt, type GarbageCollectionPlan, type Preferences, type ProxyInput, type ProxyRequestClass, type ProxyTrust, type RestoreCompletion, type RestoreConflictPolicy, type RestorePreparation } from '../../lib/api'
+import { navigationEvent } from '../../app/navigation'
+import { parseSettingsBrowserView, serializeSettingsBrowserView, type SettingsSection } from '../../lib/browserViewState'
 import { isPreferencesDirty, navigationGuard, reconcileLoadedPreferences, reconcileSavedPreferences } from '../../lib/navigationGuard'
 import { useCredentials, useDiagnostics, useIntegrity, usePreferences, useProxies, useWorkspaceMutations } from '../../lib/queries'
 import './settings.css'
 
 const proxyClasses: readonly ProxyRequestClass[] = ['public_content', 'public_resource', 'management_session', 'article_credential', 'engagement_metrics', 'comments', 'paid_content']
 
-const settingsSectionIDs = ['settings-general', 'settings-download-export', 'settings-credentials', 'settings-network', 'settings-storage', 'settings-diagnostics', 'settings-danger'] as const
+const settingsTabs = [
+  { slug: 'general', id: 'settings-general', labelKey: 'general' },
+  { slug: 'download-export', id: 'settings-download-export', labelKey: 'downloadExport' },
+  { slug: 'credentials', id: 'settings-credentials', labelKey: 'credentials' },
+  { slug: 'network', id: 'settings-network', labelKey: 'network' },
+  { slug: 'storage', id: 'settings-storage', labelKey: 'storage' },
+  { slug: 'diagnostics', id: 'settings-diagnostics', labelKey: 'diagnostics' }
+] as const satisfies readonly { readonly slug: SettingsSection; readonly id: string; readonly labelKey: keyof MessageCatalog['settings']['navigation'] }[]
 
-type SettingsSectionID = typeof settingsSectionIDs[number]
+type SettingsSectionID = typeof settingsTabs[number]['id'] | 'settings-danger'
+
+/**
+ * Writes the section directly to history rather than through `replaceLocation`, whose navigation
+ * event remounts the page subtree and would discard the unsaved preferences draft. Replacing keeps
+ * one `/settings` entry, so switching tabs never reaches the unsaved-changes guard.
+ */
+function replaceSettingsURL(search: string) {
+  window.history.replaceState(window.history.state, '', `${window.location.pathname}${search}${window.location.hash}`)
+}
 
 export function SettingsPage({ locale, messages }: { readonly locale: Locale; readonly messages: MessageCatalog }) {
   const copy = messages.settings
@@ -39,6 +57,35 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
   const [confirmation, setConfirmation] = useState('')
   const [diagnosticBundle, setDiagnosticBundle] = useState<DiagnosticBundleReceipt>()
   const [diagnosticBundleError, setDiagnosticBundleError] = useState<string>()
+  const [settingsPath] = useState(() => window.location.pathname)
+  const [initialView] = useState(() => parseSettingsBrowserView(window.location.search))
+  const [section, setSection] = useState<SettingsSection>(initialView.state.section)
+
+  useEffect(() => {
+    if (initialView.needsReplace) replaceSettingsURL(initialView.canonicalSearch)
+  }, [initialView])
+
+  useEffect(() => {
+    const restoreFromLocation = () => {
+      if (window.location.pathname !== settingsPath) return
+      const parsed = parseSettingsBrowserView(window.location.search)
+      setSection(parsed.state.section)
+      if (parsed.needsReplace) replaceSettingsURL(parsed.canonicalSearch)
+    }
+    window.addEventListener('popstate', restoreFromLocation)
+    window.addEventListener(navigationEvent, restoreFromLocation)
+    return () => {
+      window.removeEventListener('popstate', restoreFromLocation)
+      window.removeEventListener(navigationEvent, restoreFromLocation)
+    }
+  }, [settingsPath])
+
+  const changeSection = (next: string) => {
+    const target = settingsTabs.find((tab) => tab.slug === next)?.slug
+    if (!target) return
+    setSection(target)
+    replaceSettingsURL(serializeSettingsBrowserView({ section: target }, window.location.search))
+  }
 
   const error = [credentials, proxies, preferences, integrity, diagnostics].find((query) => query.isError)
   const refreshing = () => {
@@ -69,19 +116,22 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
 
   return (
     <PageStack className="settings-page" aria-labelledby="settings-title">
-      <PageHeader eyebrow={messages.navigation.operations} title={copy.title} titleId="settings-title" description={copy.description} />
+      <PreferencesDraftProvider value={preferences.data} pending={mutations.patchPreferences.isPending} onSave={savePreferences}>
+      <PageHeader eyebrow={messages.navigation.operations} title={copy.title} titleId="settings-title" description={copy.description} actions={<SavePreferencesAction label={copy.preferences.save} />} />
       {error ? <Banner status="error" title={copy.unavailable} endContent={<Button label={copy.retry} variant="secondary" onClick={refreshing} />} /> : null}
       {notice ? <Banner status={notice.kind} title={notice.message} isDismissable onDismiss={() => setNotice(undefined)} /> : null}
-      <PreferencesDraftProvider value={preferences.data} pending={mutations.patchPreferences.isPending} onSave={savePreferences}>
-      <div className="settings-layout">
-        <SettingsNavigation messages={messages} />
-        <div className="settings-content">
+      <TabNavigation className="settings-tabs" label={copy.navigation.label} value={section} onChange={changeSection} items={settingsTabs.map((tab) => ({ value: tab.slug, label: copy.navigation[tab.labelKey] }))}>
+        <TabPanel value="general">
           <SettingsSection id="settings-general" title={copy.navigation.general} description={copy.preferences.description}>
             <GeneralPreferencesPanel locale={locale} messages={messages} value={preferences.data} loading={preferences.isLoading} />
           </SettingsSection>
+        </TabPanel>
+        <TabPanel value="download-export">
           <SettingsSection id="settings-download-export" title={copy.navigation.downloadExport} description={copy.preferences.exportDefaultsHint}>
             <DownloadExportDefaultsPanel locale={locale} messages={messages} value={preferences.data} loading={preferences.isLoading} />
           </SettingsSection>
+        </TabPanel>
+        <TabPanel value="credentials">
           <SettingsSection id="settings-credentials" title={copy.credentials.title} description={copy.credentials.description}>
             <CredentialsPanel locale={locale} messages={messages} data={credentials.data} loading={credentials.isLoading} pending={mutations.importCredential.isPending || mutations.uploadCredentialFile.isPending || mutations.removeCredential.isPending} validationPending={mutations.validateCredential.isPending} onValidate={async (input) => {
               try {
@@ -96,10 +146,14 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
               }
             }} onImport={(input) => mutations.importCredential.mutate(input, { onSuccess: () => notifySuccess(copy.credentials.imported), onError: failure })} onUpload={(file) => mutations.uploadCredentialFile.mutate(file, { onSuccess: () => notifySuccess(copy.credentials.fileImported), onError: failure })} onRemove={(id, removalConfirmation) => mutations.removeCredential.mutate({ id, confirmation: removalConfirmation }, { onSuccess: () => notifySuccess(copy.credentials.removed), onError: failure })} />
           </SettingsSection>
+        </TabPanel>
+        <TabPanel value="network">
           <SettingsSection id="settings-network" title={copy.navigation.network} description={copy.proxies.description}>
             <NetworkPreferencesPanel locale={locale} messages={messages} value={preferences.data} loading={preferences.isLoading} />
             <ProxiesPanel locale={locale} messages={messages} data={proxies.data} loading={proxies.isLoading} pending={mutations.addProxy.isPending || mutations.removeProxy.isPending} onAdd={(input) => mutations.addProxy.mutate(input, { onSuccess: () => notifySuccess(copy.proxies.added), onError: failure })} onRemove={(id, removalConfirmation) => mutations.removeProxy.mutate({ id, confirmation: removalConfirmation }, { onSuccess: () => notifySuccess(copy.proxies.removed), onError: failure })} onToggle={(id, enabled) => mutations.setProxyEnabled.mutate({ id, enabled }, { onSuccess: () => notifySuccess(enabled ? copy.proxies.enabledNotice : copy.proxies.disabledNotice), onError: failure })} onTest={(id) => mutations.testProxy.mutate(id, { onSuccess: () => notifySuccess(copy.proxies.tested), onError: failure })} probe={mutations.testProxy.data} />
           </SettingsSection>
+        </TabPanel>
+        <TabPanel value="storage">
           <SettingsSection id="settings-storage" title={copy.navigation.storage} description={copy.storage.description}>
             <StorageMaintenancePanel locale={locale} messages={messages} backup={backup} backupID={backupID} backupDownloadURL={backupDownloadURL} plan={plan} confirmation={confirmation} mutations={mutations} integrity={integrity.data} integrityLoading={integrity.isLoading} onBackupIDChange={(next) => { setBackupID(next); setBackupDownloadURL(undefined) }} onCreateBackup={() => mutations.createBackup.mutate(undefined, {
               onSuccess: (result) => {
@@ -129,6 +183,8 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
               }
             })} onFailure={failure} />
           </SettingsSection>
+        </TabPanel>
+        <TabPanel value="diagnostics">
           <SettingsSection id="settings-diagnostics" title={copy.diagnostics.title} description={copy.diagnostics.description}>
             <DiagnosticsPanel locale={locale} messages={messages} loading={diagnostics.isLoading} report={diagnostics.data} bundle={diagnosticBundle} bundleError={diagnosticBundleError} pending={mutations.createDiagnosticBundle.isPending} onCreateBundle={() => {
               setDiagnosticBundleError(undefined)
@@ -145,57 +201,21 @@ export function SettingsPage({ locale, messages }: { readonly locale: Locale; re
               })
             }} />
           </SettingsSection>
-        </div>
-      </div>
+        </TabPanel>
+      </TabNavigation>
       </PreferencesDraftProvider>
     </PageStack>
   )
 }
 
-function SettingsNavigation({ messages }: { readonly messages: MessageCatalog }) {
-  const [activeID, setActiveID] = useState<SettingsSectionID>('settings-general')
+function SavePreferencesAction({ label }: { readonly label: string }) {
   const preferences = useContext(PreferencesDraftContext)
-  const sections = [
-    { id: 'settings-general', label: messages.settings.navigation.general },
-    { id: 'settings-download-export', label: messages.settings.navigation.downloadExport },
-    { id: 'settings-credentials', label: messages.settings.navigation.credentials },
-    { id: 'settings-network', label: messages.settings.navigation.network },
-    { id: 'settings-storage', label: messages.settings.navigation.storage },
-    { id: 'settings-diagnostics', label: messages.settings.navigation.diagnostics },
-    { id: 'settings-danger', label: messages.settings.navigation.danger }
-  ] as const
-
-  useEffect(() => {
-    const sectionElements = settingsSectionIDs.map((id) => document.getElementById(id)).filter((section): section is HTMLElement => section !== null)
-    if (!sectionElements.length || !('IntersectionObserver' in window)) return
-    const observer = new IntersectionObserver((entries) => {
-      const current = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0]
-      if (current) setActiveID(current.target.id as SettingsSectionID)
-    }, { rootMargin: '-12% 0px -68% 0px', threshold: [0.1, 0.4, 0.75] })
-    sectionElements.forEach((section) => observer.observe(section))
-    return () => observer.disconnect()
-  }, [])
-
-  return (
-    <nav className="settings-secondary-nav" aria-label={messages.settings.navigation.label}>
-      <p className="settings-secondary-nav-label">{messages.settings.navigation.label}</p>
-      <ul>
-        {sections.map((section) => (
-          <li key={section.id}>
-            <Link href={`#${section.id}`} isStandalone className="settings-secondary-nav-link" aria-current={activeID === section.id ? 'location' : undefined} onClick={() => setActiveID(section.id)}>{section.label}</Link>
-          </li>
-        ))}
-      </ul>
-      <Button label={messages.settings.preferences.save} variant="primary" isLoading={preferences?.pending} isDisabled={!preferences || preferences.pending} onClick={() => preferences?.save()} />
-    </nav>
-  )
+  return <Button label={label} variant="primary" isLoading={preferences?.pending} isDisabled={!preferences || preferences.pending} onClick={() => preferences?.save()} />
 }
 
 function SettingsSection({ id, title, description, children }: { readonly id: SettingsSectionID; readonly title: string; readonly description: string; readonly children: ReactNode }) {
   return (
-    <Section id={id} className="settings-section" variant="transparent" dividers={['bottom']} padding={0} aria-labelledby={`${id}-title`}>
+    <Section id={id} className="settings-section" variant="transparent" padding={0} aria-labelledby={`${id}-title`}>
       <SectionHeader className="settings-section-header" title={title} titleId={`${id}-title`} description={description} />
       <div className="settings-section-body">{children}</div>
     </Section>
@@ -213,20 +233,20 @@ type PreferencesDraftContextValue = {
 
 const PreferencesDraftContext = createContext<PreferencesDraftContextValue | undefined>(undefined)
 
+/**
+ * Stays mounted while preferences load so the surrounding page header is never torn down, which
+ * would discard the focus the workspace moves to the page title after navigation.
+ */
 function PreferencesDraftProvider({ value, pending, onSave, children }: { readonly value?: Preferences; readonly pending: boolean; readonly onSave: (value: Preferences) => Promise<Preferences>; readonly children: ReactNode }) {
-  return value
-    ? <PreferencesDraftEditor value={value} pending={pending} onSave={onSave}>{children}</PreferencesDraftEditor>
-    : <>{children}</>
-}
-
-function PreferencesDraftEditor({ value, pending, onSave, children }: { readonly value: Preferences; readonly pending: boolean; readonly onSave: (value: Preferences) => Promise<Preferences>; readonly children: ReactNode }) {
-  const [preferences, setPreferences] = useState({ draft: value, baseline: value })
-  const dirty = isPreferencesDirty(preferences.draft, preferences.baseline)
+  const [preferences, setPreferences] = useState<{ readonly draft: Preferences; readonly baseline: Preferences }>()
+  const loaded = useMemo(() => preferences ?? (value ? { draft: value, baseline: value } : undefined), [preferences, value])
+  const dirty = loaded ? isPreferencesDirty(loaded.draft, loaded.baseline) : false
 
   useEffect(() => {
+    if (!value) return
     let cancelled = false
     queueMicrotask(() => {
-      if (!cancelled) setPreferences((current) => reconcileLoadedPreferences(current.draft, current.baseline, value))
+      if (!cancelled) setPreferences((current) => current ? reconcileLoadedPreferences(current.draft, current.baseline, value) : { draft: value, baseline: value })
     })
     return () => { cancelled = true }
   }, [value])
@@ -245,18 +265,21 @@ function PreferencesDraftEditor({ value, pending, onSave, children }: { readonly
     }
   }, [dirty])
 
-  const context = useMemo<PreferencesDraftContextValue>(() => ({
-    draft: preferences.draft,
+  const context = useMemo<PreferencesDraftContextValue | undefined>(() => loaded ? ({
+    draft: loaded.draft,
     pending,
-    update: (patch) => setPreferences((current) => ({ ...current, draft: { ...current.draft, ...patch } })),
+    update: (patch) => setPreferences((current) => {
+      const base = current ?? loaded
+      return { ...base, draft: { ...base.draft, ...patch } }
+    }),
     save: () => {
       if (pending) return
-      const submitted = preferences.draft
+      const submitted = loaded.draft
       void onSave(submitted).then((saved) => {
-        setPreferences((current) => reconcileSavedPreferences(current.draft, submitted, saved))
+        setPreferences((current) => reconcileSavedPreferences((current ?? loaded).draft, submitted, saved))
       }).catch(() => undefined)
     }
-  }), [onSave, pending, preferences.draft])
+  }) : undefined, [loaded, onSave, pending])
   return <PreferencesDraftContext.Provider value={context}>{children}</PreferencesDraftContext.Provider>
 }
 

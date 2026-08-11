@@ -314,6 +314,26 @@ func (engine *Engine) runItem(
 			cancelRun()
 			return blockErr
 		}
+		// Rate limiting is a session-wide condition: retrying this item or moving
+		// on to the next one hits the same upstream window, so the whole job
+		// pauses immediately and stays resumable once the window passes.
+		if class == FailureThrottling {
+			_, transitionErr := engine.store.TransitionItem(context.Background(), jobID, item.ID, executionOwner,
+				domain.JobRunning, domain.JobPaused, nil, class, safety.RedactError(runErr).Error())
+			if transitionErr != nil && !errors.Is(transitionErr, ErrStateChanged) {
+				return transitionErr
+			}
+			if transitionErr == nil {
+				engine.log(context.Background(), jobID, item.ID, "warning", "job paused after upstream rate limiting", map[string]any{
+					"attempt": attempt.Number, "duration": time.Since(startedAt).String(), "failureClass": class,
+				})
+			}
+			if _, pauseErr := engine.pauseIfOwner(context.Background(), jobID, executionOwner); pauseErr != nil && !errors.Is(pauseErr, ErrStateChanged) {
+				return pauseErr
+			}
+			cancelRun()
+			return runErr
+		}
 		if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
 			current, getErr := engine.store.Get(context.Background(), jobID)
 			if getErr == nil && current.State != domain.JobRunning {

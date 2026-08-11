@@ -92,7 +92,9 @@ export function Selector({
           onValueChange={(nextValue) => onChange(typeof nextValue === 'string' ? nextValue : null)}
         >
           <SelectTrigger ref={triggerRef} id={id} aria-labelledby={triggerLabelId} aria-describedby={descriptionId} aria-label={isLabelHidden ? label : undefined} className="w-full">
-            <SelectValue placeholder={placeholder}>{(selected: string) => options.find((option) => option.value === selected)?.label ?? selected}</SelectValue>
+            {/* Base UI skips its own placeholder branch whenever children is a function,
+                so an empty selection has to resolve the placeholder here. */}
+            <SelectValue placeholder={placeholder}>{(selected: string | null) => selected === null ? placeholder : options.find((option) => option.value === selected)?.label ?? selected}</SelectValue>
             {isLoading ? <Icons.spinner className="size-4 animate-spin" aria-hidden="true" /> : null}
           </SelectTrigger>
           <SelectContent>

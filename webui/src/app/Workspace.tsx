@@ -15,6 +15,7 @@ import { Icons } from '@/components/icons'
 import { Component, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { type Locale, type MessageCatalog, useMessages } from '../i18n'
 import { useRuntimeStatus } from '../lib/queries'
+import { useWorkspaceSessionExpired } from '../lib/workspaceSession'
 import { navigationGuard } from '../lib/navigationGuard'
 import { HomePage } from '../features/home/HomePage'
 import { SessionControl } from './SessionControl'
@@ -252,6 +253,7 @@ export function Workspace({ locale, onLocaleChange }: WorkspaceProps) {
           </div>
         </header>
         <div className="workspace-content">
+          <WorkspaceSessionNotice messages={messages} />
           <PageErrorBoundary key={path} messages={messages}>
             <Suspense fallback={<PageLoading messages={messages} />}>
               <PageFocus key={navigationID} shouldFocus={navigationID > 0}>
@@ -327,6 +329,21 @@ function useDocumentTitle(path: string, route: ReturnType<typeof matchRoute>, me
     }
     document.title = messages.documentTitle.page(messages.navigation[route.titleKey])
   }, [path, route, messages])
+}
+
+// The workspace cookie is minted once from a one-time bootstrap URL, so an
+// expired one cannot be recovered from inside the page. Say so explicitly:
+// otherwise every request fails with an authentication error and the only
+// visible session state is the WeChat one, which is not the broken one.
+function WorkspaceSessionNotice({ messages }: { readonly messages: MessageCatalog }) {
+  const isExpired = useWorkspaceSessionExpired()
+  if (!isExpired) return null
+  return (
+    <div className="workspace-session-notice" role="alert">
+      <strong>{messages.login.workspaceExpiredTitle}</strong>
+      <p>{messages.login.workspaceExpiredDescription}</p>
+    </div>
+  )
 }
 
 function PageLoading({ messages }: { readonly messages: MessageCatalog }) {

@@ -1,12 +1,11 @@
 import { Button } from '@/components/controls/Button'
 import { Selector } from '@/components/controls/Selector'
-import { TextInput } from '@/components/controls/TextInput'
-import { AccountRemoteSelector, ActiveFilterSummary, EmptyState, FieldHint, FormGrid, InlineNotice, PageHeader, PageStack, Panel, SectionHeader, SelectionActionBar, Status, TypedConfirmationDialog } from '../../components/presentation'
+import { ActiveFilterSummary, EmptyState, FieldHint, InlineNotice, PageHeader, PageStack, SelectionActionBar, Status, TypedConfirmationDialog } from '../../components/presentation'
 import { useDebounce } from '../../hooks/use-debounce'
 import { useMemo, useRef, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Locale, MessageCatalog } from '../../i18n'
-import { ApiError, resolveAccountFromArticle, resolveAccountName, saveExportHandoff, type AccountRecord, type AccountSyncMode, type AlbumTraversalOrder } from '../../lib/api'
+import { isWeChatAuthError, resolveAccountFromArticle, resolveAccountName, saveExportHandoff, type AccountRecord, type AccountSyncMode, type AlbumTraversalOrder } from '../../lib/api'
 import { getAccountManifestDownloadURL } from '../../lib/api'
 import { useAccountPage, useAccountSearch, useAlbumPage, useSessionStatus, useWorkspaceMutations } from '../../lib/queries'
 import { usePagedBrowserView } from '../../lib/usePagedBrowserView'
@@ -17,6 +16,7 @@ import { AccountAddDrawer } from './accounts/AccountAddDrawer'
 import { AccountTableToolbar } from './accounts/AccountTableToolbar'
 import type { AccountDraft, AccountEntryMode } from './accounts/accountEntryTypes'
 import { AlbumSelectionDetails, type AlbumRecordWithAccountName } from './albums/AlbumSelectionDetails'
+import { AlbumTableToolbar } from './albums/AlbumTableToolbar'
 export { JobsPage } from './jobs/JobsPage'
 export { SavedQueriesPage } from './saved-queries/SavedQueriesPage'
 
@@ -89,7 +89,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
     setDiscoveryError(undefined)
     const result = await discovery.refetch()
     if (result.status === 'error') {
-      setDiscoveryError(result.error instanceof ApiError && result.error.status === 401 ? actions.discoveryFailedAuth : actions.discoveryFailedGeneric)
+      setDiscoveryError(isWeChatAuthError(result.error) ? actions.discoveryFailedAuth : actions.discoveryFailedGeneric)
     }
   }
   const resolveFromArticle = async () => {
@@ -108,7 +108,7 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
         setResolvedName(name)
       }
     } catch (error) {
-      setResolveError(error instanceof ApiError && error.status === 401 ? actions.discoveryFailedAuth : actions.articleLinkFailed)
+      setResolveError(isWeChatAuthError(error) ? actions.discoveryFailedAuth : actions.articleLinkFailed)
     } finally {
       setResolving(false)
     }
@@ -184,10 +184,6 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
   return (
     <PageStack as="div">
       <PageHeader eyebrow={messages.navigation.library} title={messages.resources.accounts.title} titleId="accounts-title" description={messages.resources.accounts.description} />
-      <Panel aria-labelledby="account-filters-title">
-        <SectionHeader title={messages.resources.accounts.filters.title} titleId="account-filters-title" description={messages.resources.accounts.filters.description} />
-        <FormGrid direction="horizontal" minChildWidth={12}><TextInput label={messages.resources.accounts.filters.keyword} value={listSearch} onChange={changeListSearch} /></FormGrid>
-      </Panel>
       <ActiveFilterSummary
         label={messages.resources.accounts.filters.appliedFilters}
         clearLabel={messages.resources.accounts.filters.clearFilters}
@@ -206,6 +202,9 @@ export function AccountsPage({ messages, locale }: { readonly messages: MessageC
         tableToolbar={<AccountTableToolbar
           actions={actions}
           toolbarLabel={actions.toolbarLabel}
+          searchLabel={messages.resources.accounts.filters.keyword}
+          search={listSearch}
+          onSearchChange={changeListSearch}
           isManifestImporting={mutations.uploadAccountManifest.isPending || mutations.importAccountManifest.isPending}
           onAdd={openNewEntry}
           onImport={importManifest}
@@ -300,17 +299,13 @@ export function AlbumsPage({ messages, locale }: { readonly messages: MessageCat
   const isAlbumEmpty = !query.isLoading && !query.isError && (query.data?.data.length ?? 0) === 0
   return <PageStack as="div">
     <PageHeader eyebrow={messages.navigation.library} title={messages.resources.albums.title} titleId="albums-title" description={messages.resources.albums.description} />
-    <Panel aria-labelledby="album-filters-title">
-      <SectionHeader title={messages.resources.albums.filters.title} titleId="album-filters-title" description={messages.resources.albums.filters.description} />
-      <FormGrid direction="horizontal" minChildWidth={12}><AccountRemoteSelector label={messages.resources.accounts.columns.name} value={accountId} onChange={changeAccount} placeholder={messages.articles.filters.any} copy={messages.selectors} /><TextInput label={messages.resources.albums.filters.keyword} value={keyword} onChange={changeKeyword} /></FormGrid>
-    </Panel>
     <ActiveFilterSummary
       label={messages.resources.albums.filters.appliedFilters}
       clearLabel={messages.resources.albums.filters.clearFilters}
       onClear={clearAlbumFilters}
       filters={albumFilterParts.map((part) => ({ id: part.id, label: part.label, removeLabel: messages.resources.albums.filters.removeFilter(part.label), onRemove: () => removeAlbumFilter(part.id) }))}
     />
-    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={(ids) => { setSelected(ids); setNotice(undefined) }} preserveSelectionAcrossPages maximumSelectedIDs={maximumSelectedAlbumIDs} onSelectionLimited={(limit, current) => setNotice(messages.resources.albums.actions.selectionLimit(limit, current))} selectionScope={selectionScope} hideHeader emptyState={isAlbumEmpty ? (isAlbumFiltered ? <EmptyState title={messages.resources.albums.emptyState.filteredEmptyTitle} description={messages.resources.albums.emptyState.filteredEmptyDescription} headingLevel={3} actions={<Button label={messages.resources.albums.emptyState.filteredEmptyAction} variant="secondary" onClick={clearAlbumFilters} />} /> : <EmptyState title={messages.resources.albums.emptyState.firstUseTitle} description={messages.resources.albums.emptyState.firstUseDescription} headingLevel={3} actions={<Button label={messages.resources.albums.emptyState.firstUseAction} variant="primary" onClick={() => navigateTo('/accounts')} />} />) : undefined} />
+    <ResourceTable eyebrow={messages.navigation.library} messages={messages.resources.albums} columns={columns} query={query} pageIndex={pageIndex} onPageChange={setPageIndex} onSelectionChange={(ids) => { setSelected(ids); setNotice(undefined) }} tableToolbar={<AlbumTableToolbar messages={messages} accountID={accountId} onAccountChange={changeAccount} keyword={keyword} onKeywordChange={changeKeyword} />} preserveSelectionAcrossPages maximumSelectedIDs={maximumSelectedAlbumIDs} onSelectionLimited={(limit, current) => setNotice(messages.resources.albums.actions.selectionLimit(limit, current))} selectionScope={selectionScope} hideHeader emptyState={isAlbumEmpty ? (isAlbumFiltered ? <EmptyState title={messages.resources.albums.emptyState.filteredEmptyTitle} description={messages.resources.albums.emptyState.filteredEmptyDescription} headingLevel={3} actions={<Button label={messages.resources.albums.emptyState.filteredEmptyAction} variant="secondary" onClick={clearAlbumFilters} />} /> : <EmptyState title={messages.resources.albums.emptyState.firstUseTitle} description={messages.resources.albums.emptyState.firstUseDescription} headingLevel={3} actions={<Button label={messages.resources.albums.emptyState.firstUseAction} variant="primary" onClick={() => navigateTo('/accounts')} />} />) : undefined} />
     <SelectionActionBar selectedCount={selected.length} countLabel={(count) => messages.resources.albums.actions.selectedCountWithLimit(count, maximumSelectedAlbumIDs)} toolbarLabel={messages.resources.albums.actions.title} actions={<><Selector label={messages.resources.albums.actions.order} options={[{ value: 'forward', label: messages.resources.albums.actions.forward }, { value: 'reverse', label: messages.resources.albums.actions.reverse }]} value={order} onChange={(next) => setOrder(next as AlbumTraversalOrder)} /><Button label={messages.resources.albums.actions.traverse} variant="secondary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(false)} /><Button label={messages.resources.albums.actions.download} variant="primary" isLoading={mutations.traverseAlbum.isPending || mutations.traverseAlbums.isPending} onClick={() => traverse(true)} /><Button label={messages.resources.albums.actions.export} variant="secondary" onClick={handoffExport} /></>} />
     <AlbumSelectionDetails album={album} messages={messages} />
     <InlineNotice tone="status">{notice}</InlineNotice>

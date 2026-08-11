@@ -7,7 +7,7 @@ import { Toolbar } from '@/components/controls/Toolbar'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type RowSelectionState, type SortingState, type Updater, type VisibilityState } from '@tanstack/react-table'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { navigateTo, navigationEvent } from '../../app/navigation'
-import { ActionGroup, ActiveFilterSummary, DenseRegion, DetailPanel, EmptyState, InlineNotice, MobileResourceRow, PageHeader, PageStack, Panel, ResponsiveDataTable, SectionHeader, SectionStack, SelectionActionBar, Status, TechnicalDetails } from '../../components/presentation'
+import { ActionGroup, ActiveFilterSummary, DenseRegion, DetailPanel, EmptyState, InlineNotice, MobileResourceRow, PageHeader, PageStack, ResponsiveDataTable, SectionHeader, SectionStack, SelectionActionBar, Status, TechnicalDetails } from '../../components/presentation'
 import type { Locale, MessageCatalog } from '../../i18n'
 import { getArticlePreview, parseArticleQuery, saveArticleQueryHandoff, saveExportHandoff, type ArticleQuery, type ArticleRecord, type ArticleSort } from '../../lib/api'
 import { createExportWorkflowID, parseArticleBrowserView, serializeArticleBrowserView, type ArticleBrowserView } from '../../lib/browserViewState'
@@ -24,6 +24,7 @@ interface ArticleTableProps {
 
 const pageSize = 25
 const maximumSelectedArticleIDs = 250
+const filterCommitDelay = 300
 
 function sortingStateFor(sort: ArticleSort): SortingState[number] {
   return { id: sort.field, desc: sort.direction === 'desc' }
@@ -47,6 +48,8 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   // setState updater, which must stay pure and free of setNotice side effects.
   const rowSelectionRef = useRef(rowSelection)
   rowSelectionRef.current = rowSelection
+  const filterCommitTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => cancelTimer(filterCommitTimer), [])
   const [articlePresentationByID, setArticlePresentationByID] = useState<ReadonlyMap<string, ArticleRecord>>(new Map())
   const [detailArticleID, setDetailArticleID] = useState<string>()
   const [notice, setNotice] = useState<string>()
@@ -65,6 +68,7 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
   }), [accountSelectors.data?.data, albumSelectors.data?.data, selectedSelectorNames])
 
   function restoreBrowserView(view: ArticleBrowserView, options: { readonly clearEphemeralState?: boolean } = {}) {
+    cancelTimer(filterCommitTimer)
     setFilters(view.query)
     setQuery(view.query)
     setSorting([sortingStateFor(view.sort)])
@@ -111,13 +115,19 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
     })
   }, [articlePage.data?.data])
 
-  const applyFilters = () => {
-    try {
-      const next = parseArticleQuery(filters)
-      commitBrowserView({ query: next, sort: activeSort, page: 1 })
-    } catch {
-      setNotice(messages.articles.filters.invalid)
-    }
+  // Filters apply themselves: an edit settles for filterCommitDelay before it becomes the
+  // committed query, so typing a keyword produces one request and one history entry.
+  const changeFilters = (next: ArticleQuery) => {
+    setFilters(next)
+    cancelTimer(filterCommitTimer)
+    filterCommitTimer.current = window.setTimeout(() => {
+      filterCommitTimer.current = undefined
+      try {
+        commitBrowserView({ query: parseArticleQuery(next), sort: activeSort, page: 1 })
+      } catch {
+        setNotice(messages.articles.filters.invalid)
+      }
+    }, filterCommitDelay)
   }
   const clearFilters = () => {
     commitBrowserView({ query: {}, sort: activeSort, page: 1 })
@@ -250,8 +260,8 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
       <PageHeader eyebrow={messages.navigation.library} title={messages.articles.title} titleId="articles-title" description={messages.articles.description} />
 
       <SectionStack as="section" gap="cluster" aria-label={messages.articles.filters.title}>
-        <Panel className="article-filters">
-          <ArticleFilterEditor locale={locale} messages={messages} value={filters} onChange={setFilters} selectedAccountLabel={filters.accountId ? articleQueryNames.accounts.get(filters.accountId) : undefined} selectedAlbumLabel={filters.albumId ? articleQueryNames.albums.get(filters.albumId) : undefined} onAccountOptionChange={(option) => {
+        <Toolbar className="article-query-toolbar" label={copy.savedViewsToolbar} stackAt="medium">
+          <ArticleFilterEditor layout="inline" locale={locale} messages={messages} value={filters} onChange={changeFilters} selectedAccountLabel={filters.accountId ? articleQueryNames.accounts.get(filters.accountId) : undefined} selectedAlbumLabel={filters.albumId ? articleQueryNames.albums.get(filters.albumId) : undefined} onAccountOptionChange={(option) => {
             const name = option?.displayName?.trim()
             if (!option) return
             if (name) setSelectedSelectorNames((current) => ({ accounts: new Map(current.accounts).set(option.id, name), albums: current.albums }))
@@ -259,23 +269,10 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
             const name = option?.displayName?.trim()
             if (!option) return
             if (name) setSelectedSelectorNames((current) => ({ accounts: current.accounts, albums: new Map(current.albums).set(option.id, name) }))
-          }} />
-          <ActionGroup align="start">
-            <Button label={messages.articles.filters.apply} variant="primary" onClick={applyFilters} />
-            <Button label={messages.articles.filters.reset} variant="secondary" onClick={clearFilters} />
-            <Button label={copy.saveView} variant="secondary" onClick={saveCurrentQuery} />
-          </ActionGroup>
-        </Panel>
-
-        <ActiveFilterSummary
-          label={copy.appliedFilters}
-          clearLabel={copy.clearFilters}
-          onClear={clearFilters}
-          filters={activeFilterParts.map((part) => ({ id: part.id, label: part.label, removeLabel: copy.removeFilter(part.label), onRemove: () => removeFilter(part.id) }))}
-        />
-
-        <DenseRegion>
-          <Toolbar className="article-query-toolbar" label={copy.savedViewsToolbar} stackAt="medium">
+          }} actions={<>
+            <Button label={messages.articles.filters.reset} variant="secondary" size="sm" onClick={clearFilters} />
+            <Button label={copy.saveView} variant="secondary" size="sm" onClick={saveCurrentQuery} />
+          </>} />
           <SavedQuerySelector locale={locale} messages={messages} names={articleQueryNames} value={selectedSavedQueryName} onChange={(name, savedQuery) => {
             setSelectedSavedQueryName(name)
             if (!savedQuery) return
@@ -285,8 +282,16 @@ export function ArticleTable({ locale, messages }: ArticleTableProps) {
             setSelectedSavedQueryName(name)
           }} />
           <span className="selection-count" aria-live="polite">{selectedCount > 0 ? copy.selectedCount(selectedCount) : ''}</span>
-          </Toolbar>
+        </Toolbar>
 
+        <ActiveFilterSummary
+          label={copy.appliedFilters}
+          clearLabel={copy.clearFilters}
+          onClear={clearFilters}
+          filters={activeFilterParts.map((part) => ({ id: part.id, label: part.label, removeLabel: copy.removeFilter(part.label), onRemove: () => removeFilter(part.id) }))}
+        />
+
+        <DenseRegion>
           {articlePage.isLoading ? <p role="status">{messages.articles.loading}</p> : null}
           {articlePage.isError ? <div className="error-state" role="alert"><p>{messages.articles.unavailable}</p><Button label={messages.articles.retry} variant="secondary" onClick={() => void articlePage.refetch()} /></div> : null}
           {!articlePage.isLoading && !articlePage.isError ? <>
@@ -383,6 +388,7 @@ function SavedQuerySelector({ locale, messages, names, value, onChange }: { read
     placeholder={copy.savedViewsPlaceholder}
     copy={messages.selectors}
     hasClear
+    isLabelHidden
     isLoading={savedQueries.isLoading}
     layout="inline"
     size="lg"
@@ -508,6 +514,12 @@ function ResourceSummary({ summary, messages }: { readonly summary: ReturnType<t
   if (summary.isError) return <p role="status">{messages.articles.actions.resourcesUnavailable}</p>
   if (!summary.data) return null
   return <section className="article-detail-section" aria-label={messages.articles.actions.resourcesSummaryTitle}><SectionHeader level={3} title={messages.articles.actions.resourcesSummaryTitle} description={messages.articles.actions.resourcesSummary(summary.data.total, summary.data.available, summary.data.missing)} />{summary.data.complete ? <p>{messages.articles.actions.resourcesComplete}</p> : null}</section>
+}
+
+function cancelTimer(timer: { current: number | undefined }) {
+  if (timer.current === undefined) return
+  window.clearTimeout(timer.current)
+  timer.current = undefined
 }
 
 function selectedArticleIDs(selection: RowSelectionState): RowSelectionState {

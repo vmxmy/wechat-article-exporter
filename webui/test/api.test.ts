@@ -19,6 +19,7 @@ import {
   getArticleCommentReplies,
   getDiagnosticBundleDownloadURL,
   getExportArtifactDownloadURL,
+  getJobPage,
   getRuntimeStatus,
   logout,
   consumeExportHandoff,
@@ -306,6 +307,32 @@ describe('browser API client', () => {
       },
       body: JSON.stringify({ name: 'draft / query', confirm: 'user-query-proof' })
     })
+  })
+
+  it('sends repeated state filters and a kind filter on the job page query', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      apiVersion: 'v1',
+      data: [{ id: 'job-1', kind: 'export', label: 'Export', state: 'failed', createdAt: 'now', updatedAt: 'now', permittedActions: [] }],
+      pagination: { page: 2, pageSize: 25, total: 1 }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await getJobPage({ page: 2, pageSize: 25, kind: ' export ', states: ['failed', 'blocked_auth'] })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/jobs?offset=25&limit=25&kind=export&state=failed&state=blocked_auth', expect.any(Object))
+  })
+
+  // /api/v1/jobs enforces a strict parameter allowlist and answers 400 for any
+  // unknown parameter, so the builder must be structurally unable to emit the
+  // keyword/sort params the generic page helper supports.
+  it('never emits keyword or sort on the job page query', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ apiVersion: 'v1', data: [], pagination: { page: 1, pageSize: 25, total: 0 } })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await getJobPage({ page: 1, pageSize: 25 })
+    await getJobPage({ page: 1, pageSize: 25, kind: '   ', states: ['', '  '] })
+    for (const call of fetchMock.mock.calls) {
+      expect(String(call[0])).toBe('/api/v1/jobs?offset=0&limit=25')
+    }
   })
 
   it('sends caller-supplied job proofs while leaving resume confirmation-free', async () => {

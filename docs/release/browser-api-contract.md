@@ -119,7 +119,8 @@ route can currently return, confirmed by direct route inspection:
 
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
-| `authentication_required` | 401 | No valid local browser session. |
+| `authentication_required` | 401 | No valid local browser session. The browser must be re-opened from a fresh bootstrap URL; signing in to WeChat again does not help. |
+| `wechat_session_required` | 401 | The local browser session is valid, but WeChat rejected the upstream request (expired or refused WeChat session). |
 | `forbidden` | 403 | Session valid but mutation CSRF/Origin protection failed, or the operation is not permitted in the current state. |
 | `invalid_argument` | 400 | Malformed, unsupported, out-of-range, or self-contradictory request input (query, JSON body, or path segment). |
 | `not_found` | 404 | The referenced resource (article, job, export, path segment) does not exist or is not addressable via this route shape. |

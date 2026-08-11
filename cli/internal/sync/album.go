@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
-	"github.com/wechat-article/wechat-article-exporter/cli/internal/jobs"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
@@ -88,8 +87,8 @@ func (runner *AlbumRunner) Run(
 			BeginMessageID: checkpoint.BeginMessageID, BeginItemIndex: checkpoint.BeginItemIndex, Limit: request.PageSize,
 		})
 		if err != nil {
-			if errors.Is(err, wechat.ErrDiscoveryAuthentication) {
-				return result, &jobs.ClassifiedError{Class: jobs.FailureAuthentication, Err: err}
+			if classified := classifyDiscoveryError(err); classified != nil {
+				return result, classified
 			}
 			return result, err
 		}

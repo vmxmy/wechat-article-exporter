@@ -28,6 +28,7 @@ import {
   type AlbumTraversalOrder,
   type ArticleDownloadKind,
   type ArticlePageParams,
+  type JobPageParams,
   type PageParams,
   type SelectorPageParams,
   type RestoreConflictPolicy
@@ -50,7 +51,8 @@ export const queryKeys = {
   articleCommentReplies: (articleID: string, commentID: string, page: number, pageSize: number) => ['articles', articleID, 'comments', commentID, 'replies', page, pageSize] as const,
   albums: (params: AlbumPageParams) => ['albums', params] as const,
   albumSelectors: (params: AlbumSelectorPageParams) => ['selectors', 'albums', params] as const,
-  jobs: (params: PageParams) => ['jobs', params] as const,
+  jobs: (params: JobPageParams) => ['jobs', params] as const,
+  jobCounts: (kind: string | undefined, filter: string) => ['jobs', 'counts', kind ?? '', filter] as const,
   jobDetail: (id: string) => ['jobs', id, 'detail'] as const,
   exports: (params: PageParams) => ['exports', params] as const,
   exportManifest: (id: string) => ['exports', id, 'manifest'] as const,
@@ -63,17 +65,22 @@ export const queryKeys = {
 }
 
 const snapshotPolling = { refetchInterval: 5_000, refetchIntervalInBackground: false } as const
+// Every session poll revalidates against WeChat upstream, so a 5s cadence both
+// wastes upstream budget and invites rate limiting. Poll slowly instead, and
+// refetch on focus so returning to a backgrounded tab does not act on a session
+// state observed before the tab was hidden.
+const sessionPolling = { refetchInterval: 30_000, refetchIntervalInBackground: false, refetchOnWindowFocus: true } as const
 
 export function useRuntimeStatus() {
   return useQuery({ queryKey: queryKeys.runtime, queryFn: ({ signal }) => getRuntimeStatus(signal), ...snapshotPolling })
 }
 
 export function useSessionStatus() {
-  return useQuery({ queryKey: queryKeys.session, queryFn: ({ signal }) => getSessionStatus(signal), ...snapshotPolling })
+  return useQuery({ queryKey: queryKeys.session, queryFn: ({ signal }) => getSessionStatus(signal), ...sessionPolling })
 }
 
 export function useSwitchableAccounts(enabled: boolean) {
-  return useQuery({ queryKey: queryKeys.switchableAccounts, queryFn: ({ signal }) => getSwitchableAccounts(signal), enabled, ...snapshotPolling })
+  return useQuery({ queryKey: queryKeys.switchableAccounts, queryFn: ({ signal }) => getSwitchableAccounts(signal), enabled, ...sessionPolling })
 }
 
 export function useStorageStatus() {
@@ -138,7 +145,7 @@ export function useAlbumSelectorPage(params: AlbumSelectorPageParams) {
   return usePageQuery(queryKeys.albumSelectors(params), ({ signal }) => getAlbumSelectorPage(params, signal))
 }
 
-export function useJobPage(params: PageParams) {
+export function useJobPage(params: JobPageParams) {
   return usePageQuery(queryKeys.jobs(params), ({ signal }) => getJobPage(params, signal), snapshotPolling)
 }
 

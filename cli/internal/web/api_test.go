@@ -241,6 +241,58 @@ func TestJobDetailAPIUsesSafeBoundedWorkspaceDTO(t *testing.T) {
 	assertAPIError(t, response, "invalid_argument")
 }
 
+// TestJobListAPIExposesExactlyTheSafeJobFields pins the browser-facing job
+// projection so widening it stays a conscious act rather than a side effect of
+// widening domain.Job.
+func TestJobListAPIExposesExactlyTheSafeJobFields(t *testing.T) {
+	const jobID = "11111111-1111-1111-1111-111111111111"
+	started := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	completed := started.Add(time.Minute)
+	app := &apiApplication{jobs: domain.Page[domain.Job]{Items: []domain.Job{{ID: jobID, Kind: "export",
+		State: domain.JobPartial, Profile: "fixture-profile", CreatedAt: started, StartedAt: &started,
+		CompletedAt: &completed, UpdatedAt: completed, AttemptCount: 2, Counts: map[string]int{"total": 2, "completed": 1, "failed": 1}}}, Total: 1, Limit: 25}}
+	server, client := startAPIApplicationServer(t, app)
+	base := authorizeAPI(t, client, server.URL())
+
+	response := get(t, client, base+"/api/v1/jobs?limit=25")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", response.StatusCode, readResponse(t, response))
+	}
+	var page struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	body := readResponse(t, response)
+	if err := json.Unmarshal([]byte(body), &page); err != nil || len(page.Data) != 1 {
+		t.Fatalf("list envelope err=%v body=%s", err, body)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(page.Data[0], &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{
+		"id", "kind", "label", "state", "profile", "createdAt", "startedAt", "completedAt", "updatedAt", "attemptCount", "counts", "permittedActions",
+	} {
+		if _, ok := fields[field]; !ok {
+			t.Fatalf("job list DTO omitted safe field %q: %s", field, page.Data[0])
+		}
+	}
+	if len(fields) != 12 {
+		t.Fatalf("job list DTO has unexpected extra fields: %s", page.Data[0])
+	}
+
+	// A job that has not started must omit the run timestamps rather than
+	// serialize a zero time.
+	app.jobs = domain.Page[domain.Job]{Items: []domain.Job{{ID: jobID, Kind: "export", State: domain.JobQueued, CreatedAt: started, UpdatedAt: started}}, Total: 1, Limit: 25}
+	response = get(t, client, base+"/api/v1/jobs?limit=25")
+	body = readResponse(t, response)
+	if strings.Contains(body, "0001-01-01") {
+		t.Fatalf("queued job serialized a zero timestamp: %s", body)
+	}
+	if strings.Contains(body, "startedAt") || strings.Contains(body, "completedAt") {
+		t.Fatalf("queued job must omit run timestamps: %s", body)
+	}
+}
+
 func TestArticleResourcesAPIProvidesOnlySafeCompletenessDTO(t *testing.T) {
 	app := &apiApplication{resourceAvailability: library.ArticleResourceAvailability{Total: 2, Available: 1}}
 	server, client := startAPIApplicationServer(t, app)
@@ -676,7 +728,7 @@ func TestAccountResolveRoutesUseAuthenticatedWorkspaceFacade(t *testing.T) {
 		}
 	})
 
-	t.Run("resolve maps an expired session to authentication_required", func(t *testing.T) {
+	t.Run("resolve maps an expired WeChat session to its own code", func(t *testing.T) {
 		app := &apiApplication{
 			resolveAccountErr: wechat.ErrDiscoveryAuthentication,
 		}
@@ -687,7 +739,7 @@ func TestAccountResolveRoutesUseAuthenticatedWorkspaceFacade(t *testing.T) {
 		if response.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("resolve status=%d want 401", response.StatusCode)
 		}
-		assertAPIError(t, response, string(application.WorkspaceErrorAuthentication))
+		assertAPIError(t, response, wechatSessionErrorCode)
 	})
 
 	t.Run("resolve maps an unavailable discovery capability to unavailable", func(t *testing.T) {

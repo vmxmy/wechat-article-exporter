@@ -12,6 +12,7 @@ import (
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/jobs"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/processor"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/wechat"
 )
 
 // PersistentJobStore is the durable job boundary used by download operations.
@@ -370,6 +371,9 @@ func metadataForJobItem(item jobs.Item) jobs.WorkMetadata {
 func classifyDownloadError(err error, state processor.ClassificationState) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, wechat.ErrContentThrottled) {
+		return classified(jobs.FailureThrottling, true, err)
 	}
 	if errors.Is(err, credentials.ErrCredentialMissing) || errors.Is(err, credentials.ErrCredentialExpired) {
 		return classified(jobs.FailureAuthentication, false, err)

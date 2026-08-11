@@ -122,7 +122,7 @@ func TestPageEnvelopeContract(t *testing.T) {
 // documented vocabulary, and a non-empty error.message.
 func TestErrorEnvelopeContract(t *testing.T) {
 	stableCodes := map[string]bool{
-		"authentication_required": true, "forbidden": true, "invalid_argument": true,
+		"authentication_required": true, "wechat_session_required": true, "forbidden": true, "invalid_argument": true,
 		"not_found": true, "method_not_allowed": true, "confirmation_required": true,
 		"rate_limited": true, "unavailable": true, "cancelled": true, "internal": true,
 	}

@@ -188,7 +188,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   }
   if (url.pathname === '/api/v1/accounts') return page(route, [{ id: 'account-fixture', fakeid: 'fixture-account', name: 'Fixture Account', alias: 'fixture', articleCount: 2, lastSyncAt: now, syncCompleted: true }])
   if (url.pathname === '/api/v1/accounts/search') {
-    if (state.loginState !== 'authenticated') return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'authentication_required', message: 'workspace session must be authenticated' } }) })
+    if (state.loginState !== 'authenticated') return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'wechat_session_required', message: 'WeChat session must be authenticated' } }) })
     return page(route, [{ id: 'discovery-opaque-id', fakeid: 'fixture-discovered', name: 'Discovered Fixture Account', alias: 'discovered', articleCount: 0, syncCompleted: false }])
   }
   if (url.pathname === '/api/v1/accounts/resolve-name') {
@@ -197,7 +197,7 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
   }
   if (url.pathname === '/api/v1/accounts/resolve') {
     if (!url.searchParams.get('url')) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { code: 'invalid_argument', message: 'article url is required' } }) })
-    if (state.loginState !== 'authenticated') return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'authentication_required', message: 'workspace session must be authenticated' } }) })
+    if (state.loginState !== 'authenticated') return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: { code: 'wechat_session_required', message: 'WeChat session must be authenticated' } }) })
     return json(route, { id: 'resolved-account', fakeid: 'fixture-resolved', name: 'Resolved Account', alias: 'resolved', articleCount: 0, syncCompleted: false })
   }
   if (url.pathname === '/api/v1/accounts/manifest') return route.fulfill({ contentType: 'application/json', headers: { 'content-disposition': 'attachment; filename="wechat-article-accounts-manifest.json"' }, body: JSON.stringify({ schemaVersion: 1, accounts: url.searchParams.getAll('accountId').map((id) => ({ id, fakeid: 'fixture-account', name: 'Fixture Account' })) }) })
@@ -289,8 +289,22 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
     state.onSavedQueries(state.savedQueries.filter((item) => item.name !== name))
     return route.fulfill({ status: 204, body: '' })
   }
-  if (url.pathname === '/api/v1/jobs') return page(route, [{ id: 'job-fixture-1', kind: 'export', label: 'Export', state: 'running', profile: 'fixture-profile', createdAt: now, updatedAt: now, counts: { completed: 1, total: 2 }, permittedActions: ['pause', 'cancel'] }])
-  if (url.pathname === '/api/v1/jobs/job-fixture-1/detail') return json(route, { job: { id: 'job-fixture-1', kind: 'export', label: 'Export', state: 'running', profile: 'fixture-profile', createdAt: now, updatedAt: now, counts: { completed: 1, total: 2 }, permittedActions: ['pause', 'cancel'] }, items: [{ id: 'item-fixture-1', state: 'completed', attemptCount: 1, createdAt: now, updatedAt: now }, { id: 'item-fixture-2', state: 'running', attemptCount: 2, errorClass: 'network', createdAt: now, updatedAt: now }], itemsTotal: 2, itemsLimited: false, logs: [{ id: 1, itemId: 'item-fixture-2', level: 'info', message: 'Sanitized local progress', createdAt: now }], lease: { active: true, expiresAt: '2026-07-24T09:35:00.000Z' }, refreshedAt: now })
+  if (url.pathname === '/api/v1/jobs') {
+    const states = url.searchParams.getAll('state')
+    const kind = url.searchParams.get('kind')?.trim()
+    const matched = jobFixtures.filter((job) => (states.length === 0 || states.includes(job.state)) && (!kind || job.kind === kind))
+    const offset = Number(url.searchParams.get('offset')) || 0
+    const limit = Number(url.searchParams.get('limit')) || 25
+    // The true match count, not the sliced length: the tab counters read
+    // pagination.total from a limit=1 probe.
+    return page(route, matched.slice(offset, offset + limit), matched.length)
+  }
+  if (url.pathname === '/api/v1/jobs/job-fixture-1/detail') return json(route, { job: jobFixtures[0], items: [{ id: 'item-fixture-1', state: 'completed', attemptCount: 1, createdAt: now, updatedAt: now }, { id: 'item-fixture-2', state: 'running', attemptCount: 2, errorClass: 'network', createdAt: now, updatedAt: now }], itemsTotal: 2, itemsLimited: false, logs: [{ id: 1, itemId: 'item-fixture-2', level: 'info', message: 'Sanitized local progress', createdAt: now }], lease: { active: true, expiresAt: '2026-07-24T09:35:00.000Z' }, refreshedAt: now })
+  const fixtureJobDetail = url.pathname.match(/^\/api\/v1\/jobs\/(job-fixture-[234])\/detail$/)
+  if (fixtureJobDetail) {
+    const job = jobFixtures.find((candidate) => candidate.id === fixtureJobDetail[1])!
+    return json(route, { job, items: [], itemsTotal: 0, itemsLimited: false, logs: [], lease: { active: false }, refreshedAt: now })
+  }
   const createdJobDetail = url.pathname.match(/^\/api\/v1\/jobs\/(job-(?:export|import)-[a-z0-9-]+)\/detail$/)
   if (createdJobDetail) {
     const id = createdJobDetail[1]
@@ -343,6 +357,21 @@ async function fulfillAPI(route: Route, url: URL, state: State) {
 }
 
 function json(route: Route, body: unknown) { return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) }) }
+/** One job per filter bucket so the tabs, counts, and blocked-auth banner have
+ *  something to show.
+ *
+ *  job-fixture-1 keeps its exact label, state, and counts: several specs find
+ *  the row by the accessible name "Select Export". That match is a
+ *  case-insensitive substring, so no other fixture label may begin with
+ *  "Export" — a second match is a strict-mode failure. Fixture IDs must also
+ *  never surface in a cell; a spec asserts the table never contains them. */
+const jobFixtures = [
+  { id: 'job-fixture-1', kind: 'export', label: 'Export', state: 'running', profile: 'fixture-profile', createdAt: now, startedAt: now, updatedAt: now, attemptCount: 1, counts: { completed: 1, running: 1, total: 2 }, permittedActions: ['pause', 'cancel'] },
+  { id: 'job-fixture-2', kind: 'article_download', label: 'Article download', state: 'failed', profile: 'fixture-profile', createdAt: now, startedAt: now, completedAt: now, updatedAt: now, attemptCount: 3, counts: { completed: 1, failed: 2, total: 3 }, errorSummary: { errorClass: 'network', message: 'Sanitized network failure', itemCount: 2, occurredAt: now }, permittedActions: ['retry', 'cancel'] },
+  { id: 'job-fixture-3', kind: 'account_sync', label: 'Account sync', state: 'blocked_auth', profile: 'fixture-profile', createdAt: now, startedAt: now, updatedAt: now, attemptCount: 1, counts: { blocked_auth: 1, total: 1 }, permittedActions: ['resume', 'cancel'] },
+  { id: 'job-fixture-4', kind: 'album_sync', label: 'Album sync', state: 'cancelled', profile: 'fixture-profile', createdAt: now, startedAt: now, completedAt: now, updatedAt: now, attemptCount: 1, counts: { cancelled: 1, total: 1 }, permittedActions: [] }
+] as const
+
 function page(route: Route, data: readonly unknown[], total = data.length) { return json(route, { data, pagination: { page: 1, pageSize: 25, total } }) }
 function selectorPage(route: Route, url: URL, data: readonly unknown[]) {
   const pageNumber = Math.max(1, Number(url.searchParams.get('page')) || 1)

@@ -5,6 +5,7 @@ export const defaultExportFormat: ExportFormat = 'markdown'
 export const exportBrowserDraftStorageKey = 'wechat-article.export-browser-draft.v2'
 
 export type ExportStage = 'scope' | 'format' | 'destination'
+export type SettingsSection = 'general' | 'download-export' | 'credentials' | 'network' | 'storage' | 'diagnostics'
 export type ExportScopeType = 'articles' | 'albums' | 'account' | 'album' | 'savedQuery' | 'matching'
 
 export interface ArticleBrowserView {
@@ -69,6 +70,15 @@ export interface PagedBrowserView {
 
 const pagedOwnedParameters = new Set(['page'])
 
+export interface SettingsBrowserView {
+  readonly section: SettingsSection
+}
+
+export const defaultSettingsSection: SettingsSection = 'general'
+
+const settingsSections = new Set<SettingsSection>(['general', 'download-export', 'credentials', 'network', 'storage', 'diagnostics'])
+const settingsOwnedParameters = new Set(['section'])
+
 export function parsePagedBrowserView(search: string): { readonly state: PagedBrowserView; readonly canonicalSearch: string; readonly needsReplace: boolean } {
   const source = new URLSearchParams(normalizeSearch(search))
   const page = parsePositiveInteger(oneValue(source, 'page'), maximumPage) ?? 1
@@ -80,6 +90,20 @@ export function parsePagedBrowserView(search: string): { readonly state: PagedBr
 export function serializePagedBrowserView(state: PagedBrowserView, currentSearch = ''): string {
   const params = foreignParametersFor(currentSearch, pagedOwnedParameters)
   if (state.page > 1 && state.page <= maximumPage) params.set('page', String(state.page))
+  return searchFrom(params)
+}
+
+export function parseSettingsBrowserView(search: string): { readonly state: SettingsBrowserView; readonly canonicalSearch: string; readonly needsReplace: boolean } {
+  const source = new URLSearchParams(normalizeSearch(search))
+  const raw = oneValue(source, 'section')
+  const state: SettingsBrowserView = { section: isMember(settingsSections, raw) ? raw : defaultSettingsSection }
+  const canonicalSearch = serializeSettingsBrowserView(state, search)
+  return { state, canonicalSearch, needsReplace: canonicalSearch !== normalizeSearch(search) }
+}
+
+export function serializeSettingsBrowserView(state: SettingsBrowserView, currentSearch = ''): string {
+  const params = foreignParametersFor(currentSearch, settingsOwnedParameters)
+  if (state.section !== defaultSettingsSection) params.set('section', state.section)
   return searchFrom(params)
 }
 

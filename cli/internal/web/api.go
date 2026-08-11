@@ -31,6 +31,11 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
+// wechatSessionErrorCode marks a rejection by WeChat, not by the local browser
+// session. Both are 401s, so without separate codes the browser cannot tell the
+// user which of the two sessions to restore.
+const wechatSessionErrorCode = "wechat_session_required"
+
 // workspaceSnapshot is the bounded polling DTO for local browser state. It
 // deliberately contains only existing browser-safe read models. Revision is
 // local to one server process: it advances only when the observable snapshot
@@ -582,7 +587,7 @@ func (server *Server) observeSnapshot(snapshot workspaceSnapshot) workspaceSnaps
 func (server *Server) workspaceError(writer http.ResponseWriter, err error) {
 	var workspaceErr *application.WorkspaceError
 	if errors.As(err, &workspaceErr) {
-		status := http.StatusInternalServerError
+		status, code := http.StatusInternalServerError, string(workspaceErr.Code)
 		switch workspaceErr.Code {
 		case application.WorkspaceErrorInvalidArgument:
 			status = http.StatusBadRequest
@@ -591,11 +596,14 @@ func (server *Server) workspaceError(writer http.ResponseWriter, err error) {
 		case application.WorkspaceErrorUnavailable:
 			status = http.StatusServiceUnavailable
 		case application.WorkspaceErrorAuthentication:
-			status = http.StatusUnauthorized
+			// `authentication_required` is reserved for the local browser session.
+			// An upstream WeChat rejection gets its own code so the browser can tell
+			// "re-open the workspace" apart from "sign in to WeChat again".
+			status, code = http.StatusUnauthorized, wechatSessionErrorCode
 		case application.WorkspaceErrorCancelled:
 			status = http.StatusRequestTimeout
 		}
-		server.apiError(writer, status, string(workspaceErr.Code), workspaceErr.Message)
+		server.apiError(writer, status, code, workspaceErr.Message)
 		return
 	}
 	server.apiError(writer, http.StatusInternalServerError, "internal", "workspace operation failed")

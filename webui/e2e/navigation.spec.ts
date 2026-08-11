@@ -42,7 +42,7 @@ test('desktop navigation is grouped by user task and session actions are global'
   await expectOnlyLoopbackRequests(page)
 })
 
-test('home recommends sign-in, account setup, sync, browsing, and failed-job recovery from live state', async ({ page }) => {
+test('home recommends sign-in, account setup, sync, and browsing from live state', async ({ page }) => {
   await installLoopbackFixture(page)
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Sign in to WeChat' })).toBeVisible()
@@ -64,10 +64,11 @@ test('home recommends sign-in, account setup, sync, browsing, and failed-job rec
   await expect(page.getByRole('link', { name: 'Browse articles' })).toHaveAttribute('href', '/articles')
   await expect(page.getByRole('link', { name: 'Export articles' })).toHaveAttribute('href', '/exports')
 
+  // Failed jobs stay on the Tasks page; they no longer alter the home recommendation.
   await useHomeSnapshot(page, snapshot({ session: 'authenticated', accounts: 1, articles: 4, failedJobs: 2 }))
   await page.reload()
-  await expect(page.getByRole('heading', { name: '2 failed jobs need attention' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Review failed jobs' })).toHaveAttribute('href', '/jobs')
+  await expect(page.getByRole('heading', { name: 'Continue with your articles' })).toBeVisible()
+  await expect(page.getByText('failed jobs need attention')).toHaveCount(0)
   await expectOnlyLoopbackRequests(page)
 })
 

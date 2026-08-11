@@ -227,10 +227,8 @@ func (runner *Runner) Run(
 			FakeID: state.Account.FakeID, Offset: offset, Limit: pageSize,
 		})
 		if err != nil {
-			if errors.Is(err, wechat.ErrDiscoveryAuthentication) {
-				return resultFromCheckpoint(state.Account, current, runner.now()), &jobs.ClassifiedError{
-					Class: jobs.FailureAuthentication, Err: err,
-				}
+			if classified := classifyDiscoveryError(err); classified != nil {
+				return resultFromCheckpoint(state.Account, current, runner.now()), classified
 			}
 			return resultFromCheckpoint(state.Account, current, runner.now()), err
 		}
@@ -324,6 +322,20 @@ func resultFromCheckpoint(account domain.Account, checkpoint Checkpoint, lastSyn
 		ArticlesFetched: checkpoint.ArticlesFetched, PagesCommitted: checkpoint.PagesCommitted,
 		LastSyncAt: lastSyncAt, Boundary: checkpoint.Boundary, StopReason: checkpoint.StopReason,
 		NextOffset: checkpoint.NextOffset, Completed: checkpoint.Completed,
+	}
+}
+
+// classifyDiscoveryError separates a rejected session from a throttled one.
+// Only the first blocks the job on authentication; throttling stays retryable so
+// a transient rate limit does not ask the user to sign in again.
+func classifyDiscoveryError(err error) error {
+	switch {
+	case errors.Is(err, wechat.ErrDiscoveryAuthentication):
+		return &jobs.ClassifiedError{Class: jobs.FailureAuthentication, Err: err}
+	case errors.Is(err, wechat.ErrDiscoveryThrottled):
+		return &jobs.ClassifiedError{Class: jobs.FailureThrottling, Retryable: true, Err: err}
+	default:
+		return nil
 	}
 }
 

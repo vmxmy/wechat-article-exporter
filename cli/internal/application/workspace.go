@@ -86,7 +86,7 @@ func workspaceError(err error) error {
 	case errors.Is(err, ErrUnavailable):
 		code, message = WorkspaceErrorUnavailable, "workspace capability is not available"
 	case errors.Is(err, wechat.ErrLoginExpired), errors.Is(err, wechat.ErrSessionExpired), errors.Is(err, wechat.ErrDiscoveryAuthentication):
-		code, message = WorkspaceErrorAuthentication, "workspace session must be authenticated"
+		code, message = WorkspaceErrorAuthentication, "WeChat session must be authenticated"
 	case errors.Is(err, sql.ErrNoRows):
 		code, message = WorkspaceErrorNotFound, "workspace item was not found"
 	case errors.Is(err, library.ErrInvalidArticleSort):
@@ -148,15 +148,34 @@ const (
 // internal record; browser adapters receive only this projection and its
 // derived permitted controls.
 type WorkspaceJob struct {
-	ID               domain.JobID         `json:"id"`
-	Kind             string               `json:"kind"`
-	Label            string               `json:"label"`
-	State            domain.JobState      `json:"state"`
-	Profile          domain.ProfileID     `json:"profile,omitempty"`
-	CreatedAt        time.Time            `json:"createdAt"`
-	UpdatedAt        time.Time            `json:"updatedAt"`
-	Counts           map[string]int       `json:"counts,omitempty"`
-	PermittedActions []WorkspaceJobAction `json:"permittedActions"`
+	ID               domain.JobID              `json:"id"`
+	Kind             string                    `json:"kind"`
+	Label            string                    `json:"label"`
+	State            domain.JobState           `json:"state"`
+	Profile          domain.ProfileID          `json:"profile,omitempty"`
+	CreatedAt        time.Time                 `json:"createdAt"`
+	StartedAt        *time.Time                `json:"startedAt,omitempty"`
+	CompletedAt      *time.Time                `json:"completedAt,omitempty"`
+	UpdatedAt        time.Time                 `json:"updatedAt"`
+	AttemptCount     int                       `json:"attemptCount"`
+	Counts           map[string]int            `json:"counts,omitempty"`
+	ErrorSummary     *WorkspaceJobErrorSummary `json:"errorSummary,omitempty"`
+	PermittedActions []WorkspaceJobAction      `json:"permittedActions"`
+}
+
+// WorkspaceJobErrorSummary is the browser-safe job-level failure projection.
+// ErrorClass is the closed jobs.FailureClass vocabulary already exposed on
+// WorkspaceJobItemDetail; Message is the most recent item failure passed
+// through the same redaction and truncation used for job log messages, never
+// the raw stored text.
+//
+// It describes the most recent unresolved item failure, not the job's current
+// health: a completed-with-partials job can carry one.
+type WorkspaceJobErrorSummary struct {
+	ErrorClass string    `json:"errorClass"`
+	Message    string    `json:"message,omitempty"`
+	ItemCount  int       `json:"itemCount"`
+	OccurredAt time.Time `json:"occurredAt"`
 }
 
 type WorkspaceRuntime struct {
@@ -777,7 +796,33 @@ func (workspace *Workspace) Jobs(ctx context.Context, input WorkspaceJobQuery) (
 	for _, job := range result.Items {
 		items = append(items, workspace.workspaceJob(job))
 	}
+	if err := workspace.attachJobErrorSummaries(ctx, items); err != nil {
+		return WorkspacePage[WorkspaceJob]{}, err
+	}
 	return WorkspacePage[WorkspaceJob]{Items: items, Total: result.Total, Offset: result.Offset, Limit: result.Limit}, nil
+}
+
+// attachJobErrorSummaries fills the whole page with one query rather than one
+// per row: the snapshot poller reads up to 100 jobs per tick.
+func (workspace *Workspace) attachJobErrorSummaries(ctx context.Context, items []WorkspaceJob) error {
+	provider, ok := workspace.application.(WorkspaceJobErrorSummaryProvider)
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	ids := make([]domain.JobID, 0, len(items))
+	for _, job := range items {
+		ids = append(ids, job.ID)
+	}
+	summaries, err := provider.JobErrorSummaries(ctx, ids)
+	if err != nil {
+		return workspaceError(err)
+	}
+	for index := range items {
+		if stored, ok := summaries[items[index].ID]; ok {
+			items[index].ErrorSummary = workspaceJobErrorSummary(stored)
+		}
+	}
+	return nil
 }
 
 func (workspace *Workspace) BeginLogin(ctx context.Context, clientSessionID string) (wechat.LoginFlow, error) {

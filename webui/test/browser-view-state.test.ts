@@ -7,10 +7,12 @@ import {
   parseArticleBrowserView,
   parseExportBrowserView,
   parsePagedBrowserView,
+  parseSettingsBrowserView,
   saveExportBrowserDraft,
   serializeArticleBrowserView,
   serializeExportBrowserView,
   serializePagedBrowserView,
+  serializeSettingsBrowserView,
   type ExportBrowserDraft
 } from '../src/lib/browserViewState'
 
@@ -64,6 +66,32 @@ describe('paged browser view state', () => {
   it('serializes only non-default pages while keeping foreign parameters', () => {
     expect(serializePagedBrowserView({ page: 1 }, '?from=other')).toBe('?from=other')
     expect(serializePagedBrowserView({ page: 4 }, '?from=other')).toBe('?from=other&page=4')
+  })
+})
+
+describe('settings browser view state', () => {
+  it('parses a named section and preserves foreign parameters', () => {
+    const parsed = parseSettingsBrowserView('?section=storage&from=other')
+
+    expect(parsed.state).toEqual({ section: 'storage' })
+    expect(parsed.canonicalSearch).toBe('?from=other&section=storage')
+    expect(parsed.needsReplace).toBe(true)
+  })
+
+  it('omits the default section from the canonical URL', () => {
+    expect(parseSettingsBrowserView('').canonicalSearch).toBe('')
+    expect(parseSettingsBrowserView('?section=general').canonicalSearch).toBe('')
+    expect(serializeSettingsBrowserView({ section: 'general' }, '?from=other')).toBe('?from=other')
+  })
+
+  it('falls back to the default section for unknown or repeated values', () => {
+    expect(parseSettingsBrowserView('?section=danger').state.section).toBe('general')
+    expect(parseSettingsBrowserView('?section=storage&section=network').state.section).toBe('general')
+    expect(parseSettingsBrowserView('?section=danger').needsReplace).toBe(true)
+  })
+
+  it('replaces a stale section without disturbing foreign parameters', () => {
+    expect(serializeSettingsBrowserView({ section: 'credentials' }, '?embed=compact&section=network')).toBe('?embed=compact&section=credentials')
   })
 })
 

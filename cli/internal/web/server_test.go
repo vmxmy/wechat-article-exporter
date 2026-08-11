@@ -269,6 +269,47 @@ func TestHostOriginCSRFLimitsAndLogout(t *testing.T) {
 	}
 }
 
+// A workspace that keeps polling must not die at sessionTTL: the bootstrap
+// credential is one-time, so an expiring-under-use session leaves the open tab
+// with no recovery path and every later request looking like a lost login.
+func TestActiveSessionSlidesItsIdleTimeout(t *testing.T) {
+	// Anchored to the real clock: the client cookie jar evaluates the renewed
+	// cookie's Expires against wall time, so a fixed past epoch would drop it.
+	now := time.Now()
+	server := newTestServer(t, func() time.Time { return now })
+	if err := server.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return nil }}
+	base := strings.TrimSuffix(strings.Split(server.URL(), "?")[0], "/")
+	authorize(t, client, server.URL())
+
+	// Four polls spread over twice the TTL keep the session alive throughout.
+	for step := 0; step < 4; step++ {
+		now = now.Add(defaultSessionTTL / 2)
+		if got := get(t, client, base+"/api/v1/status").StatusCode; got != http.StatusOK {
+			t.Fatalf("status after %s of continuous use = %d", time.Duration(step+1)*defaultSessionTTL/2, got)
+		}
+	}
+
+	// Idling past the full TTL still expires it.
+	now = now.Add(defaultSessionTTL + time.Second)
+	if got := get(t, client, base+"/api/v1/status").StatusCode; got != http.StatusUnauthorized {
+		t.Fatalf("idle session status = %d", got)
+	}
+
+	cancel()
+	<-done
+}
+
 func TestSessionExpiryAndCancellationInvalidateCredentials(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	server := newTestServer(t, func() time.Time { return now })

@@ -1,11 +1,21 @@
+import { reportApiFailure } from './workspaceSession'
+
 export class ApiError extends Error {
   readonly status: number
+  /** Stable `error.code` from the API envelope; empty when the body was unreadable. */
+  readonly code: string
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code = '') {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.code = code
   }
+}
+
+/** True when the WeChat session — not the local workspace session — was rejected. */
+export function isWeChatAuthError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401 && error.code === 'wechat_session_required'
 }
 
 const apiBase = '/api/v1'
@@ -219,6 +229,16 @@ export interface AlbumOption {
   readonly accountNameAvailable: boolean
 }
 
+/** The most recent unresolved item failure, already redacted server-side. It
+    describes the last failure, not current health: a partially completed job
+    can carry one. */
+export interface JobErrorSummary {
+  readonly errorClass: string
+  readonly message?: string
+  readonly itemCount: number
+  readonly occurredAt: string
+}
+
 export interface JobRecord {
   readonly id: string
   readonly kind: string
@@ -226,8 +246,13 @@ export interface JobRecord {
   readonly state: string
   readonly profile?: string
   readonly createdAt: string
+  /** Absent until the job first runs, and cleared again by a retry. */
+  readonly startedAt?: string
+  readonly completedAt?: string
   readonly updatedAt: string
+  readonly attemptCount?: number
   readonly counts?: Readonly<Record<string, number>>
+  readonly errorSummary?: JobErrorSummary
   readonly permittedActions: readonly JobControlAction[]
 }
 
@@ -671,7 +696,7 @@ export async function deleteSavedQuery(name: string, confirmation: string): Prom
     method: 'DELETE', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
     body: JSON.stringify({ name, confirm: confirmation })
   })
-  if (!response.ok) throw new ApiError(response.status, await readErrorMessage(response))
+  if (!response.ok) throw await apiError(response)
 }
 export async function traverseAlbum(albumId: string, accountId: string, order: AlbumTraversalOrder, download: boolean): Promise<JobRecord> {
   return mutate<JobRecord>(`albums/${encodeURIComponent(albumId)}/traverse`, 'POST', { accountId, order, download })
@@ -703,8 +728,27 @@ export async function getAlbumPage(params: AlbumPageParams, signal?: AbortSignal
   return normalizePage(response)
 }
 
-export async function getJobPage(params: PageParams, signal?: AbortSignal): Promise<PaginatedResponse<JobRecord>> {
-  return getPage<JobRecord>('jobs', params, signal)
+export interface JobPageParams {
+  readonly page: number
+  readonly pageSize: number
+  readonly kind?: string
+  readonly states?: readonly string[]
+}
+
+/** Builds its own query rather than using getPage: /jobs enforces a strict
+    parameter allowlist and rejects the keyword/sort params getPage can emit. */
+export async function getJobPage(params: JobPageParams, signal?: AbortSignal): Promise<PaginatedResponse<JobRecord>> {
+  const searchParams = new URLSearchParams({
+    offset: String((params.page - 1) * params.pageSize),
+    limit: String(params.pageSize)
+  })
+  if (params.kind?.trim()) searchParams.set('kind', params.kind.trim())
+  for (const state of params.states ?? []) {
+    const value = state.trim()
+    if (value) searchParams.append('state', value)
+  }
+  const response = await request<PaginatedResponse<JobRecord> | WorkspacePageResponse<JobRecord>>(`${apiBase}/jobs?${searchParams.toString()}`, { signal })
+  return normalizePage(response)
 }
 
 export async function getJobDetail(id: string, signal?: AbortSignal): Promise<JobDetail> {
@@ -1095,7 +1139,7 @@ function requiredSelectorID(value: unknown): string {
 
 async function requestWorkspacePage<T>(path: string, signal?: AbortSignal): Promise<WorkspacePageResponse<T>> {
   const response = await fetch(path, { signal, credentials: 'same-origin', headers: { Accept: 'application/json' } })
-  if (!response.ok) throw new ApiError(response.status, await readErrorMessage(response))
+  if (!response.ok) throw await apiError(response)
   const body = await response.json() as WorkspacePageResponse<T> & { readonly data?: readonly T[]; readonly apiVersion?: string }
   if (Array.isArray(body.data) && typeof body.total === 'number' && typeof body.offset === 'number' && typeof body.limit === 'number') {
     return { items: body.data, total: body.total, offset: body.offset, limit: body.limit }
@@ -1114,7 +1158,7 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   })
 
   if (!response.ok) {
-    throw new ApiError(response.status, await readErrorMessage(response))
+    throw await apiError(response)
   }
 
   if (response.status === 204) return undefined as T
@@ -1148,12 +1192,17 @@ function isPagedApiEnvelope(value: unknown): value is ApiEnvelope<readonly unkno
   return typeof pagination.page === 'number' && typeof pagination.pageSize === 'number' && typeof pagination.total === 'number'
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+async function apiError(response: Response): Promise<ApiError> {
   const fallback = `Request failed with status ${response.status}`
+  let message = fallback
+  let code = ''
   try {
-    const body = await response.json() as { readonly error?: { readonly message?: string } }
-    return body.error?.message ?? fallback
+    const body = await response.json() as { readonly error?: { readonly message?: string; readonly code?: string } }
+    message = body.error?.message ?? fallback
+    code = body.error?.code ?? ''
   } catch {
-    return fallback
+    message = fallback
   }
+  reportApiFailure(response.status, code)
+  return new ApiError(response.status, message, code)
 }

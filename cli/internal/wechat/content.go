@@ -19,7 +19,12 @@ import (
 
 const contentResponseLimit = 32 << 20
 
-var ErrContentProtocol = errors.New("unsupported WeChat content response")
+var (
+	ErrContentProtocol = errors.New("unsupported WeChat content response")
+	// ErrContentThrottled is WeChat rate limiting the content surface. It is
+	// retryable, unlike an expired credential.
+	ErrContentThrottled = errors.New("WeChat content rate limited this request; retry later")
+)
 
 type ContentEndpoint struct {
 	Network network.Client
@@ -442,8 +447,14 @@ func contentBaseError(response rawBaseResponse) error {
 	if response.Ret == 0 {
 		return nil
 	}
-	if response.Ret == 200003 || response.Ret == 200013 || response.Ret == -6 {
-		return credentials.ErrCredentialExpired
+	// Frequency control is transient and must not be reported as an expired
+	// credential: that classification blocks the job and asks the user to sign in
+	// again for something only a retry can clear.
+	switch response.Ret {
+	case retInvalidSession, retSecurityVerification:
+		return fmt.Errorf("%w (%d)", credentials.ErrCredentialExpired, response.Ret)
+	case retFrequencyControl:
+		return fmt.Errorf("%w (%d)", ErrContentThrottled, response.Ret)
 	}
 	message := strings.TrimSpace(response.ErrMsg)
 	if message == "" {

@@ -78,9 +78,8 @@ export const zhCN = {
     sessionState: '状态',
     runtimeProfile: 'Profile',
     runtimeVersion: '版本',
-    storageCounts: (accounts: number, articles: number, albums: number, jobs: number) => `${accounts} 个账号 · ${articles} 篇文章 · ${albums} 个专辑 · ${jobs} 个任务`,
+    storageStats: { accounts: '账号', articles: '文章', albums: '专辑', jobs: '任务' },
     primaryActionTitle: '建议的下一步',
-    secondaryActionsTitle: '继续工作',
     quickEntries: { browseArticles: '浏览文章', startExport: '开始导出', manageAccounts: '管理公众号', reviewTasks: '查看任务' },
     recentJobsTitle: '最近任务',
     recentJobsEmpty: '暂无最近任务。同步、导入与导出会显示在此。',
@@ -97,10 +96,7 @@ export const zhCN = {
       browseTitle: '继续处理文章',
       browseDescription: '浏览本地资料库，或导出此设备上已有的内容。',
       browse: '浏览文章',
-      export: '导出文章',
-      failedJobsTitle: (count: number) => `${count} 个失败任务需要处理`,
-      failedJobsDescription: '先查看失败原因，再继续其他后台工作。',
-      failedJobs: '查看失败任务'
+      export: '导出文章'
     }
   },
   unavailableActions: {
@@ -111,7 +107,7 @@ export const zhCN = {
   login: {
     title: '微信登录',
     description: '查看当前本地会话，或启动二维码登录流程。',
-    legacyDescription: '此旧深链接继续可用；也可从全局会话控件查看状态、切换账号或退出登录。',
+    legacyDescription: '此旧深链接继续可用。',
     manageGlobally: '可在任意页面通过工作区顶部的会话控件切换账号或退出登录。',
     sessionTitle: '当前会话',
     sessionMenu: '会话',
@@ -125,6 +121,7 @@ export const zhCN = {
     unavailable: '无法加载本地会话状态。',
     qrTitle: '二维码登录',
     qrDescription: '开始登录后，二维码及其轮询状态将显示在这里。',
+    qrSignedIn: '当前已登录。如需更换微信账号，可重新开始二维码登录。',
     start: '开始二维码登录',
     poll: '轮询登录状态',
     complete: '完成登录',
@@ -142,6 +139,25 @@ export const zhCN = {
     switchUnavailable: '当前本地会话暂不支持切换账号。',
     switching: '正在切换账号…',
     switchComplete: (name: string) => `已切换至 ${name}。`,
+    workspaceExpiredTitle: '本地工作区会话已过期',
+    workspaceExpiredDescription: '这是浏览器工作区自身的本地会话，与微信登录无关，重新登录微信不会恢复它。请在终端重新运行 wechat-article web，然后打开新的工作区链接。',
+    workspaceExpiredBadge: '工作区会话已过期',
+    progressTitle: '登录进度',
+    stepGenerate: '生成二维码',
+    stepScan: '微信扫码',
+    stepConfirm: '手机确认',
+    stepFinish: '完成登录',
+    statusIdle: '尚未开始，点击「开始二维码登录」生成二维码。',
+    statusStarting: '正在生成二维码…',
+    statusWaiting: '请使用微信 App 扫描二维码。',
+    statusScanned: '已扫码，请在手机上确认登录。',
+    statusConfirmed: '已确认，正在完成本地登录…',
+    statusCompleted: '登录成功，当前工作区已登录。',
+    statusExpired: '二维码在确认前已过期，请重新开始二维码登录获取新码。',
+    statusFailed: '登录未能完成，请查看下方错误后点击「完成登录」重试。',
+    autoRefresh: '状态每 3 秒自动刷新。',
+    lastChecked: (time: string) => `上次检查：${time}。`,
+    logTitle: '状态记录',
     states: { authenticated: '已登录', unauthenticated: '未登录', waiting: '等待扫码', scanned: '已扫码', confirmed: '已确认', expired: '已过期', completed: '已完成' }
   },
   import: {
@@ -258,7 +274,7 @@ export const zhCN = {
     title: '设置与维护',
     description: '管理浏览器安全的本地设置，并执行明确的维护检查。此处绝不显示密钥值或本机路径。',
     loading: '正在加载本地设置…', unavailable: '一项本地维护能力暂不可用。', retry: '重试', actionFailed: '无法完成本地维护操作。',
-    navigation: { label: '设置分区', general: '常规与偏好设置', downloadExport: '下载与导出默认值', credentials: '凭据', network: '网络与代理', storage: '存储维护', diagnostics: '诊断', danger: '高危维护' },
+    navigation: { label: '设置分区', general: '常规与偏好设置', downloadExport: '下载与导出默认值', credentials: '凭据', network: '网络与代理', storage: '存储维护', diagnostics: '诊断' },
     unsaved: { title: '偏好设置尚未保存', description: '你有尚未保存的偏好设置更改。可以留在此页面保存，或放弃更改后继续离开。', stay: '留在设置页', discard: '放弃更改' },
     credentials: { title: '凭据', description: '仅列出元数据。输入的凭据字段只写入，导入后会从浏览器中清除。', importTitle: '导入凭据', listTitle: '已保存的凭据元数据', accountUnavailable: '已保存账号', technicalDetails: '凭据技术详情', accountId: '账号 ID', copyAccountId: '复制账号 ID', empty: '没有可用的凭据元数据。', import: '导入凭据', validate: '验证凭据', validating: '正在验证凭据…', validationPassed: '凭据验证通过。可以导入这些已输入的值。', validationFailed: '凭据验证失败。导入前请检查或刷新已输入的值。', validationHint: '验证只检查当前输入的仅写入值，不会导入或保留它们。', remove: '移除', removed: '凭据已移除。', removeConfirmation: (id: string) => `remove-credential:${id}`, removeConfirmationLabel: '移除此凭据的精确确认字符串', removeConfirmationHint: '请原样输入此值。它只会移除所选凭据元数据及其密钥字节。', confirmRemove: '移除凭据', cancelRemove: '取消移除', nickname: '昵称', biz: '业务 ID（仅写入）', uin: 'UIN（仅写入）', key: 'Key（仅写入）', passTicket: 'Pass ticket（仅写入）', wapSid2: 'WAP SID2（仅写入）', appMsgToken: 'App message token（仅写入）', cookie: 'Cookie（仅写入）', optional: '可选', imported: '已导入凭据。密钥值未保留在浏览器中。', file: '凭据 JSON 文件', fileHint: '所选文件仅在本机流式导入，随后会从表单中清除。不会保留文件名或内容。', fileImported: '凭据文件已导入。浏览器未保留密钥值或文件详情。', visibleColumns: '可见凭据列', columns: { account: '账号', kind: '类型', status: '状态', updated: '更新时间' } },
     proxies: { title: '代理', description: '代理授权仅写入。凭据可信路由必须先披露，并在创建前输入精确确认值。', addTitle: '添加代理路由', listTitle: '已配置的代理路由', endpointPlaceholder: 'https://proxy.example/…', empty: '尚未配置代理路由。', add: '添加代理', added: '代理路由已添加。', remove: '移除', removed: '代理路由已移除。', removeConfirmation: (id: string) => `remove-proxy:${id}`, removeConfirmationLabel: '移除此代理路由的精确确认字符串', removeConfirmationHint: '请原样输入此值。它只会移除所选代理路由；不会显示授权信息或路径。', confirmRemove: '移除代理', cancelRemove: '取消移除', enable: '启用', enabledNotice: '代理路由已启用。', disable: '停用', disabledNotice: '代理路由已停用。', test: '测试', tested: '代理检查已完成。', name: '名称', endpoint: '端点', authorization: '授权信息（仅写入）', trust: '信任等级', publicOnly: '仅公开', credentialTrusted: '凭据可信', publicOnlyExplanation: '仅公开路由绝不会接收携带凭据的请求。', credentialTrustedExplanation: '凭据可信路由只有在完成下方披露和精确确认后，才可能接收经身份验证请求的凭据。', priority: '优先级', classes: '请求类别', disclosure: '凭据披露', disclosureRequired: '此路由可能接收：', confirmation: '精确确认值', confirmationHint: '请原样复制此值；它仅适用于当前拟创建的凭据可信路由。', health: '健康状态', probe: '测试结果', enabled: '已启用', disabled: '已停用', visibleColumns: '可见代理列', columns: { name: '名称', endpoint: '端点', trust: '信任', priority: '优先级', health: '健康', state: '状态', actions: '操作' } },
@@ -295,7 +311,7 @@ export const zhCN = {
     },
     filters: {
       title: '高级筛选', advanced: '高级筛选', advancedHint: '筛选条件与本地文章 API 使用同一套查询字段。翻页或导出匹配结果前请先应用更改。', invalid: '请检查查询值：日期必须使用 RFC3339，且最小值不能超过最大值。',
-      apply: '应用筛选', reset: '重置筛选', accountId: '账号 ID', albumId: '专辑 ID', author: '作者', state: '状态', messageTypes: '消息类型（逗号分隔）', hasContent: '已下载正文', hasComments: '已下载评论', deleted: '已删除', original: '原创文章', paid: '付费文章', any: '不限', yes: '是', no: '否',
+      reset: '重置筛选', accountId: '账号 ID', albumId: '专辑 ID', author: '作者', state: '状态', messageTypes: '消息类型（逗号分隔）', hasContent: '已下载正文', hasComments: '已下载评论', deleted: '已删除', original: '原创文章', paid: '付费文章', any: '不限', yes: '是', no: '否',
       publishedFrom: '发布时间起点（RFC3339）', publishedTo: '发布时间终点（RFC3339）', readMin: '最少阅读数', readMax: '最多阅读数', oldLikeMin: '最少旧版点赞数', oldLikeMax: '最多旧版点赞数', shareMin: '最少分享数', shareMax: '最多分享数', likeMin: '最少点赞数', likeMax: '最多点赞数', commentMin: '最少评论数', commentMax: '最多评论数', weCoinMin: '最少微信豆', weCoinMax: '最多微信豆', mediaSecondsMin: '最短媒体时长（秒）', mediaSecondsMax: '最长媒体时长（秒）', rangeFrom: '从', rangeTo: '到', rangeReads: '阅读数', rangeOldLikes: '旧版点赞', rangeLikes: '点赞', rangeShares: '分享', rangeComments: '评论', rangeWeCoin: '微信豆', rangeMediaSeconds: '媒体时长（秒）'
     },
     ux: {
@@ -381,12 +397,17 @@ export const zhCN = {
     jobs: {
       title: '任务',
       description: '查看共享持久任务、刷新其 SQLite 快照，并在范围确认后使用允许的控制操作。',
-      filterTabs: { all: '全部', active: '运行中', done: '已完成', attention: '需要处理', count: (count: number) => `${count}` },
+      filterTabs: { all: '全部', active: '运行中', done: '已结束', attention: '需要处理', count: (count: number) => `${count}` },
       filterToolbarLabel: '任务筛选与显示',
       loading: '正在加载本地任务快照…', unavailable: '本地 jobs 快照 API 尚不可用。', empty: '尚未记录持久任务。', retry: '重试', previous: '上一页', next: '下一页', page: (current: number, total: number) => `第 ${current} 页，共 ${total} 页`, pagination: '任务分页', rangeSummary: (start: number, end: number, total: number | undefined) => total === undefined ? `显示 ${start}–${end}` : `显示 ${start}–${end}，共 ${total} 项`, updating: '更新中…', selected: '已选择', selectAll: '选择当前页所有行', selectRow: (row: string) => `选择 ${row}`, visibleColumns: '可见任务列',
-      columns: { kind: '类型', state: '状态', created: '创建时间', updated: '更新时间', counts: '进度' },
+      columns: { task: '任务', kind: '类型', state: '状态', created: '创建时间', started: '开始时间', updated: '更新时间', duration: '耗时', counts: '进度' },
+      filters: { kind: '任务类型', allKinds: '全部类型', clearKind: '清除任务类型筛选', appliedFilters: '已应用筛选', clearFilters: '清除筛选', removeFilter: (label: string) => `移除 ${label}` },
+      progress: { label: (task: string) => `${task} 的进度`, ratio: (done: number, total: number) => `${done} / ${total}`, ratioText: (done: number, total: number) => `共 ${total} 项，已完成 ${done} 项`, unknownTotal: (done: number) => `已完成 ${done} 项`, noItems: '没有任务项', state: (count: number, label: string) => `${count} 项${label}` },
+      timing: { notStarted: '尚未开始', stillRunning: '仍在运行', elapsed: (duration: string) => `已运行 ${duration}`, waiting: (duration: string) => `已等待 ${duration}`, queueWait: '排队等待', runTime: '执行时长', completedAt: '完成时间' },
+      attention: { blockedTitle: (count: number) => `${count} 个任务需要重新登录微信`, blockedSignIn: '登录微信', blockedHint: '请重新登录后继续此任务。', failedItems: (count: number) => `${count} 个任务项失败`, occurredAt: '最近发生', errorMessage: '报告的信息' },
+      emptyState: { firstUseTitle: '暂无任务', firstUseDescription: '在排队同步、下载或导出后，任务会出现在这里。', filteredEmptyTitle: '此视图中没有内容', filteredEmptyDescription: '没有任务符合当前筛选。切换到“全部”即可查看所有已记录的任务。', filteredEmptyAction: '显示全部任务' },
       actions: { title: '任务控制', description: '暂停、继续、重试或取消一个已选持久化任务。', start: '启动任务', pause: '暂停所选任务', resume: '继续所选任务', retry: '重试所选任务', cancel: '取消所选任务', selectOne: '请先仅选择一个任务。', pauseTitle: '暂停所选任务', retryTitle: '重试所选任务', cancelTitle: '取消所选任务', confirmPause: '要暂停此任务吗？请先输入此所选任务的精确凭证。', confirmRetry: '要重试此任务吗？请先输入此所选任务的精确凭证。', confirmCancel: '要取消此任务吗？这可能中断本地工作；请先输入精确凭证。', pauseConfirmation: (id: string) => `pause-job:${id}`, retryConfirmation: (id: string) => `retry-job:${id}`, cancelConfirmationProof: (id: string) => `cancel-job:${id}`, confirmationLabel: '此任务操作的精确确认', confirmationHint: '请准确输入该值。它只会授权此所选任务操作。', cancelConfirmation: '保持任务运行', actionFailed: '无法完成任务操作。' },
-      detail: { title: '任务详情', description: '重连或刷新后会重新读取受限的本地状态。不会显示日志字段、任务载荷、执行者身份或路径。', refresh: '刷新详情', refreshing: '正在刷新详情…', loading: '正在加载任务详情…', unavailable: '无法获取任务详情，可安全重试。', items: '任务项', itemsLimited: (shown: number, total: number) => `显示 ${shown} / ${total} 个任务项。`, noItems: '该任务没有已记录的任务项。', logs: '最近日志', noLogs: '没有已记录的受限日志。', lease: '执行租约', leaseActive: '有效', leaseInactive: '无效', expires: '到期时间', attempts: '尝试次数', errorClass: '错误类别', refreshed: '最近刷新', attention: '需要处理的任务项', reason: '原因', impact: '影响', nextAction: '下一步', retryAction: '重试此任务以继续处理受影响的工作。', refreshAction: '刷新此任务以查看最新本地状态。', networkReason: '本地工作区无法连接到所需服务。', unknownReason: '无法完成此任务项。', itemNotCompleted: '受影响的任务项尚未完成。', technicalDetails: '技术详情', jobID: '任务 ID', profile: '配置档案', copyID: '复制 ID', copyValue: '复制值' }
+      detail: { title: '任务详情', description: '重连或刷新后会重新读取受限的本地状态。不会显示日志字段、任务载荷、执行者身份或路径。', refresh: '刷新详情', refreshing: '正在刷新详情…', loading: '正在加载任务详情…', unavailable: '无法获取任务详情，可安全重试。', items: '任务项', itemsLimited: (shown: number, total: number) => `显示 ${shown} / ${total} 个任务项。`, noItems: '该任务没有已记录的任务项。', logs: '最近日志', noLogs: '没有已记录的受限日志。', lease: '执行租约', leaseActive: '有效', leaseInactive: '无效', expires: '到期时间', attempts: '尝试次数', errorClass: '错误类别', refreshed: '最近刷新', attention: '需要处理的任务项', reason: '原因', impact: '影响', nextAction: '下一步', retryAction: '重试此任务以继续处理受影响的工作。', refreshAction: '刷新此任务以查看最新本地状态。', signInAction: '请重新登录微信，然后继续此任务。', rateLimitAction: '微信暂时限流了此项工作。建议约 30 分钟后再恢复或重试此任务；减少每批同步的账号数或改用增量同步可降低触发概率。', timeline: '时间线', progress: '进度', networkReason: '本地工作区无法连接到所需服务。', authReason: '微信会话已过期或被拒绝。', rateLimitReason: '远端服务限制了此次请求频率。', storageReason: '本地存储无法完成此次写入。', timeoutReason: '工作在完成前被中断。', deletedReason: '上游内容已不再可用。', parsingReason: '无法解析已下载的内容。', unknownReason: '无法完成此任务项。', itemNotCompleted: '受影响的任务项尚未完成。', technicalDetails: '技术详情', jobID: '任务 ID', profile: '配置档案', copyID: '复制 ID', copyValue: '复制值' }
     },
     savedQueries: {
       title: '已保存查询',

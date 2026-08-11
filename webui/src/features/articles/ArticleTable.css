@@ -33,17 +33,60 @@
   }
 
   .article-query-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: end;
-    justify-content: space-between;
-    gap: var(--spacing-3);
+    align-items: center;
     margin-block: 0;
   }
 
-  .article-query-toolbar > [data-slot='field'] {
-    min-width: min(100%, 16rem);
-    flex: 1 1 16rem;
+  .article-query-toolbar .presentation-toolbar-start {
+    flex: 1 1 auto;
+    row-gap: var(--spacing-2);
+  }
+
+  .article-query-toolbar .presentation-toolbar-start > [data-slot='field'] {
+    min-width: min(100%, 10rem);
+    flex: 0 1 14rem;
+  }
+
+  .article-filter-bar {
+    display: flex;
+    flex: 1 1 28rem;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-2);
+    min-width: 0;
+  }
+
+  .article-filter-bar-search {
+    flex: 1 1 12rem;
+    min-width: 8rem;
+  }
+
+  .article-filter-bar-item {
+    flex: 0 1 10rem;
+    min-width: 7rem;
+  }
+
+  .article-filter-bar-item-narrow {
+    flex: 0 1 7.5rem;
+    min-width: 6rem;
+  }
+
+  .article-filter-bar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-2);
+    min-width: 0;
+  }
+
+  /* Wraps onto its own full-width toolbar line, after every other toolbar item, so the
+     expanded filters read as a panel beneath the single-row bar rather than inside it. */
+  .article-filter-panel {
+    order: 1;
+    flex: 1 1 100%;
+    min-width: 0;
+    padding-block-start: var(--spacing-2);
+    border-block-start: 1px solid var(--workspace-ring);
   }
 
   .article-detail-actions {
