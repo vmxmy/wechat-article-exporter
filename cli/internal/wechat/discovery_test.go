@@ -159,6 +159,18 @@ func TestArticleAccountNameIgnoresScriptSideFollowNicknameIDs(t *testing.T) {
 	}
 }
 
+// The patrol tool keys its exit code off the chain head, so the accessor must
+// keep returning the chain with the primary js_name anchor first.
+func TestArticleAccountNameChainAccessorPinsPrimaryAnchor(t *testing.T) {
+	chain := ArticleAccountNameChain()
+	if len(chain) == 0 {
+		t.Fatal("ArticleAccountNameChain() is empty")
+	}
+	if chain[0].Name != "js_name" {
+		t.Fatalf("chain head anchor = %q, want %q", chain[0].Name, "js_name")
+	}
+}
+
 func TestResolveAccountFromArticleDetailsAndAuthorFixtures(t *testing.T) {
 	client, server := discoveryFixtureClient(t, map[string]string{
 		"/s/article": "article-account.html", "/cgi-bin/searchbiz": "search-success.json", "/mp/authorinfo": "author-success.json",

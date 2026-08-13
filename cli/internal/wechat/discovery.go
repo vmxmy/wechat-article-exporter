@@ -73,6 +73,12 @@ type AnchorSurface struct {
 	Anchors []string
 }
 
+// ArticleAccountNameChain exposes the article account-name anchor chain for
+// the layout patrol tool (cli/tools/patrol), which probes every anchor of the
+// chain individually against live pages. The accessor exists so patrol reuses
+// this single chain definition instead of copying anchor specs.
+func ArticleAccountNameChain() htmlx.Chain { return articleAccountNameChain }
+
 // AnchorSurfaces lists every anchor chain this package resolves, in chain
 // order. It is the single source diagnostics consumes; adding a chain without
 // listing it here leaves the chain invisible to drift detection.
