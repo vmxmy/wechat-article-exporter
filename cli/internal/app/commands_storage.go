@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/application"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/credentials"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/library"
@@ -432,6 +433,15 @@ func (a *App) diagnosticsCommand() *cobra.Command {
 			}
 			if browserErr != nil {
 				data["browserError"] = browserErr.Error()
+			}
+			if provider, ok := a.core.(interface {
+				AnchorDiagnostics(context.Context) ([]application.AnchorSurfaceDiagnostics, error)
+			}); ok {
+				if anchors, anchorsErr := provider.AnchorDiagnostics(command.Context()); anchorsErr != nil {
+					data["anchorsError"] = boundedDiagnosticError(anchorsErr)
+				} else if len(anchors) > 0 {
+					data["anchors"] = anchors
+				}
 			}
 			return a.output(data)
 		},

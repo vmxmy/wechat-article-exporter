@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/htmlx"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/identity"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 )
@@ -145,9 +146,16 @@ func TestArticleAccountNameIgnoresScriptSideFollowNicknameIDs(t *testing.T) {
 	if bytes.Contains(body, []byte(`class="wx_follow_nickname`)) {
 		t.Fatal("fixture must not carry the legacy class anchor")
 	}
-	name, matched := articleAccountName(body)
+	document, err := htmlx.Parse(bytes.NewReader(body), htmlx.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, anchorName, matched := articleAccountNameChain.Resolve(document)
 	if !matched || name != "示例公众号" {
-		t.Fatalf("articleAccountName() = %q, %v", name, matched)
+		t.Fatalf("Resolve() = %q, %q, %v", name, anchorName, matched)
+	}
+	if anchorName != "js_name" {
+		t.Fatalf("anchorName = %q, want the primary js_name anchor", anchorName)
 	}
 }
 

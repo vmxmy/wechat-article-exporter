@@ -11,12 +11,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/htmlx"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/identity"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 )
@@ -43,38 +43,59 @@ var (
 	// re-login for a problem that re-login cannot fix.
 	ErrDiscoveryThrottled = errors.New("WeChat discovery rate limited this request; retry later")
 	ErrDiscoveryProtocol  = errors.New("unsupported WeChat discovery response")
-	// articleAccountNameAnchors are tried in order, newest layout first. WeChat
-	// now renders the follow bar from script, so wx_follow_nickname survives only
-	// as element ids inside <script> and never as a class attribute; the profile
-	// anchor is the only markup-borne name on those pages. The class anchor stays
-	// for articles still served the older follow-bar markup, and the bootstrap
+	// articleAccountNameChain is tried newest layout first. WeChat now renders
+	// the follow bar from script, so wx_follow_nickname survives only as element
+	// ids inside <script> and never as a class attribute; the profile anchor is
+	// the only markup-borne name on those pages. The class anchor stays for
+	// articles still served the older follow-bar markup, and the bootstrap
 	// variable is the last resort when the header is built entirely from script.
-	articleAccountNameAnchors = []*regexp.Regexp{
-		regexp.MustCompile(`(?is)<[^>]*id=["']js_name["'][^>]*>(.*?)</[^>]+>`),
-		regexp.MustCompile(`(?is)<[^>]*class=["'][^"']*wx_follow_nickname[^"']*["'][^>]*>(.*?)</[^>]+>`),
-		regexp.MustCompile(`(?s)var\s+nickname\s*=\s*htmlDecode\("((?:[^"\\]|\\.)*)"\)`),
+	articleAccountNameChain = htmlx.Chain{
+		htmlx.ByID("js_name", "js_name"),
+		htmlx.ByClass("wx_follow_nickname", "wx_follow_nickname"),
+		htmlx.ByScriptVar("nickname-var", `var\s+nickname\s*=\s*htmlDecode\("((?:[^"\\]|\\.)*)"\)`),
 	}
-	htmlTagPattern = regexp.MustCompile(`(?s)<[^>]*>`)
 )
 
-// articleAccountName reports the first non-empty name any anchor yields, and
-// whether any anchor matched at all. The distinction separates "WeChat changed
-// the markup" from "the page carries the anchor but no name", which is what
-// deleted-author and blocked-content pages legitimately look like.
-func articleAccountName(body []byte) (string, bool) {
-	matched := false
-	for _, anchor := range articleAccountNameAnchors {
-		match := anchor.FindSubmatch(body)
-		if len(match) < 2 {
-			continue
-		}
-		matched = true
-		name := strings.TrimSpace(html.UnescapeString(htmlTagPattern.ReplaceAllString(string(match[1]), "")))
-		if name != "" {
-			return name, true
-		}
+// anchorSurface* name the anchor chains for hit reporting: the observability
+// identity a recorder aggregates on, never page content.
+const (
+	anchorSurfaceArticleAccountName = "wechat.article_account_name"
+	anchorSurfaceHomeNickname       = "wechat.home_nickname"
+	anchorSurfaceHomeHeadImage      = "wechat.home_head_img"
+	anchorSurfaceHomeAccountID      = "wechat.home_account_id"
+)
+
+// AnchorSurface documents one chain's identity and its anchor order, primary
+// first. Diagnostics needs the order to tell "the primary anchor went quiet
+// while a fallback still hits" — the drift signal — apart from normal traffic.
+type AnchorSurface struct {
+	Surface string
+	Anchors []string
+}
+
+// AnchorSurfaces lists every anchor chain this package resolves, in chain
+// order. It is the single source diagnostics consumes; adding a chain without
+// listing it here leaves the chain invisible to drift detection.
+func AnchorSurfaces() []AnchorSurface {
+	surfaces := []AnchorSurface{{Surface: anchorSurfaceArticleAccountName}}
+	for _, anchor := range articleAccountNameChain {
+		surfaces[0].Anchors = append(surfaces[0].Anchors, anchor.Name)
 	}
-	return "", matched
+	for _, chain := range []struct {
+		surface string
+		chain   htmlx.Chain
+	}{
+		{anchorSurfaceHomeNickname, homeNicknameChain},
+		{anchorSurfaceHomeHeadImage, homeHeadImageChain},
+		{anchorSurfaceHomeAccountID, homeAccountIDChain},
+	} {
+		surface := AnchorSurface{Surface: chain.surface}
+		for _, anchor := range chain.chain {
+			surface.Anchors = append(surface.Anchors, anchor.Name)
+		}
+		surfaces = append(surfaces, surface)
+	}
+	return surfaces
 }
 
 type AccountSearchRequest struct {
@@ -204,17 +225,18 @@ func (client *Client) ResolveAccountName(ctx context.Context, rawURL string) (st
 	if response.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("article account resolution returned HTTP %d", response.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+	document, err := htmlx.Parse(response.Body, htmlx.DefaultLimits())
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrDiscoveryProtocol, err)
 	}
-	name, matched := articleAccountName(body)
+	name, anchorName, matched := articleAccountNameChain.Resolve(document)
 	if name == "" {
 		if matched {
 			return "", fmt.Errorf("%w: article account name was empty", ErrDiscoveryProtocol)
 		}
 		return "", fmt.Errorf("%w: article did not expose an account name", ErrDiscoveryProtocol)
 	}
+	client.observeAnchor(anchorSurfaceArticleAccountName, anchorName)
 	return name, nil
 }
 

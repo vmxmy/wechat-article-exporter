@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
@@ -17,13 +16,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/htmlx"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 )
 
@@ -149,9 +148,26 @@ type Client struct {
 	now     func() time.Time
 	baseURL *url.URL
 
+	// anchorObserver receives (surface, anchor) on every successful chain
+	// resolution. Best-effort observability only: it must never influence
+	// parsing, so it is a plain callback the application layer may leave nil.
+	anchorObserver func(surface, anchor string)
+
 	mu                 sync.Mutex
 	capturedCookies    map[cookieKey]Cookie
 	switchableAccounts []SwitchableAccount
+}
+
+// SetAnchorObserver installs the anchor hit callback. The callback must be
+// safe for concurrent use and cheap; failures are its own responsibility.
+func (client *Client) SetAnchorObserver(observer func(surface, anchor string)) {
+	client.anchorObserver = observer
+}
+
+func (client *Client) observeAnchor(surface, anchor string) {
+	if client.anchorObserver != nil {
+		client.anchorObserver(surface, anchor)
+	}
 }
 
 type cookieKey struct {
@@ -647,10 +663,13 @@ type homeInfo struct {
 	AvatarURL   string
 }
 
+// The head_img and account id anchors stay raw: entity decoding corrupts URL
+// query strings and identifiers, and those values never pass through the
+// page's own htmlDecode.
 var (
-	nicknamePattern  = regexp.MustCompile(`wx\.cgiData\.nick_name\s*=\s*"([^"]*)"`)
-	headImagePattern = regexp.MustCompile(`wx\.cgiData\.head_img\s*=\s*"([^"]*)"`)
-	accountIDPattern = regexp.MustCompile(`wx\.cgiData\.(?:fakeid|fake_id|account_id)\s*=\s*"([^"]*)"`)
+	homeNicknameChain  = htmlx.Chain{htmlx.ByScriptVar("cgidata-nick_name", `wx\.cgiData\.nick_name\s*=\s*"([^"]*)"`)}
+	homeHeadImageChain = htmlx.Chain{htmlx.ByScriptVarRaw("cgidata-head_img", `wx\.cgiData\.head_img\s*=\s*"([^"]*)"`)}
+	homeAccountIDChain = htmlx.Chain{htmlx.ByScriptVarRaw("cgidata-account_id", `wx\.cgiData\.(?:fakeid|fake_id|account_id)\s*=\s*"([^"]*)"`)}
 )
 
 func (client *Client) fetchHome(ctx context.Context, token string) (homeInfo, error) {
@@ -664,25 +683,31 @@ func (client *Client) fetchHome(ctx context.Context, token string) (homeInfo, er
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
 		return homeInfo{}, &upstreamError{Authentication: true, Message: ErrSessionExpired.Error()}
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+	document, err := htmlx.Parse(response.Body, htmlx.DefaultLimits())
 	if err != nil {
-		return homeInfo{}, err
+		return homeInfo{}, fmt.Errorf("unsupported WeChat home page: %w", err)
 	}
-	nameMatch := nicknamePattern.FindSubmatch(body)
-	if len(nameMatch) < 2 {
-		return homeInfo{}, &upstreamError{Authentication: true, Message: "WeChat home page did not contain account identity; run login again"}
+	name, anchorName, _ := homeNicknameChain.Resolve(document)
+	if name == "" {
+		// A markup change on an authenticated 200 response is a protocol
+		// problem, not an expired session: classifying it as authentication
+		// sends the user to re-login for a problem re-login cannot fix.
+		return homeInfo{}, errors.New("unsupported WeChat home page: account identity anchors matched nothing")
 	}
+	client.observeAnchor(anchorSurfaceHomeNickname, anchorName)
 	avatar := ""
-	if match := headImagePattern.FindSubmatch(body); len(match) >= 2 {
-		avatar = string(match[1])
+	if value, anchor, _ := homeHeadImageChain.Resolve(document); value != "" {
+		avatar = value
+		client.observeAnchor(anchorSurfaceHomeHeadImage, anchor)
 	}
 	accountID := ""
-	if match := accountIDPattern.FindSubmatch(body); len(match) >= 2 {
-		accountID = string(match[1])
+	if value, anchor, _ := homeAccountIDChain.Resolve(document); value != "" {
+		accountID = value
+		client.observeAnchor(anchorSurfaceHomeAccountID, anchor)
 	}
 	return homeInfo{
 		AccountID:   accountID,
-		AccountName: strings.TrimSpace(strings.ReplaceAll(html.UnescapeString(string(nameMatch[1])), "\u00a0", " ")),
+		AccountName: strings.TrimSpace(strings.ReplaceAll(name, "\u00a0", " ")),
 		AvatarURL:   avatar,
 	}, nil
 }

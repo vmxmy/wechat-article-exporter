@@ -331,6 +331,11 @@ func (manager *runtimeManager) prepareProfileLocked(ctx context.Context, profile
 	} else {
 		wechatClient = wechat.NewClient(httpClient, manager.secrets, string(profile.ID))
 	}
+	// Anchor hits are best-effort observability by contract: a failed counter
+	// write has no user-facing surface here and must never affect parsing.
+	wechatClient.SetAnchorObserver(func(surface, anchor string) {
+		_ = database.RecordAnchorHit(context.Background(), surface, anchor)
+	})
 	jobsStore := library.NewJobStore(database)
 	jobsStore.SetAdmissionGuard(func(admissionCtx context.Context) (func() error, error) {
 		lock, lockErr := profiles.AcquireRuntimeGate(admissionCtx, profilePaths)
