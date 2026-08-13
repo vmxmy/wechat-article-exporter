@@ -80,7 +80,7 @@ export const zhCN = {
     runtimeVersion: '版本',
     storageStats: { accounts: '账号', articles: '文章', albums: '专辑', jobs: '任务' },
     primaryActionTitle: '建议的下一步',
-    quickEntries: { browseArticles: '浏览文章', startExport: '开始导出', manageAccounts: '管理公众号', reviewTasks: '查看任务' },
+    quickEntries: { reviewTasks: '查看任务' },
     recentJobsTitle: '最近任务',
     recentJobsEmpty: '暂无最近任务。同步、导入与导出会显示在此。',
     actions: {

@@ -80,7 +80,7 @@ export const en = {
     runtimeVersion: 'Version',
     storageStats: { accounts: 'Accounts', articles: 'Articles', albums: 'Albums', jobs: 'Jobs' },
     primaryActionTitle: 'Recommended next step',
-    quickEntries: { browseArticles: 'Open the article library', startExport: 'Start an export', manageAccounts: 'Manage accounts', reviewTasks: 'Review tasks' },
+    quickEntries: { reviewTasks: 'Review tasks' },
     recentJobsTitle: 'Recent tasks',
     recentJobsEmpty: 'No recent tasks yet. Syncs, imports, and exports appear here.',
     actions: {

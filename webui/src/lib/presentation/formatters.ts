@@ -113,14 +113,9 @@ export function formatRelativeTime(
   const elapsed = date.getTime() - now
   const magnitude = Math.abs(elapsed)
   const formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
-  for (const threshold of relativeThresholds) {
-    const scaled = magnitude / threshold.milliseconds
-    if (scaled < threshold.limit) {
-      const rounded = Math.round(elapsed / threshold.milliseconds)
-      return formatter.format(rounded, threshold.unit)
-    }
-  }
-  return formatter.format(Math.round(elapsed / 31_557_600_000), 'year')
+  // The last threshold is unbounded, so the loop always returns.
+  const threshold = relativeThresholds.find((candidate) => magnitude / candidate.milliseconds < candidate.limit) ?? relativeThresholds[relativeThresholds.length - 1]
+  return formatter.format(Math.round(elapsed / threshold.milliseconds), threshold.unit)
 }
 
 export interface JobKindOption {

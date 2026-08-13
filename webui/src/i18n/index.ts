@@ -48,7 +48,7 @@ export type MessageCatalog = {
     readonly runtimeVersion: string
     readonly storageStats: { readonly accounts: string; readonly articles: string; readonly albums: string; readonly jobs: string }
     readonly primaryActionTitle: string
-    readonly quickEntries: { readonly browseArticles: string; readonly startExport: string; readonly manageAccounts: string; readonly reviewTasks: string }
+    readonly quickEntries: { readonly reviewTasks: string }
     readonly recentJobsTitle: string
     readonly recentJobsEmpty: string
     readonly actions: {

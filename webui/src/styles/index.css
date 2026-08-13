@@ -688,7 +688,6 @@
     .overview-grid { border-block: 0; }
     .overview-fact { padding-inline: 0; border-block-start: 1px solid var(--workspace-ring); }
     .overview-fact + .overview-fact { border-inline-start: 0; }
-    .overview-columns { grid-template-columns: 1fr; }
     .overview-fact .presentation-definition-list dd { white-space: normal; }
     .pagination { justify-content: space-between; }
     .import-form { align-items: stretch; flex-direction: column; }

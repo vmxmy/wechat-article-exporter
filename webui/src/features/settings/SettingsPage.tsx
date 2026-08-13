@@ -22,15 +22,15 @@ import './settings.css'
 const proxyClasses: readonly ProxyRequestClass[] = ['public_content', 'public_resource', 'management_session', 'article_credential', 'engagement_metrics', 'comments', 'paid_content']
 
 const settingsTabs = [
-  { slug: 'general', id: 'settings-general', labelKey: 'general' },
-  { slug: 'download-export', id: 'settings-download-export', labelKey: 'downloadExport' },
-  { slug: 'credentials', id: 'settings-credentials', labelKey: 'credentials' },
-  { slug: 'network', id: 'settings-network', labelKey: 'network' },
-  { slug: 'storage', id: 'settings-storage', labelKey: 'storage' },
-  { slug: 'diagnostics', id: 'settings-diagnostics', labelKey: 'diagnostics' }
-] as const satisfies readonly { readonly slug: SettingsSection; readonly id: string; readonly labelKey: keyof MessageCatalog['settings']['navigation'] }[]
+  { slug: 'general', labelKey: 'general' },
+  { slug: 'download-export', labelKey: 'downloadExport' },
+  { slug: 'credentials', labelKey: 'credentials' },
+  { slug: 'network', labelKey: 'network' },
+  { slug: 'storage', labelKey: 'storage' },
+  { slug: 'diagnostics', labelKey: 'diagnostics' }
+] as const satisfies readonly { readonly slug: SettingsSection; readonly labelKey: keyof MessageCatalog['settings']['navigation'] }[]
 
-type SettingsSectionID = typeof settingsTabs[number]['id'] | 'settings-danger'
+type SettingsSectionID = `settings-${SettingsSection}` | 'settings-danger'
 
 /**
  * Writes the section directly to history rather than through `replaceLocation`, whose navigation

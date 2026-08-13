@@ -72,9 +72,6 @@ func redactValue(value reflect.Value, key string, seen map[visit]bool) any {
 
 	switch value.Kind() {
 	case reflect.Pointer:
-		if value.IsNil() {
-			return nil
-		}
 		current := visit{typeOf: value.Type(), pointer: value.Pointer()}
 		if seen[current] {
 			return "[REDACTED]"

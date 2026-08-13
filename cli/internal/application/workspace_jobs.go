@@ -180,18 +180,21 @@ func workspaceJobErrorSummary(summary library.JobErrorSummary) *WorkspaceJobErro
 	}
 	return &WorkspaceJobErrorSummary{
 		ErrorClass: string(summary.ErrorClass),
-		Message:    truncateRunes(workspaceSafeLogMessage(summary.ErrorMessage), workspaceJobErrorSummaryBytes),
+		Message:    truncateBytes(workspaceSafeLogMessage(summary.ErrorMessage), workspaceJobErrorSummaryBytes),
 		ItemCount:  summary.ItemCount,
 		OccurredAt: summary.OccurredAt,
 	}
 }
 
-func truncateRunes(value string, limit int) string {
+// truncateBytes caps a string at a byte budget without splitting a rune. It is
+// deliberately not the rune-width truncation of the same shape in internal/tui:
+// this limit exists to bound what is persisted and shipped to the browser.
+func truncateBytes(value string, limit int) string {
 	if len(value) <= limit {
 		return value
 	}
 	truncated := value[:limit]
-	for len(truncated) > 0 && !utf8.ValidString(truncated) {
+	for !utf8.ValidString(truncated) {
 		truncated = truncated[:len(truncated)-1]
 	}
 	return strings.TrimSpace(truncated) + "…"

@@ -794,7 +794,7 @@ func (workspace *Workspace) Jobs(ctx context.Context, input WorkspaceJobQuery) (
 	}
 	items := make([]WorkspaceJob, 0, len(result.Items))
 	for _, job := range result.Items {
-		items = append(items, workspace.workspaceJob(job))
+		items = append(items, newWorkspaceJob(job, workspace.permittedJobActions(job.State), nil))
 	}
 	if err := workspace.attachJobErrorSummaries(ctx, items); err != nil {
 		return WorkspacePage[WorkspaceJob]{}, err

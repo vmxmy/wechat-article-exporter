@@ -1,5 +1,5 @@
 import { Button } from '@/components/controls/Button'
-import { DefinitionList, SectionHeader, Status, TechnicalDetails } from '../../../components/presentation'
+import { DefinitionList, SectionHeader, Status, TechnicalDetails, type TechnicalDetailItem } from '../../../components/presentation'
 import { formatCount, formatDateTime, formatJobKind, formatStatus } from '../../../lib/presentation'
 import type { Locale, MessageCatalog } from '../../../i18n'
 import type { JobDetail } from '../../../lib/api'
@@ -24,6 +24,8 @@ export function JobDetailContents({ detail, messages, locale, refreshing, onRefr
   const summary = summarizeJobCounts(job)
   const label = job.label?.trim() || formatJobKind(job.kind, locale).label
   const countEntries = Object.entries(job.counts ?? {}).filter(([key, count]) => key !== 'total' && count > 0)
+  const technical = (term: string, value: TechnicalDetailItem['value'], copyLabel: string = copy.copyValue): TechnicalDetailItem =>
+    ({ label: term, value, copyLabel, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable })
 
   return (
     <div className="jobs-detail" aria-busy={refreshing}>
@@ -108,12 +110,12 @@ export function JobDetailContents({ detail, messages, locale, refreshing, onRefr
       <TechnicalDetails
         label={copy.technicalDetails}
         items={[
-          { label: copy.jobID, value: job.id, copyLabel: copy.copyID, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable },
-          { label: copy.profile, value: job.profile, copyLabel: copy.copyValue, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable },
-          { label: jobs.columns.created, value: job.createdAt, copyLabel: copy.copyValue, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable },
-          ...(job.startedAt ? [{ label: jobs.columns.started, value: job.startedAt, copyLabel: copy.copyValue, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }] : []),
-          ...(job.completedAt ? [{ label: jobs.timing.completedAt, value: job.completedAt, copyLabel: copy.copyValue, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }] : []),
-          { label: jobs.columns.updated, value: job.updatedAt, copyLabel: copy.copyValue, copiedLabel: messages.a11y.copied, copyFailedLabel: messages.a11y.copyUnavailable }
+          technical(copy.jobID, job.id, copy.copyID),
+          technical(copy.profile, job.profile),
+          technical(jobs.columns.created, job.createdAt),
+          ...(job.startedAt ? [technical(jobs.columns.started, job.startedAt)] : []),
+          ...(job.completedAt ? [technical(jobs.timing.completedAt, job.completedAt)] : []),
+          technical(jobs.columns.updated, job.updatedAt)
         ]}
       />
     </div>

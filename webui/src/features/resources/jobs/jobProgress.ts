@@ -12,7 +12,6 @@ export interface JobProgressSummary {
   readonly cancelled: number
   readonly running: number
   readonly queued: number
-  readonly paused: number
   readonly blockedAuth: number
   /** Items that reached a terminal state, whatever the outcome. */
   readonly settled: number
@@ -37,12 +36,11 @@ export function summarizeJobCounts(job: Pick<JobRecord, 'state' | 'counts'>): Jo
   const cancelled = readCount(counts, 'cancelled')
   const running = readCount(counts, 'running')
   const queued = readCount(counts, 'queued')
-  const paused = readCount(counts, 'paused')
   const blockedAuth = readCount(counts, 'blocked_auth')
   const settled = completed + partial + failed + cancelled
   const rawTotal = counts?.total
   const total = typeof rawTotal === 'number' && Number.isFinite(rawTotal) && rawTotal >= 0 ? Math.floor(rawTotal) : undefined
-  const base = { total, completed, partial, failed, cancelled, running, queued, paused, blockedAuth, settled }
+  const base = { total, completed, partial, failed, cancelled, running, queued, blockedAuth, settled }
 
   if (!counts || Object.keys(counts).length === 0) return { ...base, mode: 'none' }
   // A job with zero items has nothing to divide by, and a 0/0 bar reads as

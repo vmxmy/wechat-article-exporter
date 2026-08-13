@@ -456,42 +456,44 @@ func (server *Server) authorize(request *http.Request) (session, bool) {
 	return server.authorizeCookie(request)
 }
 
-// renewSession slides the idle timeout of a live browser session. Without it a
-// workspace that is open and in use still dies at sessionTTL, and because the
-// bootstrap credential is one-time the tab cannot recover — every later request
-// fails as if the WeChat login had expired. Renewal is deliberately lazy: it
-// only rewrites the cookies once less than half the lifetime remains.
-func (server *Server) renewSession(writer http.ResponseWriter, request *http.Request) {
+// lookupSession resolves the session cookie under a single lock acquisition and
+// slides the idle timeout while it is at it. Without renewal a workspace that is
+// open and in use still dies at sessionTTL, and because the bootstrap credential
+// is one-time the tab cannot recover — every later request fails as if the WeChat
+// login had expired. Renewal is deliberately lazy, so renewed only reports true
+// once less than half the lifetime remains and the caller must re-emit cookies.
+func (server *Server) lookupSession(request *http.Request) (id string, value session, renewed bool, ok bool) {
 	cookie, err := request.Cookie(sessionCookieName)
 	if err != nil || cookie.Value == "" {
-		return
+		return "", session{}, false, false
 	}
 	now := server.now()
 	server.mu.Lock()
-	value, ok := server.sessions[cookie.Value]
-	if !ok || server.closed || !now.Before(value.expiresAt) || now.Add(server.sessionTTL/2).Before(value.expiresAt) {
-		server.mu.Unlock()
+	defer server.mu.Unlock()
+	value, ok = server.sessions[cookie.Value]
+	if !ok || !now.Before(value.expiresAt) {
+		delete(server.sessions, cookie.Value)
+		return "", session{}, false, false
+	}
+	if !server.closed && !now.Add(server.sessionTTL/2).Before(value.expiresAt) {
+		value.expiresAt = now.Add(server.sessionTTL)
+		server.sessions[cookie.Value] = value
+		renewed = true
+	}
+	return cookie.Value, value, renewed, true
+}
+
+func (server *Server) renewSession(writer http.ResponseWriter, request *http.Request) {
+	id, value, renewed, ok := server.lookupSession(request)
+	if !ok || !renewed {
 		return
 	}
-	value.expiresAt = now.Add(server.sessionTTL)
-	server.sessions[cookie.Value] = value
-	server.mu.Unlock()
-	server.setSessionCookies(writer, cookie.Value, value.csrf)
+	server.setSessionCookies(writer, id, value.csrf)
 }
 
 func (server *Server) authorizeCookie(request *http.Request) (session, bool) {
-	cookie, err := request.Cookie(sessionCookieName)
-	if err != nil || cookie.Value == "" {
-		return session{}, false
-	}
-	server.mu.Lock()
-	defer server.mu.Unlock()
-	value, ok := server.sessions[cookie.Value]
-	if !ok || !server.now().Before(value.expiresAt) {
-		delete(server.sessions, cookie.Value)
-		return session{}, false
-	}
-	return value, true
+	_, value, _, ok := server.lookupSession(request)
+	return value, ok
 }
 
 func (server *Server) authorizeMutation(request *http.Request) (session, bool) {

@@ -65,14 +65,9 @@
 }
 
 .jobs-progress,
-.jobs-failures,
 .jobs-time,
 .jobs-time-duration {
   font-variant-numeric: tabular-nums;
-}
-
-.jobs-failures {
-  color: var(--color-text-danger);
 }
 
 .jobs-progress {
