@@ -3,9 +3,12 @@ package processor
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/htmlx"
 )
 
 type scriptBlock struct {
@@ -129,40 +132,24 @@ func validateDecodedJSON(value any, limits Limits, depth int, stats *decodedStat
 	return stats, nil
 }
 
+// scanScripts delegates tokenization to htmlx and keeps the processor's own
+// policy layered on top: only payload-bearing scripts are size-capped, and
+// htmlx input errors are translated into this package's typed ProcessError
+// contract.
 func scanScripts(html []byte, limits Limits) ([]scriptBlock, error) {
-	lower := bytes.ToLower(html)
-	blocks := make([]scriptBlock, 0, 16)
-	position := 0
-	for {
-		relativeStart := bytes.Index(lower[position:], []byte("<script"))
-		if relativeStart < 0 {
-			break
+	scanned, err := htmlx.ScanScripts(html)
+	if err != nil {
+		if errors.Is(err, htmlx.ErrUnterminatedScript) {
+			return nil, processError(ErrorMalformed, ReasonMalformedPayload, 0, "unterminated script element")
 		}
-		start := position + relativeStart
-		nameEnd := start + len("<script")
-		if nameEnd < len(lower) && isHTMLNameChar(lower[nameEnd]) {
-			position = nameEnd
-			continue
+		return nil, processError(ErrorMalformed, ReasonMalformedPayload, 0, "%v", err)
+	}
+	blocks := make([]scriptBlock, 0, len(scanned))
+	for _, block := range scanned {
+		if len(block.Body) > limits.MaxScriptBytes && containsPayloadMarker(block.Body) {
+			return nil, processError(ErrorLimit, ReasonPayloadLimit, block.Offset, "script containing CGI payload exceeds %d bytes", limits.MaxScriptBytes)
 		}
-		openEnd, err := findTagEnd(html, nameEnd)
-		if err != nil {
-			return nil, err
-		}
-		closeRelative := bytes.Index(lower[openEnd+1:], []byte("</script"))
-		if closeRelative < 0 {
-			return nil, processError(ErrorMalformed, ReasonMalformedPayload, start, "unterminated script element")
-		}
-		closeStart := openEnd + 1 + closeRelative
-		closeEnd, err := findTagEnd(html, closeStart+len("</script"))
-		if err != nil {
-			return nil, err
-		}
-		content := html[openEnd+1 : closeStart]
-		if len(content) > limits.MaxScriptBytes && containsPayloadMarker(content) {
-			return nil, processError(ErrorLimit, ReasonPayloadLimit, openEnd+1, "script containing CGI payload exceeds %d bytes", limits.MaxScriptBytes)
-		}
-		blocks = append(blocks, scriptBlock{attributes: html[nameEnd:openEnd], content: content, offset: openEnd + 1})
-		position = closeEnd + 1
+		blocks = append(blocks, scriptBlock{attributes: block.RawAttrs, content: block.Body, offset: block.Offset})
 	}
 	return blocks, nil
 }
@@ -232,67 +219,16 @@ func findPayloadCandidate(script scriptBlock, variant PayloadVariant, limits Lim
 	}
 }
 
+// findBalancedObject translates htmlx's balanced-object scan back into this
+// package's typed error contract, reconstructing the offsets the byte scanner
+// used to report.
 func findBalancedObject(script []byte, start, maxBytes int) (int, error) {
-	depth := 0
-	var quote byte
-	escaped := false
-	lineComment := false
-	blockComment := false
-	for position := start; position < len(script); position++ {
-		if position-start+1 > maxBytes {
-			return 0, processError(ErrorLimit, ReasonPayloadLimit, position, "payload exceeds %d bytes", maxBytes)
-		}
-		char := script[position]
-		if lineComment {
-			if char == '\n' || char == '\r' {
-				lineComment = false
-			}
-			continue
-		}
-		if blockComment {
-			if char == '*' && position+1 < len(script) && script[position+1] == '/' {
-				blockComment = false
-				position++
-			}
-			continue
-		}
-		if quote != 0 {
-			if escaped {
-				escaped = false
-				continue
-			}
-			if char == '\\' {
-				escaped = true
-				continue
-			}
-			if char == quote {
-				quote = 0
-			}
-			continue
-		}
-		if char == '/' && position+1 < len(script) {
-			switch script[position+1] {
-			case '/':
-				lineComment = true
-				position++
-				continue
-			case '*':
-				blockComment = true
-				position++
-				continue
-			}
-		}
-		switch char {
-		case '\'', '"':
-			quote = char
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return position + 1, nil
-			}
-		}
+	end, err := htmlx.FindBalancedObject(script, start, maxBytes)
+	if err == nil {
+		return end, nil
+	}
+	if errors.Is(err, htmlx.ErrScriptTooLarge) {
+		return 0, processError(ErrorLimit, ReasonPayloadLimit, start+maxBytes, "payload exceeds %d bytes", maxBytes)
 	}
 	return 0, processError(ErrorMalformed, ReasonMalformedPayload, start, "unterminated CGI object literal")
 }

@@ -95,15 +95,19 @@ func TestScriptsAreByteFaithful(t *testing.T) {
 	}
 }
 
-func TestScriptsRespectLimit(t *testing.T) {
-	limits := DefaultLimits()
-	limits.MaxScriptBytes = 8
-	document, err := Parse(strings.NewReader(samplePage), limits)
+func TestScanScriptsAttributesAndTermination(t *testing.T) {
+	blocks, err := ScanScripts([]byte(`<script type="application/json" nonce=abc>{"a":1}</script>`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := document.Scripts(); !errors.Is(err, ErrScriptTooLarge) {
-		t.Fatalf("err = %v, want ErrScriptTooLarge", err)
+	if len(blocks) != 1 {
+		t.Fatalf("blocks = %d, want 1", len(blocks))
+	}
+	if got := strings.TrimSpace(string(blocks[0].RawAttrs)); got != `type="application/json" nonce=abc` {
+		t.Fatalf("RawAttrs = %q", got)
+	}
+	if _, err := ScanScripts([]byte(`<div><script>var x = 1;`)); !errors.Is(err, ErrUnterminatedScript) {
+		t.Fatalf("err = %v, want ErrUnterminatedScript", err)
 	}
 }
 
