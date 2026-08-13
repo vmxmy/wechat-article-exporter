@@ -18,6 +18,7 @@ import (
 	"io"
 
 	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 const (
@@ -90,7 +91,7 @@ func ParseFragment(reader io.Reader, limits Limits) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	context := &html.Node{Type: html.ElementNode, Data: "body"}
+	context := &html.Node{Type: html.ElementNode, Data: "body", DataAtom: atom.Body}
 	fragments, err := html.ParseFragment(bytes.NewReader(raw), context)
 	if err != nil {
 		return nil, fmt.Errorf("parse html fragment: %w", err)

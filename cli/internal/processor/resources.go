@@ -3,6 +3,9 @@ package processor
 import (
 	"fmt"
 	"strings"
+
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/htmlx"
+	xhtml "golang.org/x/net/html"
 )
 
 type ResourceKind string
@@ -37,7 +40,7 @@ func (err *ResourceRewriteError) Error() string {
 
 func DiscoverResources(content string, media Media, limits Limits) ([]Resource, error) {
 	limits = limits.withDefaults()
-	root, err := parseHTMLFragment(content, limits)
+	root, err := parseContentTree(content, limits)
 	if err != nil {
 		return nil, err
 	}
@@ -60,18 +63,18 @@ func DiscoverResources(content string, media Media, limits Limits) ([]Resource, 
 		return nil
 	}
 
-	var walk func(*htmlNode) error
-	walk = func(node *htmlNode) error {
-		if node.typeID == htmlElementNode {
-			switch node.tag {
+	var walk func(*xhtml.Node) error
+	walk = func(node *xhtml.Node) error {
+		if node.Type == xhtml.ElementNode {
+			switch node.Data {
 			case "link":
-				if relationIncludes(htmlAttribute(node, "rel"), "stylesheet") {
-					if err := add(ResourceStylesheet, htmlAttribute(node, "href")); err != nil {
+				if relationIncludes(htmlx.Attr(node, "rel"), "stylesheet") {
+					if err := add(ResourceStylesheet, htmlx.Attr(node, "href")); err != nil {
 						return err
 					}
 				}
 			case "style":
-				for _, value := range cssURLs(htmlNodeText(node)) {
+				for _, value := range cssURLs(nodeText(node)) {
 					if err := add(ResourceBackground, value); err != nil {
 						return err
 					}
@@ -80,20 +83,20 @@ func DiscoverResources(content string, media Media, limits Limits) ([]Resource, 
 				if err := add(ResourceImage, preferredImageURL(node)); err != nil {
 					return err
 				}
-				for _, value := range srcsetURLs(htmlAttribute(node, "srcset")) {
+				for _, value := range srcsetURLs(htmlx.Attr(node, "srcset")) {
 					if err := add(ResourceImage, value); err != nil {
 						return err
 					}
 				}
 			case "audio":
-				if err := add(ResourceAudio, htmlAttribute(node, "src")); err != nil {
+				if err := add(ResourceAudio, htmlx.Attr(node, "src")); err != nil {
 					return err
 				}
 			case "video":
-				if err := add(ResourceImage, htmlAttribute(node, "poster")); err != nil {
+				if err := add(ResourceImage, htmlx.Attr(node, "poster")); err != nil {
 					return err
 				}
-				if err := add(ResourceVideo, htmlAttribute(node, "src")); err != nil {
+				if err := add(ResourceVideo, htmlx.Attr(node, "src")); err != nil {
 					return err
 				}
 			case "source":
@@ -101,17 +104,17 @@ func DiscoverResources(content string, media Media, limits Limits) ([]Resource, 
 				if hasAncestorTag(node, "audio") {
 					kind = ResourceAudio
 				}
-				if err := add(kind, htmlAttribute(node, "src")); err != nil {
+				if err := add(kind, htmlx.Attr(node, "src")); err != nil {
 					return err
 				}
 			}
-			for _, value := range cssURLs(htmlAttribute(node, "style")) {
+			for _, value := range cssURLs(htmlx.Attr(node, "style")) {
 				if err := add(ResourceBackground, value); err != nil {
 					return err
 				}
 			}
 		}
-		for _, child := range node.children {
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
 			if err := walk(child); err != nil {
 				return err
 			}
@@ -164,9 +167,9 @@ func relationIncludes(value, expected string) bool {
 	return false
 }
 
-func preferredImageURL(node *htmlNode) string {
+func preferredImageURL(node *xhtml.Node) string {
 	for _, attribute := range []string{"data-src", "data-original", "data-backsrc", "src"} {
-		value := htmlAttribute(node, attribute)
+		value := htmlx.Attr(node, attribute)
 		if normalizeResourceURL(value) != "" && !isTrackingImage(value) {
 			return value
 		}
@@ -231,13 +234,4 @@ func cssURLs(value string) []string {
 		position = end + 1
 	}
 	return urls
-}
-
-func hasAncestorTag(node *htmlNode, tag string) bool {
-	for ancestor := node.parent; ancestor != nil; ancestor = ancestor.parent {
-		if ancestor.tag == tag {
-			return true
-		}
-	}
-	return false
 }

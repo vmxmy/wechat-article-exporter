@@ -6,6 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/htmlx"
+	xhtml "golang.org/x/net/html"
 )
 
 type Comment struct {
@@ -64,7 +67,7 @@ func Render(article Article, options RenderOptions) (RenderedArticle, error) {
 	if err != nil {
 		return RenderedArticle{}, err
 	}
-	root, err := parseHTMLFragment(article.Content, limits)
+	root, err := parseContentTree(article.Content, limits)
 	if err != nil {
 		return RenderedArticle{}, err
 	}
@@ -148,35 +151,36 @@ func safeLocalResourceReference(value string) bool {
 	return !strings.HasPrefix(lower, "javascript:") && !strings.HasPrefix(lower, "vbscript:") && !strings.HasPrefix(lower, "data:text/html")
 }
 
-func sanitizeHTMLTree(root *htmlNode, rewriter *resourceRewriter) *htmlNode {
-	sanitizedRoot := &htmlNode{typeID: htmlDocumentNode}
-	var sanitize func(*htmlNode, *htmlNode)
-	sanitize = func(source, destination *htmlNode) {
-		for _, child := range source.children {
-			switch child.typeID {
-			case htmlTextNode:
-				appendHTMLChild(destination, &htmlNode{typeID: htmlTextNode, text: child.text})
-			case htmlElementNode:
+func sanitizeHTMLTree(root *xhtml.Node, rewriter *resourceRewriter) *xhtml.Node {
+	sanitizedRoot := &xhtml.Node{Type: xhtml.DocumentNode}
+	var sanitize func(source, destination *xhtml.Node)
+	sanitize = func(source, destination *xhtml.Node) {
+		for child := source.FirstChild; child != nil; child = child.NextSibling {
+			switch child.Type {
+			case xhtml.TextNode:
+				destination.AppendChild(newText(child.Data))
+			case xhtml.ElementNode:
 				if forbiddenHTMLNode(child) {
 					continue
 				}
-				tag := child.tag
+				tag := child.Data
 				if !allowedHTMLTag(tag) {
 					sanitize(child, destination)
 					continue
 				}
-				node := &htmlNode{typeID: htmlElementNode, tag: tag, attrs: sanitizeHTMLAttributes(child, rewriter)}
-				appendHTMLChild(destination, node)
+				attrs := sanitizeHTMLAttributes(child, rewriter)
+				if tag == "img" && attrs["src"] == "" {
+					continue
+				}
+				node := newElement(tag, attrs)
+				destination.AppendChild(node)
 				if tag == "img" {
-					if node.attrs["src"] == "" {
-						destination.children = destination.children[:len(destination.children)-1]
-					}
 					continue
 				}
 				if tag == "style" {
-					style := rewriteCSS(htmlNodeText(child), rewriter)
+					style := rewriteCSS(nodeText(child), rewriter)
 					if strings.TrimSpace(style) != "" {
-						appendHTMLChild(node, &htmlNode{typeID: htmlTextNode, text: style})
+						node.AppendChild(newText(style))
 					}
 					continue
 				}
@@ -188,12 +192,12 @@ func sanitizeHTMLTree(root *htmlNode, rewriter *resourceRewriter) *htmlNode {
 	return sanitizedRoot
 }
 
-func forbiddenHTMLNode(node *htmlNode) bool {
-	switch node.tag {
+func forbiddenHTMLNode(node *xhtml.Node) bool {
+	switch node.Data {
 	case "script", "noscript", "template", "iframe", "frame", "frameset", "object", "embed", "form", "input", "button", "textarea", "select", "option", "canvas":
 		return true
 	}
-	identity := strings.ToLower(htmlAttribute(node, "id") + " " + htmlAttribute(node, "class"))
+	identity := strings.ToLower(htmlx.Attr(node, "id") + " " + htmlx.Attr(node, "class"))
 	for _, marker := range []string{
 		"js_top_ad_area", "js_bottom_ad_area", "advertisement", "advertise", "qr_code", "qrcode",
 		"js_pc_qr", "appmsg_action_area", "reward_area", "js_reward", "tracking", "js_toobar", "js_toolbar",
@@ -203,7 +207,7 @@ func forbiddenHTMLNode(node *htmlNode) bool {
 			return true
 		}
 	}
-	return node.tag == "img" && isTrackingImage(preferredImageURL(node))
+	return node.Data == "img" && isTrackingImage(preferredImageURL(node))
 }
 
 func allowedHTMLTag(tag string) bool {
@@ -215,10 +219,11 @@ func allowedHTMLTag(tag string) bool {
 	}
 }
 
-func sanitizeHTMLAttributes(node *htmlNode, rewriter *resourceRewriter) map[string]string {
+func sanitizeHTMLAttributes(node *xhtml.Node, rewriter *resourceRewriter) map[string]string {
 	attrs := make(map[string]string)
-	for name, value := range node.attrs {
-		lowerName := strings.ToLower(name)
+	for _, attribute := range node.Attr {
+		lowerName := strings.ToLower(attribute.Key)
+		value := attribute.Val
 		if strings.HasPrefix(lowerName, "on") || lowerName == "nonce" || lowerName == "integrity" || lowerName == "crossorigin" || lowerName == "referrerpolicy" || lowerName == "srcdoc" || lowerName == "hidden" {
 			continue
 		}
@@ -231,15 +236,15 @@ func sanitizeHTMLAttributes(node *htmlNode, rewriter *resourceRewriter) map[stri
 			}
 		}
 	}
-	switch node.tag {
+	switch node.Data {
 	case "a":
-		if href := safeHyperlink(htmlAttribute(node, "href")); href != "" {
+		if href := safeHyperlink(htmlx.Attr(node, "href")); href != "" {
 			attrs["href"] = href
 		}
 	case "link":
-		if relationIncludes(htmlAttribute(node, "rel"), "stylesheet") {
+		if relationIncludes(htmlx.Attr(node, "rel"), "stylesheet") {
 			attrs["rel"] = "stylesheet"
-			if href := rewriter.rewrite(ResourceStylesheet, htmlAttribute(node, "href")); href != "" {
+			if href := rewriter.rewrite(ResourceStylesheet, htmlx.Attr(node, "href")); href != "" {
 				attrs["href"] = href
 			}
 		}
@@ -249,15 +254,15 @@ func sanitizeHTMLAttributes(node *htmlNode, rewriter *resourceRewriter) map[stri
 		}
 		delete(attrs, "data-src")
 	case "audio":
-		if source := rewriter.rewrite(ResourceAudio, htmlAttribute(node, "src")); source != "" {
+		if source := rewriter.rewrite(ResourceAudio, htmlx.Attr(node, "src")); source != "" {
 			attrs["src"] = source
 		}
 		attrs["controls"] = ""
 	case "video":
-		if source := rewriter.rewrite(ResourceVideo, htmlAttribute(node, "src")); source != "" {
+		if source := rewriter.rewrite(ResourceVideo, htmlx.Attr(node, "src")); source != "" {
 			attrs["src"] = source
 		}
-		if poster := rewriter.rewrite(ResourceImage, htmlAttribute(node, "poster")); poster != "" {
+		if poster := rewriter.rewrite(ResourceImage, htmlx.Attr(node, "poster")); poster != "" {
 			attrs["poster"] = poster
 		}
 		attrs["controls"] = ""
@@ -266,10 +271,10 @@ func sanitizeHTMLAttributes(node *htmlNode, rewriter *resourceRewriter) map[stri
 		if hasAncestorTag(node, "audio") {
 			kind = ResourceAudio
 		}
-		if source := rewriter.rewrite(kind, htmlAttribute(node, "src")); source != "" {
+		if source := rewriter.rewrite(kind, htmlx.Attr(node, "src")); source != "" {
 			attrs["src"] = source
 		}
-		if mediaType := htmlAttribute(node, "type"); mediaType != "" {
+		if mediaType := htmlx.Attr(node, "type"); mediaType != "" {
 			attrs["type"] = mediaType
 		}
 	}
@@ -365,18 +370,18 @@ func rewriteCSS(value string, rewriter *resourceRewriter) string {
 	return builder.String()
 }
 
-func appendMissingMedia(root *htmlNode, media Media, rewriter *resourceRewriter) {
+func appendMissingMedia(root *xhtml.Node, media Media, rewriter *resourceRewriter) {
 	seen := make(map[string]struct{})
-	var walk func(*htmlNode)
-	walk = func(node *htmlNode) {
-		if node.typeID == htmlElementNode {
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if node.Type == xhtml.ElementNode {
 			for _, attribute := range []string{"src", "poster"} {
-				if value := htmlAttribute(node, attribute); value != "" {
+				if value := htmlx.Attr(node, attribute); value != "" {
 					seen[value] = struct{}{}
 				}
 			}
 		}
-		for _, child := range node.children {
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
 			walk(child)
 		}
 	}
@@ -400,9 +405,9 @@ func appendMissingMedia(root *htmlNode, media Media, rewriter *resourceRewriter)
 		if image.Height > 0 {
 			attrs["height"] = strconv.FormatInt(image.Height, 10)
 		}
-		paragraph := &htmlNode{typeID: htmlElementNode, tag: "p", attrs: map[string]string{"class": "article-media article-media-image"}}
-		appendHTMLChild(paragraph, &htmlNode{typeID: htmlElementNode, tag: "img", attrs: attrs})
-		appendHTMLChild(root, paragraph)
+		paragraph := newElement("p", map[string]string{"class": "article-media article-media-image"})
+		paragraph.AppendChild(newElement("img", attrs))
+		root.AppendChild(paragraph)
 	}
 	for _, image := range media.Images {
 		appendImage(image)
@@ -416,14 +421,14 @@ func appendMissingMedia(root *htmlNode, media Media, rewriter *resourceRewriter)
 			continue
 		}
 		seen[source] = struct{}{}
-		figure := &htmlNode{typeID: htmlElementNode, tag: "figure", attrs: map[string]string{"class": "article-media article-media-audio"}}
-		appendHTMLChild(figure, &htmlNode{typeID: htmlElementNode, tag: "audio", attrs: map[string]string{"controls": "", "src": source}})
+		figure := newElement("figure", map[string]string{"class": "article-media article-media-audio"})
+		figure.AppendChild(newElement("audio", map[string]string{"controls": "", "src": source}))
 		if audio.Title != "" {
-			caption := &htmlNode{typeID: htmlElementNode, tag: "figcaption"}
-			appendHTMLChild(caption, &htmlNode{typeID: htmlTextNode, text: audio.Title})
-			appendHTMLChild(figure, caption)
+			caption := newElement("figcaption", nil)
+			caption.AppendChild(newText(audio.Title))
+			figure.AppendChild(caption)
 		}
-		appendHTMLChild(root, figure)
+		root.AppendChild(figure)
 	}
 	for _, video := range media.Videos {
 		source := rewriter.rewrite(ResourceVideo, video.URL)
@@ -438,18 +443,18 @@ func appendMissingMedia(root *htmlNode, media Media, rewriter *resourceRewriter)
 		if poster := rewriter.rewrite(ResourceImage, video.CoverURL); poster != "" {
 			attrs["poster"] = poster
 		}
-		figure := &htmlNode{typeID: htmlElementNode, tag: "figure", attrs: map[string]string{"class": "article-media article-media-video"}}
-		appendHTMLChild(figure, &htmlNode{typeID: htmlElementNode, tag: "video", attrs: attrs})
+		figure := newElement("figure", map[string]string{"class": "article-media article-media-video"})
+		figure.AppendChild(newElement("video", attrs))
 		if video.Title != "" {
-			caption := &htmlNode{typeID: htmlElementNode, tag: "figcaption"}
-			appendHTMLChild(caption, &htmlNode{typeID: htmlTextNode, text: video.Title})
-			appendHTMLChild(figure, caption)
+			caption := newElement("figcaption", nil)
+			caption.AppendChild(newText(video.Title))
+			figure.AppendChild(caption)
 		}
-		appendHTMLChild(root, figure)
+		root.AppendChild(figure)
 	}
 }
 
-func renderHTMLDocument(article Article, content *htmlNode, comments []Comment) string {
+func renderHTMLDocument(article Article, content *xhtml.Node, comments []Comment) string {
 	var builder strings.Builder
 	builder.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
 	builder.WriteString("<title>")
@@ -471,7 +476,7 @@ func renderHTMLDocument(article Article, content *htmlNode, comments []Comment) 
 		builder.WriteString("</p>")
 	}
 	builder.WriteString("</header><main id=\"js_content\" class=\"article-content\">")
-	builder.WriteString(serializeHTMLChildren(content))
+	builder.WriteString(serializeChildren(content))
 	builder.WriteString("</main>")
 	if len(comments) > 0 {
 		builder.WriteString(renderCommentsHTML(comments))
@@ -606,12 +611,12 @@ func applyCommentPrivacy(comments []Comment, privacy CommentPrivacy) []Comment {
 	return result
 }
 
-func renderTextDocument(article Article, content *htmlNode, comments []Comment) string {
+func renderTextDocument(article Article, content *xhtml.Node, comments []Comment) string {
 	lines := []string{article.Title}
 	if metadata := articleMetadata(article); metadata != "" {
 		lines = append(lines, metadata)
 	}
-	body := strings.TrimSpace(renderTextNodes(content.children, 0))
+	body := strings.TrimSpace(renderTextNodes(content, 0))
 	if body != "" {
 		lines = append(lines, "", body)
 	}
@@ -636,9 +641,9 @@ func renderTextDocument(article Article, content *htmlNode, comments []Comment) 
 	return strings.TrimSpace(strings.Join(lines, "\n")) + "\n"
 }
 
-func renderTextNodes(nodes []*htmlNode, listDepth int) string {
+func renderTextNodes(parent *xhtml.Node, listDepth int) string {
 	var blocks []string
-	for _, node := range nodes {
+	for node := parent.FirstChild; node != nil; node = node.NextSibling {
 		block := renderTextNode(node, listDepth)
 		if strings.TrimSpace(block) != "" {
 			blocks = append(blocks, strings.TrimSpace(block))
@@ -647,23 +652,23 @@ func renderTextNodes(nodes []*htmlNode, listDepth int) string {
 	return strings.Join(blocks, "\n")
 }
 
-func renderTextNode(node *htmlNode, listDepth int) string {
-	if node.typeID == htmlTextNode {
-		return compactInlineText(node.text)
+func renderTextNode(node *xhtml.Node, listDepth int) string {
+	if node.Type == xhtml.TextNode {
+		return compactInlineText(node.Data)
 	}
-	switch node.tag {
+	switch node.Data {
 	case "br":
 		return "\n"
 	case "img":
-		alt := strings.TrimSpace(htmlAttribute(node, "alt"))
+		alt := strings.TrimSpace(htmlx.Attr(node, "alt"))
 		if alt == "" {
 			alt = "image"
 		}
 		return "[Image: " + alt + "]"
 	case "audio":
-		return "[Audio] " + htmlAttribute(node, "src")
+		return "[Audio] " + htmlx.Attr(node, "src")
 	case "video":
-		return "[Video] " + firstNonEmpty(htmlAttribute(node, "src"), sourceChildURL(node))
+		return "[Video] " + firstNonEmpty(htmlx.Attr(node, "src"), sourceChildURL(node))
 	case "source", "style", "link":
 		return ""
 	case "ul", "ol":
@@ -671,29 +676,29 @@ func renderTextNode(node *htmlNode, listDepth int) string {
 	case "table":
 		return renderTextTable(node)
 	case "pre":
-		return strings.TrimSpace(htmlNodeText(node))
+		return strings.TrimSpace(nodeText(node))
 	case "p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "figcaption", "caption", "th", "td":
 		return compactInlineText(renderTextInlineChildren(node))
 	case "a", "abbr", "b", "cite", "code", "del", "em", "i", "ins", "kbd", "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var":
 		return compactInlineText(renderTextInlineChildren(node))
 	default:
-		return renderTextNodes(node.children, listDepth)
+		return renderTextNodes(node, listDepth)
 	}
 }
 
-func renderTextInlineChildren(node *htmlNode) string {
+func renderTextInlineChildren(node *xhtml.Node) string {
 	var builder strings.Builder
-	for _, child := range node.children {
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
 		switch {
-		case child.typeID == htmlTextNode:
-			builder.WriteString(child.text)
-		case child.tag == "img":
-			alt := strings.TrimSpace(htmlAttribute(child, "alt"))
+		case child.Type == xhtml.TextNode:
+			builder.WriteString(child.Data)
+		case child.Data == "img":
+			alt := strings.TrimSpace(htmlx.Attr(child, "alt"))
 			if alt == "" {
 				alt = "image"
 			}
 			builder.WriteString("[Image: " + alt + "]")
-		case child.tag == "br":
+		case child.Data == "br":
 			builder.WriteByte('\n')
 		default:
 			builder.WriteString(renderTextInlineChildren(child))
@@ -702,16 +707,16 @@ func renderTextInlineChildren(node *htmlNode) string {
 	return builder.String()
 }
 
-func renderTextList(node *htmlNode, depth int) string {
+func renderTextList(node *xhtml.Node, depth int) string {
 	lines := make([]string, 0)
 	index := 0
-	for _, child := range node.children {
-		if child.typeID != htmlElementNode || child.tag != "li" {
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type != xhtml.ElementNode || child.Data != "li" {
 			continue
 		}
 		index++
 		prefix := "- "
-		if node.tag == "ol" {
+		if node.Data == "ol" {
 			prefix = strconv.Itoa(index) + ". "
 		}
 		inline, nested := listItemParts(child)
@@ -725,7 +730,7 @@ func renderTextList(node *htmlNode, depth int) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderTextTable(node *htmlNode) string {
+func renderTextTable(node *xhtml.Node) string {
 	rows := tableRows(node)
 	lines := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -734,12 +739,12 @@ func renderTextTable(node *htmlNode) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderMarkdownDocument(article Article, content *htmlNode, comments []Comment) string {
+func renderMarkdownDocument(article Article, content *xhtml.Node, comments []Comment) string {
 	blocks := []string{"# " + escapeMarkdownInline(article.Title)}
 	if metadata := articleMetadata(article); metadata != "" {
 		blocks = append(blocks, escapeMarkdownInline(metadata))
 	}
-	body := renderMarkdownNodes(content.children, 0)
+	body := renderMarkdownNodes(content, 0)
 	if body != "" {
 		blocks = append(blocks, body)
 	}
@@ -756,7 +761,7 @@ func renderMarkdownDocument(article Article, content *htmlNode, comments []Comme
 	return strings.TrimSpace(strings.Join(blocks, "\n\n")) + "\n"
 }
 
-func renderMarkdownNodes(nodes []*htmlNode, listDepth int) string {
+func renderMarkdownNodes(parent *xhtml.Node, listDepth int) string {
 	blocks := make([]string, 0)
 	var inline strings.Builder
 	flushInline := func() {
@@ -766,8 +771,8 @@ func renderMarkdownNodes(nodes []*htmlNode, listDepth int) string {
 		}
 		inline.Reset()
 	}
-	for _, node := range nodes {
-		if node.typeID == htmlTextNode || isInlineHTMLNode(node) {
+	for node := parent.FirstChild; node != nil; node = node.NextSibling {
+		if node.Type == xhtml.TextNode || isInlineHTMLNode(node) {
 			inline.WriteString(renderMarkdownInline(node))
 			continue
 		}
@@ -781,15 +786,15 @@ func renderMarkdownNodes(nodes []*htmlNode, listDepth int) string {
 	return strings.Join(blocks, "\n\n")
 }
 
-func renderMarkdownBlock(node *htmlNode, listDepth int) string {
-	switch node.tag {
+func renderMarkdownBlock(node *xhtml.Node, listDepth int) string {
+	switch node.Data {
 	case "h1", "h2", "h3", "h4", "h5", "h6":
-		level, _ := strconv.Atoi(strings.TrimPrefix(node.tag, "h"))
+		level, _ := strconv.Atoi(strings.TrimPrefix(node.Data, "h"))
 		return strings.Repeat("#", level) + " " + strings.TrimSpace(renderMarkdownInlineChildren(node))
 	case "p", "div", "section", "article", "main", "header", "footer", "aside", "figure", "figcaption", "details", "summary":
-		return renderMarkdownNodes(node.children, listDepth)
+		return renderMarkdownNodes(node, listDepth)
 	case "blockquote":
-		value := renderMarkdownNodes(node.children, listDepth)
+		value := renderMarkdownNodes(node, listDepth)
 		lines := strings.Split(value, "\n")
 		for index := range lines {
 			lines[index] = "> " + lines[index]
@@ -797,45 +802,45 @@ func renderMarkdownBlock(node *htmlNode, listDepth int) string {
 		return strings.Join(lines, "\n")
 	case "pre":
 		language := ""
-		if len(node.children) == 1 && node.children[0].tag == "code" {
-			class := htmlAttribute(node.children[0], "class")
+		if only := node.FirstChild; only != nil && only.NextSibling == nil && only.Type == xhtml.ElementNode && only.Data == "code" {
+			class := htmlx.Attr(only, "class")
 			for _, part := range strings.Fields(class) {
 				if strings.HasPrefix(part, "language-") {
 					language = strings.TrimPrefix(part, "language-")
 				}
 			}
 		}
-		return "```" + language + "\n" + strings.TrimSpace(htmlNodeText(node)) + "\n```"
+		return "```" + language + "\n" + strings.TrimSpace(nodeText(node)) + "\n```"
 	case "ul", "ol":
 		return renderMarkdownList(node, listDepth)
 	case "table":
 		return renderMarkdownTable(node)
 	case "audio":
-		return "[Audio](" + escapeMarkdownURL(htmlAttribute(node, "src")) + ")"
+		return "[Audio](" + escapeMarkdownURL(htmlx.Attr(node, "src")) + ")"
 	case "video":
-		return "[Video](" + escapeMarkdownURL(firstNonEmpty(htmlAttribute(node, "src"), sourceChildURL(node))) + ")"
+		return "[Video](" + escapeMarkdownURL(firstNonEmpty(htmlx.Attr(node, "src"), sourceChildURL(node))) + ")"
 	case "style", "link", "source":
 		return ""
 	default:
-		return renderMarkdownNodes(node.children, listDepth)
+		return renderMarkdownNodes(node, listDepth)
 	}
 }
 
-func renderMarkdownInline(node *htmlNode) string {
-	if node.typeID == htmlTextNode {
-		return escapeMarkdownText(node.text)
+func renderMarkdownInline(node *xhtml.Node) string {
+	if node.Type == xhtml.TextNode {
+		return escapeMarkdownText(node.Data)
 	}
 	content := renderMarkdownInlineChildren(node)
-	switch node.tag {
+	switch node.Data {
 	case "a":
-		href := htmlAttribute(node, "href")
+		href := htmlx.Attr(node, "href")
 		if href == "" {
 			return content
 		}
 		return "[" + content + "](" + escapeMarkdownURL(href) + ")"
 	case "img":
-		alt := strings.TrimSpace(htmlAttribute(node, "alt"))
-		return "![" + escapeMarkdownInline(alt) + "](" + escapeMarkdownURL(htmlAttribute(node, "src")) + ")"
+		alt := strings.TrimSpace(htmlx.Attr(node, "alt"))
+		return "![" + escapeMarkdownInline(alt) + "](" + escapeMarkdownURL(htmlx.Attr(node, "src")) + ")"
 	case "strong", "b":
 		return "**" + content + "**"
 	case "em", "i":
@@ -851,10 +856,10 @@ func renderMarkdownInline(node *htmlNode) string {
 	}
 }
 
-func renderMarkdownInlineChildren(node *htmlNode) string {
+func renderMarkdownInlineChildren(node *xhtml.Node) string {
 	var builder strings.Builder
-	for _, child := range node.children {
-		if child.typeID == htmlElementNode && !isInlineHTMLNode(child) {
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == xhtml.ElementNode && !isInlineHTMLNode(child) {
 			builder.WriteString(renderMarkdownBlock(child, 0))
 		} else {
 			builder.WriteString(renderMarkdownInline(child))
@@ -863,11 +868,11 @@ func renderMarkdownInlineChildren(node *htmlNode) string {
 	return compactMarkdownSpaces(builder.String())
 }
 
-func isInlineHTMLNode(node *htmlNode) bool {
-	if node == nil || node.typeID == htmlTextNode {
+func isInlineHTMLNode(node *xhtml.Node) bool {
+	if node == nil || node.Type == xhtml.TextNode {
 		return true
 	}
-	switch node.tag {
+	switch node.Data {
 	case "a", "abbr", "b", "br", "cite", "code", "del", "em", "i", "img", "ins", "kbd", "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var", "wbr":
 		return true
 	default:
@@ -875,16 +880,16 @@ func isInlineHTMLNode(node *htmlNode) bool {
 	}
 }
 
-func renderMarkdownList(node *htmlNode, depth int) string {
+func renderMarkdownList(node *xhtml.Node, depth int) string {
 	lines := make([]string, 0)
 	index := 0
-	for _, child := range node.children {
-		if child.typeID != htmlElementNode || child.tag != "li" {
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type != xhtml.ElementNode || child.Data != "li" {
 			continue
 		}
 		index++
 		prefix := "- "
-		if node.tag == "ol" {
+		if node.Data == "ol" {
 			prefix = strconv.Itoa(index) + ". "
 		}
 		inline, nested := listItemParts(child)
@@ -898,32 +903,32 @@ func renderMarkdownList(node *htmlNode, depth int) string {
 	return strings.Join(lines, "\n")
 }
 
-func listItemParts(node *htmlNode) (string, []*htmlNode) {
+func listItemParts(node *xhtml.Node) (string, []*xhtml.Node) {
 	var inline strings.Builder
-	nested := make([]*htmlNode, 0)
-	for _, child := range node.children {
-		if child.typeID == htmlElementNode && (child.tag == "ul" || child.tag == "ol") {
+	nested := make([]*xhtml.Node, 0)
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == xhtml.ElementNode && (child.Data == "ul" || child.Data == "ol") {
 			nested = append(nested, child)
 			continue
 		}
-		if child.typeID == htmlTextNode {
-			inline.WriteString(child.text)
+		if child.Type == xhtml.TextNode {
+			inline.WriteString(child.Data)
 		} else {
-			inline.WriteString(serializeHTMLChildren(&htmlNode{typeID: htmlDocumentNode, children: []*htmlNode{child}}))
+			inline.WriteString(serializeNode(child))
 		}
 	}
 	return inline.String(), nested
 }
 
 func renderMarkdownFragment(value string) string {
-	root, err := parseHTMLFragment(value, DefaultLimits())
+	root, err := parseContentTree(value, DefaultLimits())
 	if err != nil {
 		return escapeMarkdownText(value)
 	}
-	return renderMarkdownNodes(root.children, 0)
+	return renderMarkdownNodes(root, 0)
 }
 
-func renderMarkdownTable(node *htmlNode) string {
+func renderMarkdownTable(node *xhtml.Node) string {
 	rows := tableRows(node)
 	if len(rows) == 0 {
 		return ""
@@ -955,15 +960,15 @@ func renderMarkdownTable(node *htmlNode) string {
 	return strings.Join(lines, "\n")
 }
 
-func tableRows(node *htmlNode) [][]string {
+func tableRows(node *xhtml.Node) [][]string {
 	rows := make([][]string, 0)
-	var walk func(*htmlNode)
-	walk = func(current *htmlNode) {
-		if current.typeID == htmlElementNode && current.tag == "tr" {
+	var walk func(*xhtml.Node)
+	walk = func(current *xhtml.Node) {
+		if current.Type == xhtml.ElementNode && current.Data == "tr" {
 			row := make([]string, 0)
-			for _, cell := range current.children {
-				if cell.typeID == htmlElementNode && (cell.tag == "th" || cell.tag == "td") {
-					row = append(row, compactInlineText(htmlNodeText(cell)))
+			for cell := current.FirstChild; cell != nil; cell = cell.NextSibling {
+				if cell.Type == xhtml.ElementNode && (cell.Data == "th" || cell.Data == "td") {
+					row = append(row, compactInlineText(nodeText(cell)))
 				}
 			}
 			if len(row) > 0 {
@@ -971,7 +976,7 @@ func tableRows(node *htmlNode) [][]string {
 			}
 			return
 		}
-		for _, child := range current.children {
+		for child := current.FirstChild; child != nil; child = child.NextSibling {
 			walk(child)
 		}
 	}
@@ -987,10 +992,10 @@ func markdownTableRow(row []string) string {
 	return "| " + strings.Join(escaped, " | ") + " |"
 }
 
-func sourceChildURL(node *htmlNode) string {
-	for _, child := range node.children {
-		if child.typeID == htmlElementNode && child.tag == "source" {
-			if source := htmlAttribute(child, "src"); source != "" {
+func sourceChildURL(node *xhtml.Node) string {
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == xhtml.ElementNode && child.Data == "source" {
+			if source := htmlx.Attr(child, "src"); source != "" {
 				return source
 			}
 		}

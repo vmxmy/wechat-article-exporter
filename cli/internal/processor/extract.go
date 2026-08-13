@@ -154,26 +154,6 @@ func scanScripts(html []byte, limits Limits) ([]scriptBlock, error) {
 	return blocks, nil
 }
 
-func findTagEnd(html []byte, position int) (int, error) {
-	var quote byte
-	for index := position; index < len(html); index++ {
-		char := html[index]
-		if quote != 0 {
-			if char == quote {
-				quote = 0
-			}
-			continue
-		}
-		switch char {
-		case '\'', '"':
-			quote = char
-		case '>':
-			return index, nil
-		}
-	}
-	return 0, processError(ErrorMalformed, ReasonMalformedPayload, position, "unterminated HTML tag")
-}
-
 func findPayloadCandidate(script scriptBlock, variant PayloadVariant, limits Limits) (payloadCandidate, bool, error) {
 	if variant == PayloadEmbeddedJSON {
 		if !isEmbeddedCGIScript(script.attributes) {
@@ -269,10 +249,6 @@ func isEmbeddedCGIScript(attributes []byte) bool {
 
 func containsPayloadMarker(data []byte) bool {
 	return bytes.Contains(data, []byte(PayloadCGIDataNew)) || bytes.Contains(data, []byte(PayloadCGIData))
-}
-
-func isHTMLNameChar(char byte) bool {
-	return char == '-' || char == ':' || char == '_' || char >= '0' && char <= '9' || char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z'
 }
 
 func isIdentifierPart(char byte) bool {

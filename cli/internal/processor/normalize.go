@@ -334,6 +334,13 @@ func normalizeURL(value string) string {
 	for strings.Contains(value, "&amp;") {
 		value = strings.ReplaceAll(value, "&amp;", "&")
 	}
+	// Raw whitespace, quotes, or angle brackets never appear in a legitimate
+	// resource URL (they must be percent-encoded), and they are exactly the
+	// characters that let a crafted value smuggle attribute- or tag-shaped
+	// text into rendered markup. url.Parse tolerates them, so reject here.
+	if strings.ContainsAny(value, " \t\r\n\"'<>") {
+		return ""
+	}
 	if strings.HasPrefix(value, "//") {
 		return "https:" + value
 	}
