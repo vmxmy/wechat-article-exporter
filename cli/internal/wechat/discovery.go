@@ -41,11 +41,41 @@ var (
 	// failure blocks a job until the user signs in again, while throttling is
 	// transient and retryable, and reporting one as the other sends the user to
 	// re-login for a problem that re-login cannot fix.
-	ErrDiscoveryThrottled     = errors.New("WeChat discovery rate limited this request; retry later")
-	ErrDiscoveryProtocol      = errors.New("unsupported WeChat discovery response")
-	articleAccountNamePattern = regexp.MustCompile(`(?is)<[^>]*class=["'][^"']*wx_follow_nickname[^"']*["'][^>]*>(.*?)</[^>]+>`)
-	htmlTagPattern            = regexp.MustCompile(`(?s)<[^>]*>`)
+	ErrDiscoveryThrottled = errors.New("WeChat discovery rate limited this request; retry later")
+	ErrDiscoveryProtocol  = errors.New("unsupported WeChat discovery response")
+	// articleAccountNameAnchors are tried in order, newest layout first. WeChat
+	// now renders the follow bar from script, so wx_follow_nickname survives only
+	// as element ids inside <script> and never as a class attribute; the profile
+	// anchor is the only markup-borne name on those pages. The class anchor stays
+	// for articles still served the older follow-bar markup, and the bootstrap
+	// variable is the last resort when the header is built entirely from script.
+	articleAccountNameAnchors = []*regexp.Regexp{
+		regexp.MustCompile(`(?is)<[^>]*id=["']js_name["'][^>]*>(.*?)</[^>]+>`),
+		regexp.MustCompile(`(?is)<[^>]*class=["'][^"']*wx_follow_nickname[^"']*["'][^>]*>(.*?)</[^>]+>`),
+		regexp.MustCompile(`(?s)var\s+nickname\s*=\s*htmlDecode\("((?:[^"\\]|\\.)*)"\)`),
+	}
+	htmlTagPattern = regexp.MustCompile(`(?s)<[^>]*>`)
 )
+
+// articleAccountName reports the first non-empty name any anchor yields, and
+// whether any anchor matched at all. The distinction separates "WeChat changed
+// the markup" from "the page carries the anchor but no name", which is what
+// deleted-author and blocked-content pages legitimately look like.
+func articleAccountName(body []byte) (string, bool) {
+	matched := false
+	for _, anchor := range articleAccountNameAnchors {
+		match := anchor.FindSubmatch(body)
+		if len(match) < 2 {
+			continue
+		}
+		matched = true
+		name := strings.TrimSpace(html.UnescapeString(htmlTagPattern.ReplaceAllString(string(match[1]), "")))
+		if name != "" {
+			return name, true
+		}
+	}
+	return "", matched
+}
 
 type AccountSearchRequest struct {
 	Keyword string `json:"keyword"`
@@ -178,13 +208,12 @@ func (client *Client) ResolveAccountName(ctx context.Context, rawURL string) (st
 	if err != nil {
 		return "", err
 	}
-	match := articleAccountNamePattern.FindSubmatch(body)
-	if len(match) < 2 {
-		return "", fmt.Errorf("%w: article did not expose an account name", ErrDiscoveryProtocol)
-	}
-	name := strings.TrimSpace(html.UnescapeString(htmlTagPattern.ReplaceAllString(string(match[1]), "")))
+	name, matched := articleAccountName(body)
 	if name == "" {
-		return "", fmt.Errorf("%w: article account name was empty", ErrDiscoveryProtocol)
+		if matched {
+			return "", fmt.Errorf("%w: article account name was empty", ErrDiscoveryProtocol)
+		}
+		return "", fmt.Errorf("%w: article did not expose an account name", ErrDiscoveryProtocol)
 	}
 	return name, nil
 }

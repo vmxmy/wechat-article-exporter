@@ -1,6 +1,7 @@
 package wechat
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -89,6 +91,63 @@ func TestResolveAccountNameRejectsRedirectOutsideAllowedHosts(t *testing.T) {
 	client := newClient(redirector.Client(), secrets.NewMemoryStore(), "default", redirector.URL)
 	if _, err := client.ResolveAccountName(context.Background(), redirector.URL+"/article"); err == nil {
 		t.Fatal("ResolveAccountName(redirect outside allowed hosts) error = nil")
+	}
+}
+
+// WeChat now renders the follow bar from script, so wx_follow_nickname reaches
+// the page only as element ids inside <script> and the class anchor alone
+// resolves nothing. Each layout must keep resolving through the anchor chain.
+func TestResolveAccountNameAcrossArticleLayouts(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		fixture string
+		want    string
+		wantErr string
+	}{
+		{name: "script rendered layout", fixture: "article-account-script-layout.html", want: "示例公众号"},
+		{name: "legacy follow bar layout", fixture: "article-account.html", want: "Fixture Account"},
+		{name: "anchor carries no name", fixture: "article-account-blank.html", wantErr: "article account name was empty"},
+		{name: "no anchor at all", fixture: "article-account-absent.html", wantErr: "article did not expose an account name"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			client, server := discoveryFixtureClient(t, map[string]string{"/s/article": testCase.fixture})
+			defer server.Close()
+			name, err := client.ResolveAccountName(context.Background(), server.URL+"/s/article")
+			if testCase.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), testCase.wantErr) {
+					t.Fatalf("error = %v, want containing %q", err, testCase.wantErr)
+				}
+				if !errors.Is(err, ErrDiscoveryProtocol) {
+					t.Fatalf("error = %v, want ErrDiscoveryProtocol", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name != testCase.want {
+				t.Fatalf("name = %q, want %q", name, testCase.want)
+			}
+		})
+	}
+}
+
+// The script-rendered layout must not silently fall through to the legacy class
+// anchor: that anchor is absent, so a regression there would resolve nothing.
+func TestArticleAccountNameIgnoresScriptSideFollowNicknameIDs(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "discovery", "article-account-script-layout.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte("js_wx_follow_nickname")) {
+		t.Fatal("fixture no longer reproduces script-side wx_follow_nickname ids")
+	}
+	if bytes.Contains(body, []byte(`class="wx_follow_nickname`)) {
+		t.Fatal("fixture must not carry the legacy class anchor")
+	}
+	name, matched := articleAccountName(body)
+	if !matched || name != "示例公众号" {
+		t.Fatalf("articleAccountName() = %q, %v", name, matched)
 	}
 }
 
