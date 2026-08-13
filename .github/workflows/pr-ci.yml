@@ -182,6 +182,9 @@ jobs:
       - name: Staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 -checks='SA*,S1*,QF*' ./...
 
+      - name: Govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
       - name: Unit and integration tests
         run: go test -count=1 ./...
 
