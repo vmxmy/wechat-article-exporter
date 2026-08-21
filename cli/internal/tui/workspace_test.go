@@ -1188,6 +1188,9 @@ func (*fakeWorkspaceApplication) ResolveAccountName(context.Context, string) (st
 func (*fakeWorkspaceApplication) ResolveAccountFromArticle(context.Context, string) (domain.Account, error) {
 	return domain.Account{ID: "account-a", FakeID: "fake-a", Name: "Fixture"}, nil
 }
+func (*fakeWorkspaceApplication) ResolveArticleAlbums(context.Context, string) (wechat.ArticleAlbums, error) {
+	return wechat.ArticleAlbums{}, nil
+}
 func (*fakeWorkspaceApplication) AccountDetails(context.Context, string) (wechat.AccountDetails, error) {
 	return wechat.AccountDetails{}, nil
 }

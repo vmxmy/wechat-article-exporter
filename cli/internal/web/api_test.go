@@ -1463,6 +1463,9 @@ func (app *apiApplication) ResolveAccountFromArticle(_ context.Context, articleU
 	app.resolvedArticleURL = articleURL
 	return app.resolvedAccount, app.resolveAccountErr
 }
+func (app *apiApplication) ResolveArticleAlbums(context.Context, string) (wechat.ArticleAlbums, error) {
+	return wechat.ArticleAlbums{}, nil
+}
 func (app *apiApplication) QueryArticles(_ context.Context, query domain.ArticleQuery) (domain.Page[domain.Article], error) {
 	app.articleQueryCalls++
 	app.articleQuery = query

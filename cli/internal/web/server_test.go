@@ -593,6 +593,9 @@ func (testApplication) ResolveAccountName(context.Context, string) (string, erro
 func (testApplication) ResolveAccountFromArticle(context.Context, string) (domain.Account, error) {
 	return domain.Account{}, nil
 }
+func (testApplication) ResolveArticleAlbums(context.Context, string) (wechat.ArticleAlbums, error) {
+	return wechat.ArticleAlbums{}, nil
+}
 func (testApplication) AccountDetails(context.Context, string) (wechat.AccountDetails, error) {
 	return wechat.AccountDetails{}, nil
 }

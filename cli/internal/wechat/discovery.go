@@ -61,6 +61,8 @@ var (
 // identity a recorder aggregates on, never page content.
 const (
 	anchorSurfaceArticleAccountName = "wechat.article_account_name"
+	anchorSurfaceArticleAccountID   = "wechat.article_account_id"
+	anchorSurfaceArticleAlbums      = "wechat.article_albums"
 	anchorSurfaceHomeNickname       = "wechat.home_nickname"
 	anchorSurfaceHomeHeadImage      = "wechat.home_head_img"
 	anchorSurfaceHomeAccountID      = "wechat.home_account_id"
@@ -95,6 +97,7 @@ func AnchorSurfaces() []AnchorSurface {
 		{anchorSurfaceHomeNickname, homeNicknameChain},
 		{anchorSurfaceHomeHeadImage, homeHeadImageChain},
 		{anchorSurfaceHomeAccountID, homeAccountIDChain},
+		{anchorSurfaceArticleAccountID, articleAccountIDChain},
 	} {
 		surface := AnchorSurface{Surface: chain.surface}
 		for _, anchor := range chain.chain {
@@ -102,6 +105,11 @@ func AnchorSurfaces() []AnchorSurface {
 		}
 		surfaces = append(surfaces, surface)
 	}
+	albums := AnchorSurface{Surface: anchorSurfaceArticleAlbums}
+	for _, anchor := range articleAlbumChain {
+		albums.Anchors = append(albums.Anchors, anchor.name)
+	}
+	surfaces = append(surfaces, albums)
 	return surfaces
 }
 
@@ -120,6 +128,7 @@ type DiscoveryGateway interface {
 	SearchAccounts(context.Context, domain.AccountQuery) (domain.Page[domain.Account], error)
 	ResolveAccountName(context.Context, string) (string, error)
 	ResolveAccountFromArticle(context.Context, string) (domain.Account, error)
+	ResolveArticleAlbums(context.Context, string) (ArticleAlbums, error)
 	AccountDetails(context.Context, string) (AccountDetails, error)
 	AuthorInfo(context.Context, string) (AuthorInfo, error)
 	ListArticles(context.Context, ArticleListRequest) (ArticlePage, error)
@@ -314,9 +323,6 @@ func (client *Client) AuthorInfo(ctx context.Context, fakeID string) (AuthorInfo
 	fakeID = strings.TrimSpace(fakeID)
 	if fakeID == "" {
 		return AuthorInfo{}, errors.New("author fakeid is required")
-	}
-	if _, err := client.discoverySession(ctx); err != nil {
-		return AuthorInfo{}, err
 	}
 	response, err := client.request(ctx, http.MethodGet, "/mp/authorinfo", url.Values{
 		"wxtoken": {"777"}, "biz": {fakeID}, "__biz": {fakeID}, "x5": {"0"}, "f": {"json"},

@@ -475,6 +475,9 @@ func (*fakeApplication) ResolveAccountName(context.Context, string) (string, err
 func (*fakeApplication) ResolveAccountFromArticle(context.Context, string) (domain.Account, error) {
 	return domain.Account{}, nil
 }
+func (*fakeApplication) ResolveArticleAlbums(context.Context, string) (wechat.ArticleAlbums, error) {
+	return wechat.ArticleAlbums{}, nil
+}
 func (*fakeApplication) AccountDetails(context.Context, string) (wechat.AccountDetails, error) {
 	return wechat.AccountDetails{}, nil
 }

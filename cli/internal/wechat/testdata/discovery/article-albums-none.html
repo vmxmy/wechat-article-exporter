@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head><title>Fixture Article</title></head>
+<body>
+<h1 id="activity-name">Fixture Article</h1>
+<script nonce="fixture">
+  var biz = "fixture-account-c";
+  // Pages outside every album still ship the album sharing code, where the
+  // field name is followed by a variable reference rather than an identifier.
+  function shareOptions(opt) {
+    if (opt.isAlbum) {
+      return Object.assign({ album_id: opt.album_id, album_type: opt.album_type }, opt);
+    }
+    return opt;
+  }
+</script>
+</body>
+</html>

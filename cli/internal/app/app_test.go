@@ -1072,6 +1072,9 @@ func (fixedApplication) ResolveAccountName(context.Context, string) (string, err
 func (fixedApplication) ResolveAccountFromArticle(context.Context, string) (domain.Account, error) {
 	return domain.Account{}, nil
 }
+func (fixedApplication) ResolveArticleAlbums(context.Context, string) (wechat.ArticleAlbums, error) {
+	return wechat.ArticleAlbums{}, nil
+}
 func (fixedApplication) AccountDetails(context.Context, string) (wechat.AccountDetails, error) {
 	return wechat.AccountDetails{}, nil
 }

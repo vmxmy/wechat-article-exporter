@@ -31,6 +31,7 @@ type Application interface {
 	SearchAccounts(context.Context, domain.AccountQuery) (domain.Page[domain.Account], error)
 	ResolveAccountName(context.Context, string) (string, error)
 	ResolveAccountFromArticle(context.Context, string) (domain.Account, error)
+	ResolveArticleAlbums(context.Context, string) (wechat.ArticleAlbums, error)
 	AccountDetails(context.Context, string) (wechat.AccountDetails, error)
 	AuthorInfo(context.Context, string) (wechat.AuthorInfo, error)
 	ListArticles(context.Context, wechat.ArticleListRequest) (wechat.ArticlePage, error)
@@ -283,6 +284,13 @@ func (service *Service) AccountDetails(ctx context.Context, fakeID string) (wech
 		return wechat.AccountDetails{}, fmt.Errorf("account details: %w", ErrUnavailable)
 	}
 	return service.discovery.AccountDetails(ctx, fakeID)
+}
+
+func (service *Service) ResolveArticleAlbums(ctx context.Context, articleURL string) (wechat.ArticleAlbums, error) {
+	if service.discovery == nil {
+		return wechat.ArticleAlbums{}, fmt.Errorf("resolve article albums: %w", ErrUnavailable)
+	}
+	return service.discovery.ResolveArticleAlbums(ctx, articleURL)
 }
 
 func (service *Service) AuthorInfo(ctx context.Context, fakeID string) (wechat.AuthorInfo, error) {

@@ -85,9 +85,6 @@ func (client *Client) ListAlbumArticles(ctx context.Context, request AlbumListRe
 	if order != AlbumForward && order != AlbumReverse {
 		return AlbumPage{}, fmt.Errorf("unsupported album order %q", order)
 	}
-	if _, err := client.discoverySession(ctx); err != nil {
-		return AlbumPage{}, err
-	}
 	query := BuildAlbumQuery(AlbumListRequest{
 		FakeID: fakeID, AlbumID: albumID, Order: order, BeginMessageID: request.BeginMessageID,
 		BeginItemIndex: request.BeginItemIndex, Limit: limit,
