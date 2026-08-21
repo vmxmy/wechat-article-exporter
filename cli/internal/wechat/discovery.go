@@ -18,6 +18,7 @@ import (
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/htmlx"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/identity"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/network"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 )
 
@@ -198,15 +199,34 @@ func (client *Client) SearchAccountPage(ctx context.Context, request AccountSear
 }
 
 func (client *Client) ResolveAccountName(ctx context.Context, rawURL string) (string, error) {
-	target, err := client.validateArticleURL(rawURL)
+	document, err := client.fetchArticleDocument(ctx, rawURL)
 	if err != nil {
 		return "", err
+	}
+	name, anchorName, matched := articleAccountNameChain.Resolve(document)
+	if name == "" {
+		if matched {
+			return "", fmt.Errorf("%w: article account name was empty", ErrDiscoveryProtocol)
+		}
+		return "", fmt.Errorf("%w: article did not expose an account name", ErrDiscoveryProtocol)
+	}
+	client.observeAnchor(anchorSurfaceArticleAccountName, anchorName)
+	return name, nil
+}
+
+// fetchArticleDocument retrieves a public article page. Article pages carry no
+// credentials, so this path deliberately does not require a management
+// session; the redirect check keeps every hop inside the allowed hosts.
+func (client *Client) fetchArticleDocument(ctx context.Context, rawURL string) (*htmlx.Document, error) {
+	target, err := client.validateArticleURL(rawURL)
+	if err != nil {
+		return nil, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	request.Header.Set("User-Agent", "Mozilla/5.0 wechat-article-local/2")
+	request.Header.Set("User-Agent", network.BrowserArticleUserAgent)
 	request.Header.Set("Referer", upstreamOrigin+"/")
 	request.Header.Set("Origin", upstreamOrigin)
 	httpClient := *client.http
@@ -225,25 +245,17 @@ func (client *Client) ResolveAccountName(ctx context.Context, rawURL string) (st
 	}
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("article account resolution returned HTTP %d", response.StatusCode)
+		return nil, fmt.Errorf("article page request returned HTTP %d", response.StatusCode)
 	}
 	document, err := htmlx.Parse(response.Body, htmlx.DefaultLimits())
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrDiscoveryProtocol, err)
+		return nil, fmt.Errorf("%w: %v", ErrDiscoveryProtocol, err)
 	}
-	name, anchorName, matched := articleAccountNameChain.Resolve(document)
-	if name == "" {
-		if matched {
-			return "", fmt.Errorf("%w: article account name was empty", ErrDiscoveryProtocol)
-		}
-		return "", fmt.Errorf("%w: article did not expose an account name", ErrDiscoveryProtocol)
-	}
-	client.observeAnchor(anchorSurfaceArticleAccountName, anchorName)
-	return name, nil
+	return document, nil
 }
 
 func (client *Client) ResolveAccountFromArticle(ctx context.Context, rawURL string) (domain.Account, error) {
