@@ -297,7 +297,11 @@ func normalizeAlbumArticles(fakeID string, controlledOrigin *url.URL, raw json.R
 		seen[key] = struct{}{}
 		publishedUnix, _ := strconv.ParseInt(payload.PublishedAt, 10, 64)
 		messageType, _ := strconv.Atoi(payload.MessageType)
-		aid := key
+		// The article-list surface spells this identity "{appmsgid}_{itemidx}"
+		// and identity.ArticleID hashes it verbatim, so the album surface has
+		// to spell it the same way. Using the ":" separated key here made the
+		// same article land twice, once per discovery channel.
+		aid := messageID + "_" + itemIndex
 		article := domain.Article{ID: domain.ArticleID(identity.ArticleID(fakeID, aid)), AccountID: domain.AccountID(identity.AccountID(fakeID)),
 			Aid: aid, Title: strings.TrimSpace(payload.Title), CanonicalURL: target.String(),
 			CoverURL: strings.TrimSpace(html.UnescapeString(payload.CoverURL)), PublishedAt: unixSeconds(publishedUnix),
