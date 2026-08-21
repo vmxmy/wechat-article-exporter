@@ -281,9 +281,13 @@ func normalizeAlbumArticles(fakeID string, controlledOrigin *url.URL, raw json.R
 			return nil, nil, fmt.Errorf("%w: album item %d lacks message ID, item index, title, or URL", ErrDiscoveryProtocol, index)
 		}
 		target, err := url.Parse(strings.TrimSpace(html.UnescapeString(payload.URL)))
-		if err != nil || target.User != nil || (!matchesControlledArticleOrigin(target, controlledOrigin) &&
-			(target.Scheme != "https" || !strings.EqualFold(target.Hostname(), "mp.weixin.qq.com"))) {
+		if err != nil {
 			return nil, nil, fmt.Errorf("%w: album item %d contains an invalid article URL", ErrDiscoveryProtocol, index)
+		}
+		if !matchesControlledArticleOrigin(target, controlledOrigin) {
+			if target, err = upgradeWeChatArticleURL(target); err != nil {
+				return nil, nil, fmt.Errorf("%w: album item %d contains an invalid article URL", ErrDiscoveryProtocol, index)
+			}
 		}
 		key := messageID + ":" + itemIndex
 		if _, duplicate := seen[key]; duplicate {

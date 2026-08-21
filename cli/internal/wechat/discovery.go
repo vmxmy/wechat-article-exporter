@@ -450,19 +450,37 @@ func (client *Client) discoverySession(ctx context.Context) (Session, error) {
 }
 
 func (client *Client) validateArticleURL(rawURL string) (*url.URL, error) {
-	value := strings.TrimSpace(rawURL)
-	parsed, err := url.Parse(value)
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err == nil && matchesControlledArticleOrigin(parsed, client.baseURL) {
 		return parsed, nil
 	}
-	if err != nil || parsed.User != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.Port() != "" {
+	if err != nil {
 		return nil, errors.New("article URL must use HTTPS and an allowed WeChat host")
 	}
-	host := strings.ToLower(parsed.Hostname())
-	if host != "mp.weixin.qq.com" && host != "weixin.qq.com" {
-		return nil, errors.New("article URL must use HTTPS and an allowed WeChat host")
+	return upgradeWeChatArticleURL(parsed)
+}
+
+// upgradeWeChatArticleURL accepts an article link on an allowed WeChat host and
+// returns it as HTTPS. The album endpoint still hands out http:// permalinks
+// that upstream answers with a redirect, so rejecting them outright made every
+// album item unusable; rewriting to HTTPS keeps the stored canonical URL and
+// every later fetch on TLS instead of persisting a cleartext link.
+func upgradeWeChatArticleURL(parsed *url.URL) (*url.URL, error) {
+	invalid := errors.New("article URL must use HTTPS and an allowed WeChat host")
+	if parsed == nil || parsed.User != nil || parsed.Hostname() == "" || parsed.Port() != "" {
+		return nil, invalid
 	}
-	return parsed, nil
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return nil, invalid
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "mp.weixin.qq.com", "weixin.qq.com":
+	default:
+		return nil, invalid
+	}
+	upgraded := *parsed
+	upgraded.Scheme = "https"
+	return &upgraded, nil
 }
 
 func matchesControlledArticleOrigin(target, origin *url.URL) bool {

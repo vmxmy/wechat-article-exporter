@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -70,13 +71,31 @@ func TestResolveAccountNameRejectsUnsupportedURLBeforeRequest(t *testing.T) {
 		requests++
 		return nil, errors.New("should not request")
 	})}, secrets.NewMemoryStore(), "default", upstreamOrigin)
-	for _, rawURL := range []string{"http://mp.weixin.qq.com/s/a", "https://example.com/s/a", "not-a-url"} {
+	for _, rawURL := range []string{
+		"https://example.com/s/a", "http://example.com/s/a", "not-a-url", "https://mp.weixin.qq.com:8443/s/a",
+	} {
 		if _, err := client.ResolveAccountName(context.Background(), rawURL); err == nil {
 			t.Fatalf("ResolveAccountName(%q) error = nil", rawURL)
 		}
 	}
 	if requests != 0 {
 		t.Fatalf("requests = %d", requests)
+	}
+}
+
+// The album endpoint still publishes http:// permalinks. They are accepted so
+// album items stay usable, but the fetch itself must never go out in the clear.
+func TestArticleFetchUpgradesCleartextWeChatURLToHTTPS(t *testing.T) {
+	schemes := make([]string, 0, 1)
+	client := newClient(&http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		schemes = append(schemes, request.URL.Scheme)
+		return nil, errors.New("stop once the scheme is captured")
+	})}, secrets.NewMemoryStore(), "default", upstreamOrigin)
+	if _, err := client.ResolveAccountName(context.Background(), "http://mp.weixin.qq.com/s?__biz=b&mid=1&idx=1"); err == nil {
+		t.Fatal("ResolveAccountName error = nil")
+	}
+	if !reflect.DeepEqual(schemes, []string{"https"}) {
+		t.Fatalf("request schemes = %v, want exactly one https request", schemes)
 	}
 }
 

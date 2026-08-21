@@ -122,6 +122,23 @@ func TestAlbumFixturesCoverEmptyAuthenticationAndMalformedPayload(t *testing.T) 
 	}
 }
 
+// Live album responses carry http:// permalinks. Rejecting them made every
+// upstream album item unusable while every fixture, being https, stayed green.
+func TestNormalizeAlbumArticlesUpgradesCleartextPermalinks(t *testing.T) {
+	raw := json.RawMessage(`[{"msgid":"10001","itemidx":"1","title":"Fixture","url":"http://mp.weixin.qq.com/s?__biz=b&mid=10001&idx=1","create_time":"1750000000"}]`)
+	items, _, err := normalizeAlbumArticles("fixture-account-a", nil, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].CanonicalURL != "https://mp.weixin.qq.com/s?__biz=b&mid=10001&idx=1" {
+		t.Fatalf("items = %#v", items)
+	}
+	cleartextElsewhere := json.RawMessage(`[{"msgid":"10001","itemidx":"1","title":"Fixture","url":"http://example.com/s/a"}]`)
+	if _, _, err := normalizeAlbumArticles("fixture-account-a", nil, cleartextElsewhere); err == nil {
+		t.Fatal("normalizeAlbumArticles accepted a non-WeChat host")
+	}
+}
+
 func albumFixtureClient(t *testing.T, fixture func(*http.Request) string) (*Client, *httptest.Server) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
