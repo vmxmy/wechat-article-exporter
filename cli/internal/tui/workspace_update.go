@@ -135,7 +135,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return model, nil
 		}
 		model.loginPoll = typed.result
-		if typed.result.State == wechat.QRConfirmed || typed.result.State == wechat.QRScanned {
+		if typed.result.State == wechat.QRConfirmed {
 			return model, model.beginCommand(func(ctx context.Context) tea.Msg {
 				session, err := model.options.Application.CompleteLogin(ctx)
 				return loginCompletedMsg{session: session, err: err}

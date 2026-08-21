@@ -239,8 +239,10 @@ func TestLoginRefreshesExpiredQRWithinBound(t *testing.T) {
 	}
 }
 
-func TestLoginCompletesWhenUpstreamReportsScanned(t *testing.T) {
+func TestLoginKeepsPollingUntilUpstreamConfirmsScan(t *testing.T) {
 	qr := fixturePNG(t)
+	var mu sync.Mutex
+	polls, completions := 0, 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Query().Get("action") {
 		case "startlogin":
@@ -249,8 +251,23 @@ func TestLoginCompletesWhenUpstreamReportsScanned(t *testing.T) {
 		case "getqrcode":
 			writer.Write(qr)
 		case "ask":
-			io.WriteString(writer, `{"base_resp":{"ret":0},"status":4,"acct_size":1}`)
+			mu.Lock()
+			polls++
+			scanned := polls < 3
+			mu.Unlock()
+			if scanned {
+				io.WriteString(writer, `{"base_resp":{"ret":0},"status":4,"acct_size":1}`)
+				return
+			}
+			io.WriteString(writer, `{"base_resp":{"ret":0},"status":1,"acct_size":1}`)
 		case "login":
+			mu.Lock()
+			completions++
+			scanned := polls < 3
+			mu.Unlock()
+			if scanned {
+				t.Error("login completed before WeChat confirmed the scan")
+			}
 			http.SetCookie(writer, &http.Cookie{Name: "bizuin", Value: "fixture", Path: "/"})
 			io.WriteString(writer, `{"base_resp":{"ret":0},"redirect_url":"/cgi-bin/home?token=fixture"}`)
 		default:
@@ -268,8 +285,8 @@ func TestLoginCompletesWhenUpstreamReportsScanned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.State != SessionAuthenticated {
-		t.Fatalf("session=%#v", session)
+	if session.State != SessionAuthenticated || completions != 1 || polls != 3 {
+		t.Fatalf("session=%#v completions=%d polls=%d", session, completions, polls)
 	}
 }
 

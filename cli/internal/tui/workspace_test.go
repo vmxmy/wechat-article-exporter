@@ -322,7 +322,7 @@ func TestWorkspaceOnboardingQRAndOfflineEntryPoints(t *testing.T) {
 	}
 }
 
-func TestWorkspaceLoginCompletesAfterScannedStatus(t *testing.T) {
+func TestWorkspaceLoginWaitsForConfirmationAfterScannedStatus(t *testing.T) {
 	app := newFakeWorkspaceApplication()
 	app.session = wechat.Session{State: wechat.SessionMissing}
 	app.loginPoll = wechat.PollResult{State: wechat.QRScanned, AccountCount: 1}
@@ -333,19 +333,21 @@ func TestWorkspaceLoginCompletesAfterScannedStatus(t *testing.T) {
 	model = updateWorkspace(t, model, runCommand(t, command))
 	next, command = model.Update(keyRune("r"))
 	model = next.(Model)
-	next, command = model.Update(runCommand(t, command))
+	next, _ = model.Update(runCommand(t, command))
 	model = next.(Model)
-	model = updateWorkspace(t, model, runCommand(t, command))
 
-	if model.session.State != wechat.SessionAuthenticated || model.modal != modalNone {
-		t.Fatalf("session=%#v modal=%q", model.session, model.modal)
+	if slices.Contains(app.calls, "CompleteLogin") {
+		t.Fatalf("scanned status completed login before confirmation: calls=%#v", app.calls)
+	}
+	if model.modal != modalLogin {
+		t.Fatalf("modal=%q", model.modal)
 	}
 }
 
 func TestWorkspaceLoginPollsAutomaticallyAndReloadsWorkspace(t *testing.T) {
 	app := newFakeWorkspaceApplication()
 	app.session = wechat.Session{State: wechat.SessionMissing}
-	app.loginPoll = wechat.PollResult{State: wechat.QRScanned, AccountCount: 1}
+	app.loginPoll = wechat.PollResult{State: wechat.QRConfirmed, AccountCount: 1}
 	model := loadedWorkspace(t, app, nil)
 	model.modal = modalLogin
 
