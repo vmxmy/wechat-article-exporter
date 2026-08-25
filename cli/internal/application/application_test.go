@@ -86,6 +86,9 @@ func (fakeDiscovery) ResolveAccountName(context.Context, string) (string, error)
 func (fakeDiscovery) ResolveAccountFromArticle(context.Context, string) (domain.Account, error) {
 	return domain.Account{FakeID: "fixture-a", Name: "Fixture"}, nil
 }
+func (fakeDiscovery) ResolveArticleAlbums(context.Context, string) (wechat.ArticleAlbums, error) {
+	return wechat.ArticleAlbums{FakeID: "fixture-a", Albums: []wechat.AlbumRef{{AlbumID: "album-a"}}}, nil
+}
 func (fakeDiscovery) AccountDetails(context.Context, string) (wechat.AccountDetails, error) {
 	return wechat.AccountDetails{Account: domain.Account{FakeID: "fixture-a", Name: "Fixture"}}, nil
 }
@@ -169,6 +172,13 @@ func TestApplicationDiscoveryMethodsUseSharedGateway(t *testing.T) {
 	articles, err := service.ListArticles(context.Background(), wechat.ArticleListRequest{FakeID: "fixture-a"})
 	if err != nil || articles.Total != 1 || articles.Items[0].Aid != "aid-a" {
 		t.Fatalf("ListArticles() = %#v, %v", articles, err)
+	}
+	// The gateway is bound by runtime type assertion, so a gateway that stops
+	// satisfying the interface degrades to "capability unavailable" instead of
+	// failing to build. Every method needs its own reach-through assertion.
+	albums, err := service.ResolveArticleAlbums(context.Background(), "https://mp.weixin.qq.com/s/fixture")
+	if err != nil || len(albums.Albums) != 1 || albums.Albums[0].AlbumID != "album-a" {
+		t.Fatalf("ResolveArticleAlbums() = %#v, %v", albums, err)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -70,13 +71,31 @@ func TestResolveAccountNameRejectsUnsupportedURLBeforeRequest(t *testing.T) {
 		requests++
 		return nil, errors.New("should not request")
 	})}, secrets.NewMemoryStore(), "default", upstreamOrigin)
-	for _, rawURL := range []string{"http://mp.weixin.qq.com/s/a", "https://example.com/s/a", "not-a-url"} {
+	for _, rawURL := range []string{
+		"https://example.com/s/a", "http://example.com/s/a", "not-a-url", "https://mp.weixin.qq.com:8443/s/a",
+	} {
 		if _, err := client.ResolveAccountName(context.Background(), rawURL); err == nil {
 			t.Fatalf("ResolveAccountName(%q) error = nil", rawURL)
 		}
 	}
 	if requests != 0 {
 		t.Fatalf("requests = %d", requests)
+	}
+}
+
+// The album endpoint still publishes http:// permalinks. They are accepted so
+// album items stay usable, but the fetch itself must never go out in the clear.
+func TestArticleFetchUpgradesCleartextWeChatURLToHTTPS(t *testing.T) {
+	schemes := make([]string, 0, 1)
+	client := newClient(&http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		schemes = append(schemes, request.URL.Scheme)
+		return nil, errors.New("stop once the scheme is captured")
+	})}, secrets.NewMemoryStore(), "default", upstreamOrigin)
+	if _, err := client.ResolveAccountName(context.Background(), "http://mp.weixin.qq.com/s?__biz=b&mid=1&idx=1"); err == nil {
+		t.Fatal("ResolveAccountName error = nil")
+	}
+	if !reflect.DeepEqual(schemes, []string{"https"}) {
+		t.Fatalf("request schemes = %v, want exactly one https request", schemes)
 	}
 }
 
@@ -189,6 +208,107 @@ func TestResolveAccountFromArticleDetailsAndAuthorFixtures(t *testing.T) {
 	}
 	if details.Author.PrincipalName != "Fixture Organization" || details.Account.Alias != "fixture_alias" {
 		t.Fatalf("details = %#v", details)
+	}
+}
+
+func TestResolveArticleAlbumsAcrossLayouts(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		fixture  string
+		fakeID   string
+		expected []AlbumRef
+	}{
+		{
+			name: "tags list every membership", fixture: "article-albums.html", fakeID: "fixture-account-a",
+			expected: []AlbumRef{
+				{AlbumID: "100000000000000001", Title: "Fixture Album One", ArticleCount: 12},
+				{AlbumID: "100000000000000002", Title: "Fixture Album Two", ArticleCount: 3},
+			},
+		},
+		{
+			name: "album info without tags", fixture: "article-albums-legacy.html", fakeID: "fixture-account-b",
+			expected: []AlbumRef{{AlbumID: "100000000000000003", Title: "Fixture Legacy Album", ArticleCount: 7}},
+		},
+		{
+			name: "sharing code is not a membership", fixture: "article-albums-none.html", fakeID: "fixture-account-c",
+			expected: nil,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			client, server := discoveryFixtureClient(t, map[string]string{"/s/article": testCase.fixture})
+			defer server.Close()
+			albums, err := client.ResolveArticleAlbums(context.Background(), server.URL+"/s/article")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if albums.FakeID != testCase.fakeID {
+				t.Fatalf("fakeid = %q, want %q", albums.FakeID, testCase.fakeID)
+			}
+			if !reflect.DeepEqual(albums.Albums, testCase.expected) {
+				t.Fatalf("albums = %#v, want %#v", albums.Albums, testCase.expected)
+			}
+		})
+	}
+}
+
+// Every anchor chain must be listed for drift detection; an unlisted chain
+// fails quietly instead of showing up as its primary anchor going silent.
+func TestAnchorSurfacesCoverArticleAlbumChains(t *testing.T) {
+	surfaces := map[string][]string{}
+	for _, surface := range AnchorSurfaces() {
+		surfaces[surface.Surface] = surface.Anchors
+	}
+	for surface, first := range map[string]string{
+		"wechat.article_account_id": "biz-var",
+		"wechat.article_albums":     "album-tags",
+	} {
+		anchors, ok := surfaces[surface]
+		if !ok || len(anchors) == 0 || anchors[0] != first {
+			t.Fatalf("surface %q anchors = %v, want primary %q", surface, anchors, first)
+		}
+	}
+}
+
+// Album listing and author info are zero-credential upstream surfaces (ADR
+// 0002 channel C). They must keep working with no management session at all,
+// because that session is now only good for searchbiz.
+func TestAlbumAndAuthorInfoNeedNoManagementSession(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if cookies := request.Cookies(); len(cookies) != 0 {
+			t.Errorf("zero-credential request carried cookies: %v", cookies)
+		}
+		fixtures := map[string]string{"/mp/authorinfo": "author-success.json", "/mp/appmsgalbum": "album-forward.json"}
+		fixture, ok := fixtures[request.URL.Path]
+		if !ok {
+			http.NotFound(writer, request)
+			return
+		}
+		contents, err := os.ReadFile(filepath.Join("testdata", "discovery", fixture))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_, _ = writer.Write(contents)
+	}))
+	defer server.Close()
+	client := newClient(server.Client(), secrets.NewMemoryStore(), "default", server.URL)
+	client.now = func() time.Time { return time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC) }
+
+	author, err := client.AuthorInfo(context.Background(), "fixture-account-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if author.PrincipalName != "Fixture Organization" {
+		t.Fatalf("author = %#v", author)
+	}
+	page, err := client.ListAlbumArticles(context.Background(), AlbumListRequest{
+		FakeID: "fixture-account-a", AlbumID: "fixture-album-a", Limit: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) == 0 {
+		t.Fatalf("album page = %#v", page)
 	}
 }
 

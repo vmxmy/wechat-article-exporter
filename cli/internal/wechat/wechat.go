@@ -495,7 +495,7 @@ func (client *Client) Login(ctx context.Context, options LoginOptions) (Session,
 				options.OnStatus(result)
 			}
 			switch result.State {
-			case QRConfirmed, QRScanned:
+			case QRConfirmed:
 				return client.CompleteLogin(ctx)
 			case QRExpired:
 				client.clearLoginState()

@@ -85,9 +85,6 @@ func (client *Client) ListAlbumArticles(ctx context.Context, request AlbumListRe
 	if order != AlbumForward && order != AlbumReverse {
 		return AlbumPage{}, fmt.Errorf("unsupported album order %q", order)
 	}
-	if _, err := client.discoverySession(ctx); err != nil {
-		return AlbumPage{}, err
-	}
 	query := BuildAlbumQuery(AlbumListRequest{
 		FakeID: fakeID, AlbumID: albumID, Order: order, BeginMessageID: request.BeginMessageID,
 		BeginItemIndex: request.BeginItemIndex, Limit: limit,
@@ -281,9 +278,13 @@ func normalizeAlbumArticles(fakeID string, controlledOrigin *url.URL, raw json.R
 			return nil, nil, fmt.Errorf("%w: album item %d lacks message ID, item index, title, or URL", ErrDiscoveryProtocol, index)
 		}
 		target, err := url.Parse(strings.TrimSpace(html.UnescapeString(payload.URL)))
-		if err != nil || target.User != nil || (!matchesControlledArticleOrigin(target, controlledOrigin) &&
-			(target.Scheme != "https" || !strings.EqualFold(target.Hostname(), "mp.weixin.qq.com"))) {
+		if err != nil {
 			return nil, nil, fmt.Errorf("%w: album item %d contains an invalid article URL", ErrDiscoveryProtocol, index)
+		}
+		if !matchesControlledArticleOrigin(target, controlledOrigin) {
+			if target, err = upgradeWeChatArticleURL(target); err != nil {
+				return nil, nil, fmt.Errorf("%w: album item %d contains an invalid article URL", ErrDiscoveryProtocol, index)
+			}
 		}
 		key := messageID + ":" + itemIndex
 		if _, duplicate := seen[key]; duplicate {
@@ -293,7 +294,11 @@ func normalizeAlbumArticles(fakeID string, controlledOrigin *url.URL, raw json.R
 		seen[key] = struct{}{}
 		publishedUnix, _ := strconv.ParseInt(payload.PublishedAt, 10, 64)
 		messageType, _ := strconv.Atoi(payload.MessageType)
-		aid := key
+		// The article-list surface spells this identity "{appmsgid}_{itemidx}"
+		// and identity.ArticleID hashes it verbatim, so the album surface has
+		// to spell it the same way. Using the ":" separated key here made the
+		// same article land twice, once per discovery channel.
+		aid := messageID + "_" + itemIndex
 		article := domain.Article{ID: domain.ArticleID(identity.ArticleID(fakeID, aid)), AccountID: domain.AccountID(identity.AccountID(fakeID)),
 			Aid: aid, Title: strings.TrimSpace(payload.Title), CanonicalURL: target.String(),
 			CoverURL: strings.TrimSpace(html.UnescapeString(payload.CoverURL)), PublishedAt: unixSeconds(publishedUnix),

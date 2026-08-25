@@ -16,6 +16,14 @@ const (
 	defaultUserAgent        = "wechat-article/2 local-client"
 )
 
+// BrowserArticleUserAgent is required on public article surfaces. WeChat
+// serves those pages by user agent: the local-client agent is answered with a
+// 302 to a ~1 KB stub carrying no article payload, while a desktop browser
+// agent receives the full page. Every caller that parses a public article page
+// or fetches its resources must send this, or it will parse the stub and
+// report the article as structurally broken.
+const BrowserArticleUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+
 type Direct struct {
 	HTTP      Doer
 	Policy    DestinationPolicy

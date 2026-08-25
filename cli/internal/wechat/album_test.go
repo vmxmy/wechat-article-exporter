@@ -122,6 +122,44 @@ func TestAlbumFixturesCoverEmptyAuthenticationAndMalformedPayload(t *testing.T) 
 	}
 }
 
+// An article reached through an album and the same article reached through the
+// article list must be one row. identity.ArticleID hashes aid verbatim, so the
+// two surfaces have to agree on how aid is spelled.
+func TestAlbumAndArticleListAgreeOnArticleIdentity(t *testing.T) {
+	raw := json.RawMessage(`[{"msgid":"10001","itemidx":"1","title":"Fixture","url":"https://mp.weixin.qq.com/s?__biz=b&mid=10001&idx=1"}]`)
+	items, _, err := normalizeAlbumArticles("fixture-account-a", nil, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := normalizeDiscoveredArticle("fixture-account-a", articleItem{
+		Aid: "10001_1", AppMsgID: 10001, ItemIndex: 1, Title: "Fixture",
+		Link: "https://mp.weixin.qq.com/s?__biz=b&mid=10001&idx=1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Article.ID != listed.ID {
+		t.Fatalf("album article ID = %q, article-list ID = %q", items[0].Article.ID, listed.ID)
+	}
+}
+
+// Live album responses carry http:// permalinks. Rejecting them made every
+// upstream album item unusable while every fixture, being https, stayed green.
+func TestNormalizeAlbumArticlesUpgradesCleartextPermalinks(t *testing.T) {
+	raw := json.RawMessage(`[{"msgid":"10001","itemidx":"1","title":"Fixture","url":"http://mp.weixin.qq.com/s?__biz=b&mid=10001&idx=1","create_time":"1750000000"}]`)
+	items, _, err := normalizeAlbumArticles("fixture-account-a", nil, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].CanonicalURL != "https://mp.weixin.qq.com/s?__biz=b&mid=10001&idx=1" {
+		t.Fatalf("items = %#v", items)
+	}
+	cleartextElsewhere := json.RawMessage(`[{"msgid":"10001","itemidx":"1","title":"Fixture","url":"http://example.com/s/a"}]`)
+	if _, _, err := normalizeAlbumArticles("fixture-account-a", nil, cleartextElsewhere); err == nil {
+		t.Fatal("normalizeAlbumArticles accepted a non-WeChat host")
+	}
+}
+
 func albumFixtureClient(t *testing.T, fixture func(*http.Request) string) (*Client, *httptest.Server) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

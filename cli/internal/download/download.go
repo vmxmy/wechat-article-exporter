@@ -78,7 +78,7 @@ type ArticleResult struct {
 	RequestID      string                   `json:"requestId,omitempty"`
 }
 
-const browserArticleUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+const browserArticleUserAgent = network.BrowserArticleUserAgent
 
 func browserArticleHeaders(target *url.URL) http.Header {
 	header := make(http.Header)

@@ -624,7 +624,7 @@ func (a *App) localLoginCommand() *cobra.Command {
 					}
 					fmt.Fprintf(a.stderr, "WeChat login status: %s\n", result.State)
 					switch result.State {
-					case wechat.QRConfirmed, wechat.QRScanned:
+					case wechat.QRConfirmed:
 						session, err := a.core.CompleteLogin(command.Context())
 						if err != nil {
 							return err

@@ -18,6 +18,7 @@ import (
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/domain"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/htmlx"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/identity"
+	"github.com/wechat-article/wechat-article-exporter/cli/internal/network"
 	"github.com/wechat-article/wechat-article-exporter/cli/internal/secrets"
 )
 
@@ -60,6 +61,8 @@ var (
 // identity a recorder aggregates on, never page content.
 const (
 	anchorSurfaceArticleAccountName = "wechat.article_account_name"
+	anchorSurfaceArticleAccountID   = "wechat.article_account_id"
+	anchorSurfaceArticleAlbums      = "wechat.article_albums"
 	anchorSurfaceHomeNickname       = "wechat.home_nickname"
 	anchorSurfaceHomeHeadImage      = "wechat.home_head_img"
 	anchorSurfaceHomeAccountID      = "wechat.home_account_id"
@@ -94,6 +97,7 @@ func AnchorSurfaces() []AnchorSurface {
 		{anchorSurfaceHomeNickname, homeNicknameChain},
 		{anchorSurfaceHomeHeadImage, homeHeadImageChain},
 		{anchorSurfaceHomeAccountID, homeAccountIDChain},
+		{anchorSurfaceArticleAccountID, articleAccountIDChain},
 	} {
 		surface := AnchorSurface{Surface: chain.surface}
 		for _, anchor := range chain.chain {
@@ -101,6 +105,11 @@ func AnchorSurfaces() []AnchorSurface {
 		}
 		surfaces = append(surfaces, surface)
 	}
+	albums := AnchorSurface{Surface: anchorSurfaceArticleAlbums}
+	for _, anchor := range articleAlbumChain {
+		albums.Anchors = append(albums.Anchors, anchor.name)
+	}
+	surfaces = append(surfaces, albums)
 	return surfaces
 }
 
@@ -119,6 +128,7 @@ type DiscoveryGateway interface {
 	SearchAccounts(context.Context, domain.AccountQuery) (domain.Page[domain.Account], error)
 	ResolveAccountName(context.Context, string) (string, error)
 	ResolveAccountFromArticle(context.Context, string) (domain.Account, error)
+	ResolveArticleAlbums(context.Context, string) (ArticleAlbums, error)
 	AccountDetails(context.Context, string) (AccountDetails, error)
 	AuthorInfo(context.Context, string) (AuthorInfo, error)
 	ListArticles(context.Context, ArticleListRequest) (ArticlePage, error)
@@ -198,15 +208,34 @@ func (client *Client) SearchAccountPage(ctx context.Context, request AccountSear
 }
 
 func (client *Client) ResolveAccountName(ctx context.Context, rawURL string) (string, error) {
-	target, err := client.validateArticleURL(rawURL)
+	document, err := client.fetchArticleDocument(ctx, rawURL)
 	if err != nil {
 		return "", err
+	}
+	name, anchorName, matched := articleAccountNameChain.Resolve(document)
+	if name == "" {
+		if matched {
+			return "", fmt.Errorf("%w: article account name was empty", ErrDiscoveryProtocol)
+		}
+		return "", fmt.Errorf("%w: article did not expose an account name", ErrDiscoveryProtocol)
+	}
+	client.observeAnchor(anchorSurfaceArticleAccountName, anchorName)
+	return name, nil
+}
+
+// fetchArticleDocument retrieves a public article page. Article pages carry no
+// credentials, so this path deliberately does not require a management
+// session; the redirect check keeps every hop inside the allowed hosts.
+func (client *Client) fetchArticleDocument(ctx context.Context, rawURL string) (*htmlx.Document, error) {
+	target, err := client.validateArticleURL(rawURL)
+	if err != nil {
+		return nil, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	request.Header.Set("User-Agent", "Mozilla/5.0 wechat-article-local/2")
+	request.Header.Set("User-Agent", network.BrowserArticleUserAgent)
 	request.Header.Set("Referer", upstreamOrigin+"/")
 	request.Header.Set("Origin", upstreamOrigin)
 	httpClient := *client.http
@@ -225,25 +254,17 @@ func (client *Client) ResolveAccountName(ctx context.Context, rawURL string) (st
 	}
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("article account resolution returned HTTP %d", response.StatusCode)
+		return nil, fmt.Errorf("article page request returned HTTP %d", response.StatusCode)
 	}
 	document, err := htmlx.Parse(response.Body, htmlx.DefaultLimits())
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrDiscoveryProtocol, err)
+		return nil, fmt.Errorf("%w: %v", ErrDiscoveryProtocol, err)
 	}
-	name, anchorName, matched := articleAccountNameChain.Resolve(document)
-	if name == "" {
-		if matched {
-			return "", fmt.Errorf("%w: article account name was empty", ErrDiscoveryProtocol)
-		}
-		return "", fmt.Errorf("%w: article did not expose an account name", ErrDiscoveryProtocol)
-	}
-	client.observeAnchor(anchorSurfaceArticleAccountName, anchorName)
-	return name, nil
+	return document, nil
 }
 
 func (client *Client) ResolveAccountFromArticle(ctx context.Context, rawURL string) (domain.Account, error) {
@@ -302,9 +323,6 @@ func (client *Client) AuthorInfo(ctx context.Context, fakeID string) (AuthorInfo
 	fakeID = strings.TrimSpace(fakeID)
 	if fakeID == "" {
 		return AuthorInfo{}, errors.New("author fakeid is required")
-	}
-	if _, err := client.discoverySession(ctx); err != nil {
-		return AuthorInfo{}, err
 	}
 	response, err := client.request(ctx, http.MethodGet, "/mp/authorinfo", url.Values{
 		"wxtoken": {"777"}, "biz": {fakeID}, "__biz": {fakeID}, "x5": {"0"}, "f": {"json"},
@@ -438,19 +456,37 @@ func (client *Client) discoverySession(ctx context.Context) (Session, error) {
 }
 
 func (client *Client) validateArticleURL(rawURL string) (*url.URL, error) {
-	value := strings.TrimSpace(rawURL)
-	parsed, err := url.Parse(value)
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err == nil && matchesControlledArticleOrigin(parsed, client.baseURL) {
 		return parsed, nil
 	}
-	if err != nil || parsed.User != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.Port() != "" {
+	if err != nil {
 		return nil, errors.New("article URL must use HTTPS and an allowed WeChat host")
 	}
-	host := strings.ToLower(parsed.Hostname())
-	if host != "mp.weixin.qq.com" && host != "weixin.qq.com" {
-		return nil, errors.New("article URL must use HTTPS and an allowed WeChat host")
+	return upgradeWeChatArticleURL(parsed)
+}
+
+// upgradeWeChatArticleURL accepts an article link on an allowed WeChat host and
+// returns it as HTTPS. The album endpoint still hands out http:// permalinks
+// that upstream answers with a redirect, so rejecting them outright made every
+// album item unusable; rewriting to HTTPS keeps the stored canonical URL and
+// every later fetch on TLS instead of persisting a cleartext link.
+func upgradeWeChatArticleURL(parsed *url.URL) (*url.URL, error) {
+	invalid := errors.New("article URL must use HTTPS and an allowed WeChat host")
+	if parsed == nil || parsed.User != nil || parsed.Hostname() == "" || parsed.Port() != "" {
+		return nil, invalid
 	}
-	return parsed, nil
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return nil, invalid
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "mp.weixin.qq.com", "weixin.qq.com":
+	default:
+		return nil, invalid
+	}
+	upgraded := *parsed
+	upgraded.Scheme = "https"
+	return &upgraded, nil
 }
 
 func matchesControlledArticleOrigin(target, origin *url.URL) bool {

@@ -502,14 +502,37 @@ func (a *App) albumCommand() *cobra.Command {
 			return a.outputJob(command.Context(), job, async)
 		},
 	}
-	traverse.Flags().StringVar(&fakeID, "fakeid", "", "publisher fakeid used by the authenticated album endpoint")
+	traverse.Flags().StringVar(&fakeID, "fakeid", "", "publisher fakeid used by the album endpoint")
 	traverse.Flags().StringVar(&order, "order", string(wechat.AlbumForward), "forward or reverse traversal order")
 	traverse.Flags().IntVar(&pageSize, "page-size", 20, "upstream page size between 1 and 50")
 	traverse.Flags().DurationVar(&pageDelay, "page-delay", 5*time.Second, "delay between album pages")
 	traverse.Flags().BoolVar(&downloadAfter, "download", false, "record that stored album articles should be batch-downloaded after traversal")
 	async.addFlags(traverse)
 
-	command.AddCommand(list, traverse)
+	discover := &cobra.Command{
+		Use: "discover <article-url>", Short: "Read album membership off one public article page",
+		Long: `Read album membership off one public article page.
+
+Neither this command nor "album traverse" needs a login: the article page and
+the album endpoint are both public. Feed a discovered album into traverse to
+enumerate the rest of its articles, then repeat on those articles to reach
+albums the first page never mentioned.`,
+		Example: `  wechat-article album discover https://mp.weixin.qq.com/s/ARTICLE_ID --json
+  wechat-article album traverse ALBUM_ID --fakeid ACCOUNT_FAKEID --wait`,
+		Args: exactArgs(1, "album discover requires <article-url>"),
+		RunE: func(command *cobra.Command, args []string) error {
+			albums, err := a.core.ResolveArticleAlbums(command.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if len(albums.Albums) == 0 {
+				fmt.Fprintln(a.stderr, "article belongs to no album; this account may not use albums at all")
+			}
+			return a.output(albums)
+		},
+	}
+
+	command.AddCommand(list, traverse, discover)
 	return command
 }
 
